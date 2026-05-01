@@ -1,7 +1,7 @@
 # Local Godot project — do not commit or push
 project/
 
-@references/
+references/
 
 # Godot
 .import/
