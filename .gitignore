@@ -1,0 +1,44 @@
+# Local Godot project — do not commit or push
+@project/
+
+@references/
+
+# Godot
+.import/
+*.translation
+
+# Build outputs (root / generic)
+build/
+
+# Compiled GDExtension libraries (adjust names to match your targets)
+*.dll
+*.so
+*.dylib
+*.exp
+*.lib
+*.pdb
+*.obj
+*.o
+*.a
+
+# godot-cpp / SCons
+.sconsign.dblite
+*.os
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# IDE / OS
+.vs/
+.vscode/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# godot-cpp generated/build (when using submodule at ./godot-cpp)
+godot-cpp/bin/
+godot-cpp/gen/

@@ -1,0 +1,32 @@
+name: GDExtension
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build-linux-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential python3 scons
+
+      - name: Build (linux, template_debug + bindings)
+        run: scons platform=linux target=template_debug generate_bindings=yes -j$(nproc) verbose=yes
+
+      - name: Deploy addon artifacts
+        run: python3 scripts/deploy_addon.py --build-dir build/extension/bin
+
+      - name: Verify deployed addon layout
+        run: |
+          test -f addons/nexus_coda/bin/libnexus_coda.linux.template_debug.x86_64.so
+          test -f project/addons/nexus_coda/bin/libnexus_coda.linux.template_debug.x86_64.so
+          test -f project/addons/nexus_coda/nexus_coda.gdextension

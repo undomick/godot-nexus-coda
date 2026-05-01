@@ -1,0 +1,10 @@
+# Aligned with godot-cpp (LLVM base). Run: clang-format -i path/to/file.cpp
+BasedOnStyle: LLVM
+ColumnLimit: 120
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+SortIncludes: true
+PointerAlignment: Left
+AlignAfterOpenBracket: DontAlign
+AlignOperands: DontAlign

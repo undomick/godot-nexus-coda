@@ -1,2 +1,8 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Normalize line endings
+* text=auto eol=lf
+
+# Shell entrypoints must be LF on checkout (avoid CRLF breaking CI / shebangs)
+*.sh text eol=lf
+
+# Exclude from git archive (Source ZIP) - sensitive / build data
+build/ export-ignore
