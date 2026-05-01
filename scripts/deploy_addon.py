@@ -4,6 +4,9 @@ Copy or symlink built GDExtension binaries from the SCons output directory into:
   - addons/nexus_coda/bin
   - project/addons/nexus_coda/bin
 
+Also materializes `nexus_coda.gdextension` from `nexus_coda.gdextension.template`, then copies
+`plugin.cfg` and `plugin.gd` from `addons/nexus_coda` into `project/addons/nexus_coda`.
+
 Default is copy (portable on Windows). Use --symlink on Unix for development.
 """
 
@@ -75,14 +78,26 @@ def _iter_artifacts(build_dir: Path) -> list[Path]:
 	return out
 
 
-def _sync_gdextension_manifest(root: Path) -> None:
-	"""Ensure the demo Project tree has the manifest (bins are deployed separately)."""
-	src = root / "addons" / "nexus_coda" / "nexus_coda.gdextension"
-	if not src.is_file():
+def _materialize_gdextension_manifest(root: Path) -> None:
+	"""Copy nexus_coda.gdextension.template -> nexus_coda.gdextension after binaries exist."""
+	template = root / "addons" / "nexus_coda" / "nexus_coda.gdextension.template"
+	out = root / "addons" / "nexus_coda" / "nexus_coda.gdextension"
+	if not template.is_file():
+		raise FileNotFoundError(f"Missing GDExtension template: {template}")
+	shutil.copy2(template, out)
+
+
+def _sync_addon_text_assets(root: Path) -> None:
+	"""Copy GDExtension manifest and editor-plugin files into the local Godot project tree."""
+	src_dir = root / "addons" / "nexus_coda"
+	if not src_dir.is_dir():
 		return
 	dst_dir = root / "project" / "addons" / "nexus_coda"
 	dst_dir.mkdir(parents=True, exist_ok=True)
-	shutil.copy2(src, dst_dir / "nexus_coda.gdextension")
+	for name in ("nexus_coda.gdextension", "plugin.cfg", "plugin.gd"):
+		src = src_dir / name
+		if src.is_file():
+			shutil.copy2(src, dst_dir / name)
 
 
 def main() -> int:
@@ -118,7 +133,8 @@ def main() -> int:
 			_deploy_item(src, dest, args.symlink)
 		print(f"Deployed {len(artifacts)} item(s) -> {dest}")
 
-	_sync_gdextension_manifest(root)
+	_materialize_gdextension_manifest(root)
+	_sync_addon_text_assets(root)
 	gdext = root / "project" / "addons" / "nexus_coda" / "nexus_coda.gdextension"
 	if gdext.is_file():
 		print(f"Synced manifest -> {gdext}")

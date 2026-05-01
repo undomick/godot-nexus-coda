@@ -10,6 +10,9 @@ references/
 # Build outputs (root / generic)
 build/
 
+# Generated when native binaries are deployed (see scripts/deploy_addon.py)
+addons/nexus_coda/nexus_coda.gdextension
+
 # Compiled GDExtension libraries (adjust names to match your targets)
 *.dll
 *.so
