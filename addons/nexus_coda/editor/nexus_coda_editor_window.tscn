@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://addons/nexus_coda/editor/nexus_coda_editor_window.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://addons/nexus_coda/editor/coda_editor_layout.tscn" id="1_layout"]
 
 [node name="NexusCodaEditorWindow" type="Window"]
 visible = false
@@ -8,7 +8,6 @@ initial_position = 2
 title = "Nexus Coda"
 size = Vector2i(960, 600)
 min_size = Vector2i(400, 300)
-script = ExtResource("1_script")
 
 [node name="RootMargin" type="MarginContainer" parent="."]
 layout_mode = 1
@@ -22,12 +21,7 @@ theme_override_constants/margin_top = 16
 theme_override_constants/margin_right = 16
 theme_override_constants/margin_bottom = 16
 
-[node name="VBox" type="VBoxContainer" parent="RootMargin"]
+[node name="CodaEditorLayout" parent="RootMargin" instance=ExtResource("1_layout")]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-
-[node name="PlaceholderLabel" type="Label" parent="RootMargin/VBox"]
-layout_mode = 2
-text = "Nexus Coda — editor UI placeholder"
-horizontal_alignment = 1

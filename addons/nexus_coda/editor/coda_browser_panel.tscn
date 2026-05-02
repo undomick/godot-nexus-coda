@@ -1,0 +1,58 @@
+[gd_scene format=3 uid="uid://b8s2w2yt46qci"]
+
+[ext_resource type="Script" uid="uid://dvqc7fnr8vrsw" path="res://addons/nexus_coda/editor/coda_browser_panel.gd" id="1_script"]
+
+[node name="CodaBrowserPanel" type="VBoxContainer" unique_id=1433656973]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_script")
+
+[node name="BrowserTabContainer" type="TabContainer" parent="." unique_id=1401845610]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+current_tab = 0
+
+[node name="Events" type="PanelContainer" parent="BrowserTabContainer" unique_id=439287353]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+metadata/_tab_index = 0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="BrowserTabContainer/Events" unique_id=687268446]
+layout_mode = 2
+
+[node name="FilterBar" type="LineEdit" parent="BrowserTabContainer/Events/VBoxContainer" unique_id=903563642]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Filter..."
+clear_button_enabled = true
+
+[node name="EventsTree" type="Tree" parent="BrowserTabContainer/Events/VBoxContainer" unique_id=1132116751]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+allow_rmb_select = true
+hide_root = true
+
+[node name="Assets" type="PanelContainer" parent="BrowserTabContainer" unique_id=878287384]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+metadata/_tab_index = 1
+
+[node name="AssetsTree" type="Tree" parent="BrowserTabContainer/Assets" unique_id=132870738]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+allow_rmb_select = true
+hide_root = true

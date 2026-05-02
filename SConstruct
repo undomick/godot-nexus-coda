@@ -4,6 +4,14 @@ import os
 import subprocess
 import sys
 
+from SCons.Script import ARGUMENTS
+
+# Optional Godot 4.7 API dump (scripts/dump_extension_api.ps1). Relative to repo root for godot-cpp.
+_repo_root = Dir("#").abspath
+_api_47 = os.path.normpath(os.path.join(_repo_root, "godot-cpp", "gdextension", "extension_api-4-7.json"))
+if os.path.isfile(_api_47) and ARGUMENTS.get("custom_api_file") is None:
+	ARGUMENTS["custom_api_file"] = "godot-cpp/gdextension/extension_api-4-7.json"
+
 # godot-cpp (see godot-cpp/test/SConstruct pattern)
 env = SConscript("godot-cpp/SConstruct")
 
@@ -42,7 +50,7 @@ def _run_deploy(target, source, env_local):
 deploy_stamp = env.Command(
 	os.path.join("build", "extension", ".deploy_stamp"),
 	library,
-	env.Action(_run_deploy, "Deploying addon artifacts to addons/ and project/addons/..."),
+	env.Action(_run_deploy, "Deploying addon artifacts to project/addons/ and addons/..."),
 )
 env.Alias("deploy", deploy_stamp)
 env.AlwaysBuild(deploy_stamp)

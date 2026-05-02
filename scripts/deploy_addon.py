@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 Copy or symlink built GDExtension binaries from the SCons output directory into:
-  - addons/nexus_coda/bin
-  - project/addons/nexus_coda/bin
+  - project/addons/nexus_coda/bin (primary / editor tree)
+  - addons/nexus_coda/bin (repository-root addon mirror)
 
-Also materializes `nexus_coda.gdextension` from `nexus_coda.gdextension.template`, then copies
-`plugin.cfg` and `plugin.gd` from `addons/nexus_coda` into `project/addons/nexus_coda`.
+Materializes `nexus_coda.gdextension` from `nexus_coda.gdextension.template`, then copies
+`plugin.cfg`, `plugin.gd`, and the manifest from `project/addons/nexus_coda` into `addons/nexus_coda`
+when the project tree exists.
 
 Default is copy (portable on Windows). Use --symlink on Unix for development.
 """
@@ -78,21 +79,36 @@ def _iter_artifacts(build_dir: Path) -> list[Path]:
 	return out
 
 
+def _resolve_gdextension_template(root: Path) -> Path:
+	"""Prefer the project-tree template; fall back to repo-root addon (e.g. CI without project/)."""
+	project_tpl = root / "project" / "addons" / "nexus_coda" / "nexus_coda.gdextension.template"
+	addon_tpl = root / "addons" / "nexus_coda" / "nexus_coda.gdextension.template"
+	if project_tpl.is_file():
+		return project_tpl
+	if addon_tpl.is_file():
+		return addon_tpl
+	raise FileNotFoundError(
+		f"Missing GDExtension template (expected {project_tpl} or {addon_tpl})"
+	)
+
+
 def _materialize_gdextension_manifest(root: Path) -> None:
-	"""Copy nexus_coda.gdextension.template -> nexus_coda.gdextension after binaries exist."""
-	template = root / "addons" / "nexus_coda" / "nexus_coda.gdextension.template"
-	out = root / "addons" / "nexus_coda" / "nexus_coda.gdextension"
-	if not template.is_file():
-		raise FileNotFoundError(f"Missing GDExtension template: {template}")
-	shutil.copy2(template, out)
+	template = _resolve_gdextension_template(root)
+	for parent in (
+		root / "project" / "addons" / "nexus_coda",
+		root / "addons" / "nexus_coda",
+	):
+		parent.mkdir(parents=True, exist_ok=True)
+		out = parent / "nexus_coda.gdextension"
+		shutil.copy2(template, out)
 
 
-def _sync_addon_text_assets(root: Path) -> None:
-	"""Copy GDExtension manifest and editor-plugin files into the local Godot project tree."""
-	src_dir = root / "addons" / "nexus_coda"
+def _mirror_plugin_manifest_project_to_addons(root: Path) -> None:
+	"""Copy plugin files from the Godot project addon into repo-root addons/ (for commits)."""
+	src_dir = root / "project" / "addons" / "nexus_coda"
 	if not src_dir.is_dir():
 		return
-	dst_dir = root / "project" / "addons" / "nexus_coda"
+	dst_dir = root / "addons" / "nexus_coda"
 	dst_dir.mkdir(parents=True, exist_ok=True)
 	for name in ("nexus_coda.gdextension", "plugin.cfg", "plugin.gd"):
 		src = src_dir / name
@@ -118,8 +134,8 @@ def main() -> int:
 	root = _repo_root()
 	build_dir = args.build_dir if args.build_dir.is_absolute() else (root / args.build_dir).resolve()
 	destinations = [
-		root / "addons" / "nexus_coda" / "bin",
 		root / "project" / "addons" / "nexus_coda" / "bin",
+		root / "addons" / "nexus_coda" / "bin",
 	]
 
 	artifacts = _iter_artifacts(build_dir)
@@ -134,10 +150,10 @@ def main() -> int:
 		print(f"Deployed {len(artifacts)} item(s) -> {dest}")
 
 	_materialize_gdextension_manifest(root)
-	_sync_addon_text_assets(root)
-	gdext = root / "project" / "addons" / "nexus_coda" / "nexus_coda.gdextension"
+	_mirror_plugin_manifest_project_to_addons(root)
+	gdext = root / "addons" / "nexus_coda" / "nexus_coda.gdextension"
 	if gdext.is_file():
-		print(f"Synced manifest -> {gdext}")
+		print(f"Manifest present -> {gdext}")
 
 	return 0
 

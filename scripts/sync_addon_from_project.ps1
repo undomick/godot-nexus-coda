@@ -1,16 +1,14 @@
 <#
 .SYNOPSIS
-  Mirror repo addon `addons/nexus_coda` into `project/addons/nexus_coda` by copy or symlink.
+  Mirror the Godot project addon `project/addons/nexus_coda` into repo-root `addons/nexus_coda` by copy or symlink.
 
 .DESCRIPTION
-  Source of truth is the repository root `addons/nexus_coda`. Use this before opening the
-  Godot project under `project/` so the editor sees `plugin.cfg`, `plugin.gd`, and (after a native
-  build) `nexus_coda.gdextension`. Use `nexus_coda.gdextension.template` as the manifest source;
-  `python scripts/deploy_addon.py` materializes `nexus_coda.gdextension` when DLLs exist. Native libraries are deployed separately:
-  `python scripts/deploy_addon.py` (or with --symlink on Unix).
+  Source of truth for local development is `project/addons/nexus_coda`. Use this after editing there so the
+  repository-root addon (what you commit under `addons/nexus_coda`) stays in sync. Open the project under
+  `project/` in Godot. Native builds still deploy via `python scripts/deploy_addon.py` / `scons` (see deploy_addon.py).
 
 .PARAMETER Symlink
-  Link the destination to the source instead of copying.
+  Link repo-root `addons/nexus_coda` to the project folder instead of copying.
   On Windows, a directory junction is used (no admin required in most setups).
   On macOS/Linux, a symbolic link is created.
 
@@ -18,10 +16,10 @@
   Replace an existing destination path (removes files or a previous link).
 
 .EXAMPLE
-  .\scripts\sync_addon_to_project.ps1
+  .\scripts\sync_addon_from_project.ps1
 
 .EXAMPLE
-  .\scripts\sync_addon_to_project.ps1 -Symlink -Force
+  .\scripts\sync_addon_from_project.ps1 -Symlink -Force
 #>
 
 [CmdletBinding()]
@@ -34,8 +32,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$src = Join-Path $repoRoot "addons/nexus_coda"
-$dstParent = Join-Path $repoRoot "project/addons"
+$src = Join-Path $repoRoot "project/addons/nexus_coda"
+$dstParent = Join-Path $repoRoot "addons"
 $dst = Join-Path $dstParent "nexus_coda"
 
 if (-not (Test-Path -LiteralPath $src -PathType Container)) {
@@ -59,7 +57,6 @@ New-Item -ItemType Directory -Path $dstParent -Force | Out-Null
 if ($Symlink) {
     $srcFull = Convert-Path $src
     $dstFull = $dst
-    # Junction (mklink /J): Windows only. Symbolic links: macOS/Linux (and optional on Windows).
     $onWindows = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("SystemRoot"))
 
     if ($onWindows) {

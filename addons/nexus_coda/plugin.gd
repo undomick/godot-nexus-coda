@@ -2,6 +2,7 @@
 extends EditorPlugin
 
 const EDITOR_WINDOW_SCENE := preload("res://addons/nexus_coda/editor/nexus_coda_editor_window.tscn")
+const EDITOR_WINDOW_SCRIPT := preload("res://addons/nexus_coda/editor/nexus_coda_editor_window.gd")
 
 const TOOLS_SUBMENU_NAME := "Nexus Coda"
 const MENU_OPEN_EDITOR := 0
@@ -39,6 +40,8 @@ func _open_or_focus_editor_window() -> void:
 	var base := get_editor_interface().get_base_control()
 	if _editor_window == null or not is_instance_valid(_editor_window):
 		_editor_window = EDITOR_WINDOW_SCENE.instantiate() as Window
+		# Attach at runtime so the scene file does not reference the script; avoids Scene Dock null-focus when opening the script from the FileSystem (Window-root scenes).
+		_editor_window.set_script(EDITOR_WINDOW_SCRIPT)
 		# Window::set_force_native fails while is_visible() && !is_in_edited_scene_root() (editor plugins are not "edited scene").
 		_editor_window.visible = false
 		_editor_window.force_native = true
@@ -55,4 +58,4 @@ func _open_or_focus_editor_window() -> void:
 			if host_window != null:
 				_editor_window.current_screen = host_window.current_screen
 			_editor_window.show()
-		_editor_window.move_to_foreground()
+		_editor_window.grab_focus()
