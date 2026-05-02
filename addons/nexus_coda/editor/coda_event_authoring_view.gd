@@ -12,7 +12,6 @@ var _draft_audio_paths: PackedStringArray = PackedStringArray()
 @onready var _placeholder: Label = %PlaceholderLabel
 @onready var _event_section: Control = %EventSection
 @onready var _event_name_label: Label = %EventNameLabel
-@onready var _event_id_label: Label = %EventIdLabel
 @onready var _parameters_host: VBoxContainer = %ParametersHost
 @onready var _audio_list: ItemList = %AudioList
 @onready var _validation_label: Label = %ValidationLabel
@@ -88,7 +87,6 @@ func _refresh_event_section_visibility() -> void:
 	if not show_ev:
 		return
 	_event_name_label.text = 'Event: "%s"' % _selected_event.name
-	_event_id_label.text = "id: %s" % _selected_event.id
 	_rebuild_parameter_editor()
 	_refresh_audio_list()
 
@@ -125,6 +123,7 @@ func _append_parameter_row(param: CodaEventParameter, index: int) -> void:
 	type_ob.add_item("Float", CodaEventParameter.ParamType.FLOAT)
 	type_ob.add_item("Int", CodaEventParameter.ParamType.INT)
 	type_ob.add_item("Bool", CodaEventParameter.ParamType.BOOL)
+	type_ob.add_item("String", CodaEventParameter.ParamType.STRING)
 	type_ob.select(_type_option_index(param.param_type))
 	type_ob.item_selected.connect(_make_type_handler(index, type_ob))
 	var default_slot := HBoxContainer.new()
@@ -133,7 +132,7 @@ func _append_parameter_row(param: CodaEventParameter, index: int) -> void:
 	def_float.min_value = -1e12
 	def_float.max_value = 1e12
 	def_float.step = 0.01
-	def_float.value = float(param.default_value) if param.param_type != CodaEventParameter.ParamType.BOOL else 0.0
+	def_float.value = float(param.default_value) if param.param_type == CodaEventParameter.ParamType.FLOAT else 0.0
 	def_float.value_changed.connect(_make_default_float_handler(index))
 	var def_int := SpinBox.new()
 	def_int.min_value = -2147483648
@@ -145,15 +144,24 @@ func _append_parameter_row(param: CodaEventParameter, index: int) -> void:
 	var def_bool := CheckBox.new()
 	def_bool.button_pressed = bool(param.default_value) if param.param_type == CodaEventParameter.ParamType.BOOL else false
 	def_bool.toggled.connect(_make_default_bool_handler(index))
+	var def_string := LineEdit.new()
+	def_string.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	def_string.placeholder_text = "Default"
+	def_string.text = str(param.default_value) if param.param_type == CodaEventParameter.ParamType.STRING else ""
+	def_string.text_changed.connect(_make_default_string_handler(index))
 	default_slot.add_child(def_float)
 	default_slot.add_child(def_int)
 	default_slot.add_child(def_bool)
-	_update_default_widgets_visibility(param.param_type, def_float, def_int, def_bool)
+	default_slot.add_child(def_string)
+	_update_default_widgets_visibility(
+		param.param_type, def_float, def_int, def_bool, def_string
+	)
 	var remove_btn := Button.new()
 	remove_btn.text = "Remove"
 	remove_btn.pressed.connect(_make_remove_param_handler(index))
 	row.add_child(name_edit)
 	row.add_child(type_ob)
+	default_slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(default_slot)
 	row.add_child(remove_btn)
 	_parameters_host.add_child(row)
@@ -167,6 +175,8 @@ func _type_option_index(t: CodaEventParameter.ParamType) -> int:
 			return 1
 		CodaEventParameter.ParamType.BOOL:
 			return 2
+		CodaEventParameter.ParamType.STRING:
+			return 3
 	return 0
 
 
@@ -174,11 +184,13 @@ func _update_default_widgets_visibility(
 	t: CodaEventParameter.ParamType,
 	def_float: SpinBox,
 	def_int: SpinBox,
-	def_bool: CheckBox
+	def_bool: CheckBox,
+	def_string: LineEdit
 ) -> void:
 	def_float.visible = t == CodaEventParameter.ParamType.FLOAT
 	def_int.visible = t == CodaEventParameter.ParamType.INT
 	def_bool.visible = t == CodaEventParameter.ParamType.BOOL
+	def_string.visible = t == CodaEventParameter.ParamType.STRING
 
 
 func _make_param_name_handler(index: int) -> Callable:
@@ -222,6 +234,13 @@ func _make_default_bool_handler(index: int) -> Callable:
 			_push_authoring()
 
 
+func _make_default_string_handler(index: int) -> Callable:
+	return func(new_text: String) -> void:
+		if index >= 0 and index < _draft_parameters.size():
+			_draft_parameters[index].default_value = new_text
+			_push_authoring()
+
+
 func _make_remove_param_handler(index: int) -> Callable:
 	return func() -> void:
 		if index >= 0 and index < _draft_parameters.size():
@@ -233,7 +252,11 @@ func _make_remove_param_handler(index: int) -> Callable:
 func _on_add_parameter_pressed() -> void:
 	if _selected_event == null:
 		return
-	_draft_parameters.append(CodaEventParameter.new())
+	var np := CodaEventParameter.new()
+	np.param_name = CodaEventParameter.suggest_next_parameter_name(_draft_parameters)
+	np.param_type = CodaEventParameter.ParamType.FLOAT
+	np.default_value = CodaEventParameter._default_for_type(np.param_type)
+	_draft_parameters.append(np)
 	_rebuild_parameter_editor()
 	_push_authoring()
 

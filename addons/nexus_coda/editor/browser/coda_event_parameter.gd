@@ -4,7 +4,7 @@ extends RefCounted
 ## MVP event authoring uses GDScript-only parameter descriptors (no C++ core yet).
 ## Optional later: migrate schema to GDExtension for shared runtime/editor logic.
 
-enum ParamType { FLOAT = 0, INT = 1, BOOL = 2 }
+enum ParamType { FLOAT = 0, INT = 1, BOOL = 2, STRING = 3 }
 
 var id: String
 var param_name: String = "Parameter"
@@ -70,11 +70,12 @@ static func from_dictionary(data: Dictionary) -> CodaEventParameter:
 	p.param_name = str(data.get("name", "Parameter"))
 	var t: int = int(data.get("param_type", ParamType.FLOAT))
 	match t:
-		ParamType.FLOAT, ParamType.INT, ParamType.BOOL:
+		ParamType.FLOAT, ParamType.INT, ParamType.BOOL, ParamType.STRING:
 			p.param_type = t as ParamType
 		_:
 			p.param_type = ParamType.FLOAT
-	p.default_value = data.get("default", _default_for_type(p.param_type))
+	var def_var: Variant = data.get("default", _default_for_type(p.param_type))
+	p.default_value = _coerce_default_for_type(p.param_type, def_var)
 	p.min_value = data.get("min", null)
 	p.max_value = data.get("max", null)
 	p.unit_hint = str(data.get("unit", ""))
@@ -89,7 +90,39 @@ static func _default_for_type(t: ParamType) -> Variant:
 			return 0
 		ParamType.BOOL:
 			return false
-	return null
+		ParamType.STRING:
+			return ""
+	return 0.0
+
+
+static func _coerce_default_for_type(t: ParamType, raw: Variant) -> Variant:
+	match t:
+		ParamType.FLOAT:
+			return float(raw) if typeof(raw) in [TYPE_FLOAT, TYPE_INT] else 0.0
+		ParamType.INT:
+			return int(raw) if typeof(raw) in [TYPE_FLOAT, TYPE_INT] else 0
+		ParamType.BOOL:
+			return bool(raw)
+		ParamType.STRING:
+			return str(raw)
+	return raw
+
+
+## Next non-colliding name: "New Parameter", then "New Parameter (1)", "New Parameter (2)", … (case-insensitive vs existing).
+static func suggest_next_parameter_name(existing: Array[CodaEventParameter]) -> String:
+	const BASE := "New Parameter"
+	var used: Dictionary = {}
+	for q in existing:
+		used[str(q.param_name).strip_edges().to_lower()] = true
+	if not used.has(BASE.to_lower()):
+		return BASE
+	var n := 1
+	while true:
+		var cand: String = "%s (%d)" % [BASE, n]
+		if not used.has(cand.to_lower()):
+			return cand
+		n += 1
+	return BASE
 
 
 static func validate_list(parameters: Array[CodaEventParameter]) -> String:

@@ -53,11 +53,6 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Event:"
 
-[node name="EventIdLabel" type="Label" parent="Scroll/Margin/MainColumn/EventSection"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_font_sizes/font_size = 11
-
 [node name="SepParams" type="HSeparator" parent="Scroll/Margin/MainColumn/EventSection"]
 layout_mode = 2
 
