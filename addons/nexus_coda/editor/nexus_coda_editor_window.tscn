@@ -4,6 +4,7 @@
 
 [node name="NexusCodaEditorWindow" type="Window"]
 visible = false
+force_native = true
 initial_position = 2
 title = "Nexus Coda"
 size = Vector2i(960, 600)
