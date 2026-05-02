@@ -141,8 +141,9 @@ func _events_into_folder_insert_index(dest_parent: CodaBrowserNode, moving: Coda
 func _validate_events_move_into(moving: CodaBrowserNode, dest_parent: CodaBrowserNode) -> bool:
 	if not moving.is_folder():
 		return true
+	# Folder cannot be dropped into itself: take_child_by_id removes it first, then re-insert fails.
 	if moving.id == dest_parent.id:
-		return true
+		return false
 	return moving.find_by_id(dest_parent.id) == null
 
 
