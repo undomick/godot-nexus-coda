@@ -6,11 +6,14 @@ signal asset_selection_changed(node: CodaBrowserNode)
 
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
 const BrowserContextMenuScript := preload("res://addons/nexus_coda/editor/browser_context_menu.gd")
+const BrowserFolderIcons := preload("res://addons/nexus_coda/editor/browser/coda_browser_folder_icons.gd")
+
+const FOLDER_ICON_DISPLAY_MAX := 16
 
 @onready var _filter_edit: LineEdit = %FilterBar
 @onready var _tabs: TabContainer = %BrowserTabContainer
-@onready var _events_tree: Tree = %EventsTree
-@onready var _assets_tree: Tree = %AssetsTree
+@onready var _events_tree: CodaBrowserTree = %EventsTree
+@onready var _assets_tree: CodaBrowserTree = %AssetsTree
 
 var _project = CodaStateScript.new()
 var _browser_ctx: BrowserContextMenu
@@ -35,8 +38,20 @@ func _ready() -> void:
 	_assets_tree.hide_root = true
 	_events_tree.allow_rmb_select = true
 	_assets_tree.allow_rmb_select = true
+	_events_tree.add_theme_constant_override(&"icon_max_width", FOLDER_ICON_DISPLAY_MAX)
+	_assets_tree.add_theme_constant_override(&"icon_max_width", FOLDER_ICON_DISPLAY_MAX)
+	_events_tree.configure(_project, true)
+	_assets_tree.configure(_project, false)
 	_events_tree.item_selected.connect(_on_events_item_selected)
 	_assets_tree.item_selected.connect(_on_assets_item_selected)
+	_events_tree.item_activated.connect(_on_events_item_activated)
+	_assets_tree.item_activated.connect(_on_assets_item_activated)
+	_events_tree.item_edited.connect(_on_events_item_edited)
+	_assets_tree.item_edited.connect(_on_assets_item_edited)
+	_events_tree.rename_committed.connect(_on_events_tree_rename_committed)
+	_assets_tree.rename_committed.connect(_on_assets_tree_rename_committed)
+	_events_tree.item_collapsed.connect(_on_events_tree_item_collapsed)
+	_assets_tree.item_collapsed.connect(_on_assets_tree_item_collapsed)
 	_events_tree.gui_input.connect(_on_events_tree_gui_input)
 	_assets_tree.gui_input.connect(_on_assets_tree_gui_input)
 
@@ -56,6 +71,10 @@ func set_project(project: Variant) -> void:
 		_project.structure_changed.disconnect(_on_project_structure_changed)
 	_project = project
 	_project.structure_changed.connect(_on_project_structure_changed)
+	if is_instance_valid(_events_tree):
+		_events_tree.configure(_project, true)
+	if is_instance_valid(_assets_tree):
+		_assets_tree.configure(_project, false)
 	_rebuild_both_trees()
 
 
@@ -82,16 +101,52 @@ func _branch_visible(node: CodaBrowserNode, filter_lower: String) -> bool:
 	return false
 
 
-func _build_tree_branch(tree: Tree, parent_item: TreeItem, node: CodaBrowserNode, filter_lower: String) -> void:
+func _folder_contains_leaf_kind(node: CodaBrowserNode, kind: CodaBrowserNode.Kind) -> bool:
+	for c in node.children:
+		if c.kind == kind:
+			return true
+		if c.is_folder() and _folder_contains_leaf_kind(c, kind):
+			return true
+	return false
+
+
+func _apply_folder_item_icon(tree: Tree, item: TreeItem, folder: CodaBrowserNode, is_events_panel: bool) -> void:
+	var filled: bool
+	if is_events_panel:
+		filled = _folder_contains_leaf_kind(folder, CodaBrowserNode.Kind.EVENT)
+	else:
+		filled = _folder_contains_leaf_kind(folder, CodaBrowserNode.Kind.ASSET)
+	var tex: Texture2D = BrowserFolderIcons.get_folder_texture(item.collapsed, filled)
+	item.set_icon(0, tex)
+
+
+func _refresh_folder_item_icon(tree: Tree, item: TreeItem, is_events_panel: bool) -> void:
+	var nid: String = str(item.get_metadata(0))
+	var node: CodaBrowserNode = _project.find_node_anywhere(nid)
+	if node != null and node.is_folder():
+		_apply_folder_item_icon(tree, item, node, is_events_panel)
+
+
+func _build_tree_branch(
+	tree: Tree,
+	parent_item: TreeItem,
+	node: CodaBrowserNode,
+	filter_lower: String,
+	is_events_panel: bool
+) -> void:
 	if not _branch_visible(node, filter_lower):
 		return
 	var item := tree.create_item(parent_item)
 	item.set_text(0, node.name)
 	item.set_metadata(0, node.id)
+	item.set_editable(0, false)
 	if node.is_folder():
 		item.set_collapsed(false)
+		_apply_folder_item_icon(tree, item, node, is_events_panel)
+	else:
+		item.set_icon(0, null)
 	for child in node.children:
-		_build_tree_branch(tree, item, child, filter_lower)
+		_build_tree_branch(tree, item, child, filter_lower, is_events_panel)
 
 
 func _rebuild_events_tree() -> void:
@@ -100,7 +155,7 @@ func _rebuild_events_tree() -> void:
 	root_item.set_metadata(0, _project.events_root.id)
 	var fl := _filter_text().to_lower()
 	for child in _project.events_root.children:
-		_build_tree_branch(_events_tree, root_item, child, fl)
+		_build_tree_branch(_events_tree, root_item, child, fl, true)
 
 
 func _rebuild_assets_tree() -> void:
@@ -109,7 +164,7 @@ func _rebuild_assets_tree() -> void:
 	root_item.set_metadata(0, _project.assets_root.id)
 	var fl := _filter_text().to_lower()
 	for child in _project.assets_root.children:
-		_build_tree_branch(_assets_tree, root_item, child, fl)
+		_build_tree_branch(_assets_tree, root_item, child, fl, false)
 
 
 func _rebuild_both_trees() -> void:
@@ -135,6 +190,38 @@ func _on_assets_item_selected() -> void:
 	var node: CodaBrowserNode = _project.find_node_anywhere(nid)
 	if node != null:
 		asset_selection_changed.emit(node)
+
+
+func _on_events_item_activated() -> void:
+	_events_tree.begin_rename_selected_if_allowed()
+
+
+func _on_assets_item_activated() -> void:
+	_assets_tree.begin_rename_selected_if_allowed()
+
+
+func _on_events_item_edited() -> void:
+	_events_tree.commit_edited_if_rename(_events_tree.get_edited(), _events_tree.get_edited_column())
+
+
+func _on_assets_item_edited() -> void:
+	_assets_tree.commit_edited_if_rename(_assets_tree.get_edited(), _assets_tree.get_edited_column())
+
+
+func _on_events_tree_rename_committed(node_id: String, new_name: String) -> void:
+	_project.rename_node(node_id, new_name)
+
+
+func _on_assets_tree_rename_committed(node_id: String, new_name: String) -> void:
+	_project.rename_node(node_id, new_name)
+
+
+func _on_events_tree_item_collapsed(item: TreeItem) -> void:
+	_refresh_folder_item_icon(_events_tree, item, true)
+
+
+func _on_assets_tree_item_collapsed(item: TreeItem) -> void:
+	_refresh_folder_item_icon(_assets_tree, item, false)
 
 
 func _on_events_tree_gui_input(event: InputEvent) -> void:

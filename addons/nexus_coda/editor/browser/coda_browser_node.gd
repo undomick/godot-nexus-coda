@@ -45,6 +45,18 @@ func remove_child_by_id(target_id: String) -> bool:
 	return false
 
 
+func take_child_by_id(target_id: String) -> CodaBrowserNode:
+	for i in range(children.size()):
+		if children[i].id == target_id:
+			var taken: CodaBrowserNode = children[i]
+			children.remove_at(i)
+			return taken
+		var deeper: CodaBrowserNode = children[i].take_child_by_id(target_id)
+		if deeper != null:
+			return deeper
+	return null
+
+
 func insert_child_sorted(node: CodaBrowserNode) -> void:
 	children.append(node)
 	children.sort_custom(func(a: CodaBrowserNode, b: CodaBrowserNode) -> bool:

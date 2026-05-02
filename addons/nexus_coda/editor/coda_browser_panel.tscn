@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://b8s2w2yt46qci"]
 
 [ext_resource type="Script" uid="uid://dvqc7fnr8vrsw" path="res://addons/nexus_coda/editor/coda_browser_panel.gd" id="1_script"]
+[ext_resource type="Script" path="res://addons/nexus_coda/editor/browser/coda_browser_tree.gd" id="2_tree"]
 
 [node name="CodaBrowserPanel" type="VBoxContainer" unique_id=1433656973]
 anchors_preset = 15
@@ -39,6 +40,7 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+script = ExtResource("2_tree")
 allow_rmb_select = true
 hide_root = true
 
@@ -54,5 +56,6 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+script = ExtResource("2_tree")
 allow_rmb_select = true
 hide_root = true
