@@ -89,6 +89,43 @@ func add_asset_placeholder(parent_id: String, asset_name: String = "New Asset") 
 	return asset
 
 
+## Returns empty string on success, otherwise an English error message for the UI.
+func set_event_authoring_data(
+	event_id: String,
+	parameters: Array[CodaEventParameter],
+	audio_paths: PackedStringArray
+) -> String:
+	var err_msg: String = CodaEventParameter.validate_list(parameters)
+	if not err_msg.is_empty():
+		return err_msg
+	err_msg = _validate_event_audio_paths(audio_paths)
+	if not err_msg.is_empty():
+		return err_msg
+	var node: CodaBrowserNode = events_root.find_by_id(event_id)
+	if node == null or node.kind != CodaBrowserNode.Kind.EVENT:
+		return "Not an event in the events tree."
+	node.event_parameters.clear()
+	for p in parameters:
+		node.event_parameters.append(p.clone_keep_id())
+	node.event_audio_paths.clear()
+	for p in audio_paths:
+		var s: String = str(p).strip_edges()
+		if not s.is_empty():
+			node.event_audio_paths.append(s)
+	structure_changed.emit()
+	return ""
+
+
+func _validate_event_audio_paths(paths: PackedStringArray) -> String:
+	for p in paths:
+		var s: String = str(p).strip_edges()
+		if s.is_empty():
+			continue
+		if not s.begins_with("res://"):
+			return 'Audio paths must start with res:// ("%s")' % s
+	return ""
+
+
 func rename_node(target_id: String, new_name: String) -> bool:
 	var node: CodaBrowserNode = find_node_anywhere(target_id)
 	if node == null or node == events_root or node == assets_root:
@@ -141,8 +178,9 @@ func _events_into_folder_insert_index(dest_parent: CodaBrowserNode, moving: Coda
 func _validate_events_move_into(moving: CodaBrowserNode, dest_parent: CodaBrowserNode) -> bool:
 	if not moving.is_folder():
 		return true
+	# Folder cannot be dropped into itself: take_child_by_id removes it first, then re-insert fails.
 	if moving.id == dest_parent.id:
-		return true
+		return false
 	return moving.find_by_id(dest_parent.id) == null
 
 

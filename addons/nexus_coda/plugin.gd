@@ -1,6 +1,7 @@
 @tool
 extends EditorPlugin
 
+const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const EDITOR_WINDOW_SCENE := preload("res://addons/nexus_coda/editor/nexus_coda_editor_window.tscn")
 const EDITOR_WINDOW_SCRIPT := preload("res://addons/nexus_coda/editor/nexus_coda_editor_window.gd")
 
@@ -12,6 +13,7 @@ var _editor_window: Window
 
 
 func _enter_tree() -> void:
+	NexusCodaLog.print_ready_banner()
 	_tools_menu = PopupMenu.new()
 	_tools_menu.name = "NexusCodaToolsMenu"
 	_tools_menu.add_item("Open Editor", MENU_OPEN_EDITOR)

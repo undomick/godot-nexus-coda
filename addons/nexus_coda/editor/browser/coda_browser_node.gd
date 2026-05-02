@@ -8,6 +8,12 @@ var name: String
 var kind: Kind = Kind.FOLDER
 ## Physical source path for imported assets (Kind.ASSET); empty for synthesized entries.
 var asset_source_path: String = ""
+## Kind.EVENT: authoring schema version for forward compatibility.
+var event_def_version: int = 1
+## Kind.EVENT: designer-defined parameters (gameplay will set these at runtime later).
+var event_parameters: Array[CodaEventParameter] = []
+## Kind.EVENT: res:// paths to AudioStream resources (no banks in MVP).
+var event_audio_paths: PackedStringArray = PackedStringArray()
 var children: Array[CodaBrowserNode] = []
 
 
@@ -67,13 +73,20 @@ func insert_child_sorted(node: CodaBrowserNode) -> void:
 
 
 func to_dictionary() -> Dictionary:
-	return {
+	var d: Dictionary = {
 		"id": id,
 		"name": name,
 		"kind": kind,
 		"asset_source_path": asset_source_path,
 		"children": children.map(func(c: CodaBrowserNode) -> Dictionary: return c.to_dictionary()),
 	}
+	if kind == Kind.EVENT:
+		d["event_def_version"] = event_def_version
+		d["event_parameters"] = event_parameters.map(
+			func(p: CodaEventParameter) -> Dictionary: return p.to_dictionary()
+		)
+		d["event_audio_paths"] = Array(event_audio_paths)
+	return d
 
 
 static func from_dictionary(data: Dictionary) -> CodaBrowserNode:
@@ -95,6 +108,17 @@ static func from_dictionary(data: Dictionary) -> CodaBrowserNode:
 	else:
 		node.id = str(stored_id)
 	node.asset_source_path = str(data.get("asset_source_path", ""))
+	if k == Kind.EVENT:
+		node.event_def_version = int(data.get("event_def_version", 1))
+		node.event_parameters.clear()
+		for pd in data.get("event_parameters", []) as Array:
+			if pd is Dictionary:
+				node.event_parameters.append(CodaEventParameter.from_dictionary(pd))
+		node.event_audio_paths.clear()
+		var paths_raw: Variant = data.get("event_audio_paths", [])
+		if paths_raw is Array:
+			for s in paths_raw:
+				node.event_audio_paths.append(str(s))
 	for child_data in data.get("children", []) as Array:
 		if child_data is Dictionary:
 			node.children.append(from_dictionary(child_data))

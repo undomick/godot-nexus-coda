@@ -1,9 +1,11 @@
 @tool
 extends VBoxContainer
 
-signal event_selection_changed(node: CodaBrowserNode)
-signal asset_selection_changed(node: CodaBrowserNode)
+## Variant avoids typed-signal → Callable slot issues in EditorPlugin windows (emit fired; receiver never ran).
+signal event_selection_changed(node: Variant)
+signal asset_selection_changed(node: Variant)
 
+const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
 const BrowserContextMenuScript := preload("res://addons/nexus_coda/editor/browser_context_menu.gd")
 const BrowserFolderIcons := preload("res://addons/nexus_coda/editor/browser/coda_browser_folder_icons.gd")
@@ -70,6 +72,12 @@ func get_project():
 	return _project
 
 
+## Call after wiring the editor panel so the inspector reflects the current Events tree selection
+## (programmatic select does not always emit item_selected).
+func pulse_events_selection_to_editor() -> void:
+	_emit_events_selection_to_editor()
+
+
 func set_project(project: Variant) -> void:
 	if project == null:
 		return
@@ -100,8 +108,45 @@ func _queue_rebuild_both_trees() -> void:
 
 
 func _deferred_rebuild_both_trees() -> void:
+	var ev_sel: String = ""
+	var as_sel: String = ""
+	var ev_it: TreeItem = _events_tree.get_selected()
+	if ev_it != null:
+		ev_sel = str(ev_it.get_metadata(0))
+	var as_it: TreeItem = _assets_tree.get_selected()
+	if as_it != null:
+		as_sel = str(as_it.get_metadata(0))
 	_rebuild_trees_queued = false
 	_rebuild_both_trees()
+	if not ev_sel.is_empty():
+		_select_tree_item_by_node_id(_events_tree, ev_sel)
+		# Programmatic TreeItem.select() does not always emit item_selected; refresh editor binding (sync — selection is already set).
+		_emit_events_selection_to_editor()
+	if not as_sel.is_empty():
+		_select_tree_item_by_node_id(_assets_tree, as_sel)
+		_emit_assets_selection_to_editor()
+
+
+func _select_tree_item_by_node_id(tree: Tree, node_id: String) -> void:
+	var root_item: TreeItem = tree.get_root()
+	if root_item == null:
+		return
+	var found: TreeItem = _find_tree_item_by_node_id(root_item, node_id)
+	if found != null:
+		found.select(0)
+		tree.scroll_to_item(found)
+
+
+func _find_tree_item_by_node_id(item: TreeItem, node_id: String) -> TreeItem:
+	if str(item.get_metadata(0)) == node_id:
+		return item
+	var child: TreeItem = item.get_first_child()
+	while child != null:
+		var deeper: TreeItem = _find_tree_item_by_node_id(child, node_id)
+		if deeper != null:
+			return deeper
+		child = child.get_next()
+	return null
 
 
 func _filter_text() -> String:
@@ -193,23 +238,51 @@ func _rebuild_both_trees() -> void:
 
 
 func _on_events_item_selected() -> void:
+	# One emit per click: sync first; deferred retry only if selection was not ready yet.
+	if _emit_events_selection_to_editor():
+		return
+	call_deferred(&"_emit_events_selection_to_editor_deferred")
+
+
+func _emit_events_selection_to_editor_deferred() -> void:
+	_emit_events_selection_to_editor()
+
+
+## Returns true if a node was emitted (so callers can skip redundant deferred retries).
+func _emit_events_selection_to_editor() -> bool:
 	var item: TreeItem = _events_tree.get_selected()
 	if item == null:
-		return
+		return false
 	var nid: String = str(item.get_metadata(0))
 	var node: CodaBrowserNode = _project.find_node_anywhere(nid)
-	if node != null:
-		event_selection_changed.emit(node)
+	if node == null:
+		return false
+	if node.kind == CodaBrowserNode.Kind.EVENT:
+		NexusCodaLog.debug("browser", 'emit event_selection_changed ("%s" id=%s)' % [node.name, node.id])
+	event_selection_changed.emit(node)
+	return true
 
 
 func _on_assets_item_selected() -> void:
+	if _emit_assets_selection_to_editor():
+		return
+	call_deferred(&"_emit_assets_selection_to_editor_deferred")
+
+
+func _emit_assets_selection_to_editor_deferred() -> void:
+	_emit_assets_selection_to_editor()
+
+
+func _emit_assets_selection_to_editor() -> bool:
 	var item: TreeItem = _assets_tree.get_selected()
 	if item == null:
-		return
+		return false
 	var nid: String = str(item.get_metadata(0))
 	var node: CodaBrowserNode = _project.find_node_anywhere(nid)
-	if node != null:
-		asset_selection_changed.emit(node)
+	if node == null:
+		return false
+	asset_selection_changed.emit(node)
+	return true
 
 
 func _on_events_item_activated() -> void:
