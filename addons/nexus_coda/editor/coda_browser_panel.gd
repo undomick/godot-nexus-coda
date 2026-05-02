@@ -11,6 +11,8 @@ const BrowserFolderIcons := preload("res://addons/nexus_coda/editor/browser/coda
 const FOLDER_ICON_DISPLAY_MAX := 16
 
 @onready var _filter_edit: LineEdit = %FilterBar
+@onready var _events_qa_new_event: TextureButton = %NewEventButton
+@onready var _events_qa_new_folder: TextureButton = %NewFolderButton
 @onready var _tabs: TabContainer = %BrowserTabContainer
 @onready var _events_tree: CodaBrowserTree = %EventsTree
 @onready var _assets_tree: CodaBrowserTree = %AssetsTree
@@ -25,6 +27,8 @@ var _rename_target_id: String = ""
 var _delete_dialog: ConfirmationDialog
 var _delete_target_id: String = ""
 
+var _rebuild_trees_queued: bool = false
+
 
 func _ready() -> void:
 	_browser_ctx = BrowserContextMenuScript.new()
@@ -34,6 +38,8 @@ func _ready() -> void:
 
 	_project.structure_changed.connect(_on_project_structure_changed)
 	_filter_edit.text_changed.connect(_on_filter_changed)
+	_events_qa_new_event.pressed.connect(_on_events_quick_action_new_event)
+	_events_qa_new_folder.pressed.connect(_on_events_quick_action_new_folder)
 	_events_tree.hide_root = true
 	_assets_tree.hide_root = true
 	_events_tree.allow_rmb_select = true
@@ -75,14 +81,26 @@ func set_project(project: Variant) -> void:
 		_events_tree.configure(_project, true)
 	if is_instance_valid(_assets_tree):
 		_assets_tree.configure(_project, false)
-	_rebuild_both_trees()
+	_queue_rebuild_both_trees()
 
 
 func _on_project_structure_changed() -> void:
-	_rebuild_both_trees()
+	_queue_rebuild_both_trees()
 
 
 func _on_filter_changed(_new_text: String) -> void:
+	_queue_rebuild_both_trees()
+
+
+func _queue_rebuild_both_trees() -> void:
+	if _rebuild_trees_queued:
+		return
+	_rebuild_trees_queued = true
+	call_deferred(&"_deferred_rebuild_both_trees")
+
+
+func _deferred_rebuild_both_trees() -> void:
+	_rebuild_trees_queued = false
 	_rebuild_both_trees()
 
 
@@ -143,6 +161,8 @@ func _build_tree_branch(
 	if node.is_folder():
 		item.set_collapsed(false)
 		_apply_folder_item_icon(tree, item, node, is_events_panel)
+	elif is_events_panel and node.kind == CodaBrowserNode.Kind.EVENT:
+		item.set_icon(0, BrowserFolderIcons.get_event_leaf_texture())
 	else:
 		item.set_icon(0, null)
 	for child in node.children:
@@ -283,6 +303,23 @@ func _handle_tree_rmb(event: InputEvent, tree: Tree) -> void:
 	else:
 		_browser_ctx.open_assets_at(gp, nid, allow_rd)
 	tree.accept_event()
+
+
+func _events_quick_action_target_folder_id() -> String:
+	var item: TreeItem = _events_tree.get_selected()
+	if item == null:
+		return _project.events_root.id
+	return _ctx_target_folder_id(str(item.get_metadata(0)), true)
+
+
+func _on_events_quick_action_new_event() -> void:
+	var folder_id: String = _events_quick_action_target_folder_id()
+	_project.add_events_event(folder_id, "New Event")
+
+
+func _on_events_quick_action_new_folder() -> void:
+	var folder_id: String = _events_quick_action_target_folder_id()
+	_project.add_events_folder(folder_id, "New Folder")
 
 
 func _ctx_target_folder_id(clicked_node_id: String, is_events: bool) -> String:
