@@ -9,7 +9,7 @@ extends RefCounted
 var id: String
 var snapshot_name: String = "Snapshot"
 var blend_ms: int = 0
-## Map of bus_id (String) -> { "volume_db": float, "mute": bool }
+## Map of bus_id (String) -> { "volume_db", "mute", "solo", "bypass", "send_target_id" }
 var bus_overrides: Dictionary = {}
 
 
@@ -34,10 +34,14 @@ func clone_keep_id() -> CodaSnapshot:
 func to_dictionary() -> Dictionary:
 	var entries: Array = []
 	for bus_id in bus_overrides.keys():
+		var ov: Dictionary = bus_overrides[bus_id] as Dictionary
 		entries.append({
 			"bus_id": bus_id,
-			"volume_db": float((bus_overrides[bus_id] as Dictionary).get("volume_db", 0.0)),
-			"mute": bool((bus_overrides[bus_id] as Dictionary).get("mute", false)),
+			"volume_db": float(ov.get("volume_db", 0.0)),
+			"mute": bool(ov.get("mute", false)),
+			"solo": bool(ov.get("solo", false)),
+			"bypass": bool(ov.get("bypass", false)),
+			"send_target_id": str(ov.get("send_target_id", "")),
 		})
 	return {
 		"id": id,
@@ -63,5 +67,8 @@ static func from_dictionary(data: Dictionary) -> CodaSnapshot:
 		s.bus_overrides[bus_id] = {
 			"volume_db": float(entry.get("volume_db", 0.0)),
 			"mute": bool(entry.get("mute", false)),
+			"solo": bool(entry.get("solo", false)),
+			"bypass": bool(entry.get("bypass", false)),
+			"send_target_id": str(entry.get("send_target_id", "")),
 		}
 	return s

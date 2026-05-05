@@ -735,6 +735,8 @@ func _bind_project_signals(state: Variant) -> void:
 	if _project_signal_source != null and is_instance_valid(_project_signal_source):
 		if _project_signal_source.structure_changed.is_connected(_on_project_structure_changed):
 			_project_signal_source.structure_changed.disconnect(_on_project_structure_changed)
+		if _project_signal_source.project_dirty.is_connected(_on_project_structure_changed):
+			_project_signal_source.project_dirty.disconnect(_on_project_structure_changed)
 	_project_signal_source = null
 	if state == null:
 		return
@@ -743,6 +745,7 @@ func _bind_project_signals(state: Variant) -> void:
 		return
 	_project_signal_source = st
 	st.structure_changed.connect(_on_project_structure_changed)
+	st.project_dirty.connect(_on_project_structure_changed)
 
 
 func _on_project_structure_changed() -> void:

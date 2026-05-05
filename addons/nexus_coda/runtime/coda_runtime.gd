@@ -65,6 +65,11 @@ func _process(delta: float) -> void:
 
 
 func set_project(project: Variant) -> void:
+	if _project != null:
+		if _project.structure_changed.is_connected(_on_project_structure_changed):
+			_project.structure_changed.disconnect(_on_project_structure_changed)
+		if _project.project_dirty.is_connected(_on_project_dirty_sync_buses):
+			_project.project_dirty.disconnect(_on_project_dirty_sync_buses)
 	if project == null:
 		_project = null
 		_bus_id_to_godot_name.clear()
@@ -74,9 +79,15 @@ func set_project(project: Variant) -> void:
 	if _project != null:
 		if not _project.structure_changed.is_connected(_on_project_structure_changed):
 			_project.structure_changed.connect(_on_project_structure_changed)
+		if not _project.project_dirty.is_connected(_on_project_dirty_sync_buses):
+			_project.project_dirty.connect(_on_project_dirty_sync_buses)
 
 
 func _on_project_structure_changed() -> void:
+	_sync_buses()
+
+
+func _on_project_dirty_sync_buses() -> void:
 	_sync_buses()
 
 

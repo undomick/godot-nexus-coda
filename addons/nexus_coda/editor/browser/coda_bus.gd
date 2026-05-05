@@ -10,6 +10,9 @@ var bus_name: String = "Bus"
 var volume_db: float = 0.0
 var mute: bool = false
 var solo: bool = false
+var bypass: bool = false
+## If empty, routing uses the tree parent (same as Godot layout from nesting). Otherwise sends to this bus id (must be a strict ancestor toward Master).
+var send_target_id: String = ""
 var children: Array[CodaBus] = []
 
 
@@ -66,6 +69,8 @@ func clone_keep_id() -> CodaBus:
 	b.volume_db = volume_db
 	b.mute = mute
 	b.solo = solo
+	b.bypass = bypass
+	b.send_target_id = send_target_id
 	for c in children:
 		b.children.append(c.clone_keep_id())
 	return b
@@ -78,6 +83,8 @@ func to_dictionary() -> Dictionary:
 		"volume_db": volume_db,
 		"mute": mute,
 		"solo": solo,
+		"bypass": bypass,
+		"send_target_id": send_target_id,
 		"children": children.map(func(c: CodaBus) -> Dictionary: return c.to_dictionary()),
 	}
 
@@ -90,6 +97,8 @@ static func from_dictionary(data: Dictionary) -> CodaBus:
 	b.volume_db = float(data.get("volume_db", 0.0))
 	b.mute = bool(data.get("mute", false))
 	b.solo = bool(data.get("solo", false))
+	b.bypass = bool(data.get("bypass", false))
+	b.send_target_id = str(data.get("send_target_id", ""))
 	for c_raw in data.get("children", []) as Array:
 		if c_raw is Dictionary:
 			b.children.append(CodaBus.from_dictionary(c_raw))

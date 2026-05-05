@@ -9,6 +9,8 @@ const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaEmptyStateScript := preload("res://addons/nexus_coda/editor/theme/coda_empty_state.gd")
 const CodaBusStripScript := preload("res://addons/nexus_coda/editor/panels/mixer/coda_bus_strip.gd")
+const CodaMixerStripRowScript := preload("res://addons/nexus_coda/editor/panels/mixer/coda_mixer_strip_row.gd")
+const CodaMixerAddBusSlotScript := preload("res://addons/nexus_coda/editor/panels/mixer/coda_mixer_add_bus_slot.gd")
 const CodaAudioBusMirrorScript := preload("res://addons/nexus_coda/runtime/coda_audio_bus_mirror.gd")
 
 const METER_REFRESH_HZ := 30.0
@@ -23,6 +25,7 @@ var _snapshot_picker: OptionButton
 var _add_bus_button: Button
 var _strips_by_bus_id: Dictionary = {}
 var _meter_accumulator: float = 0.0
+var _mixer_rebuild_pending: bool = false
 
 
 func _ready() -> void:
@@ -86,10 +89,11 @@ func _ready() -> void:
 	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	add_child(_scroll)
 
-	_strip_row = HBoxContainer.new()
+	_strip_row = CodaMixerStripRowScript.new()
 	_strip_row.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
 	_strip_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_strip_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_strip_row.setup(self)
 	_scroll.add_child(_strip_row)
 
 	set_process(true)
@@ -97,12 +101,13 @@ func _ready() -> void:
 
 func attach_project(project: CodaState) -> void:
 	if _project != null and is_instance_valid(_project):
-		if _project.structure_changed.is_connected(_on_project_structure_changed):
-			_project.structure_changed.disconnect(_on_project_structure_changed)
+		if _project.structure_changed.is_connected(_on_mixer_structure_changed):
+			_project.structure_changed.disconnect(_on_mixer_structure_changed)
+	_mixer_rebuild_pending = false
 	_project = project
 	if _project != null:
-		if not _project.structure_changed.is_connected(_on_project_structure_changed):
-			_project.structure_changed.connect(_on_project_structure_changed)
+		if not _project.structure_changed.is_connected(_on_mixer_structure_changed):
+			_project.structure_changed.connect(_on_mixer_structure_changed)
 	_rebuild_strips()
 	_refresh_snapshot_picker()
 
@@ -111,7 +116,18 @@ func attach_runtime(runtime: CodaRuntime) -> void:
 	_runtime = runtime
 
 
-func _on_project_structure_changed() -> void:
+func _on_mixer_structure_changed() -> void:
+	# Defer so callers (controls, snapshots, etc.) are never mid–child-list mutation when we rebuild.
+	if _mixer_rebuild_pending:
+		return
+	_mixer_rebuild_pending = true
+	call_deferred("_deferred_mixer_rebuild")
+
+
+func _deferred_mixer_rebuild() -> void:
+	_mixer_rebuild_pending = false
+	if not is_instance_valid(self) or _project == null:
+		return
 	# A bus was added/removed/renamed elsewhere — rebuild from scratch. Rebuild also refreshes
 	# the snapshot dropdown to reflect new/removed snapshots.
 	_rebuild_strips()
@@ -146,11 +162,30 @@ func _rebuild_strips() -> void:
 	for b in flat:
 		var strip := CodaBusStripScript.new()
 		_strip_row.add_child(strip)
-		strip.bind(b, String(name_map.get(b.id, b.bus_name)))
+		var is_master: bool = b.id == _project.bus_root.id
+		var send_targets: Array[CodaBus] = _ancestor_send_targets(b)
+		var default_send: String = ""
+		var pbus: CodaBus = _project.parent_bus_of(b.id)
+		if pbus != null:
+			default_send = pbus.id
+		strip.bind(
+			b,
+			String(name_map.get(b.id, b.bus_name)),
+			is_master,
+			send_targets,
+			default_send
+		)
 		strip.volume_changed.connect(_on_strip_volume_changed)
 		strip.mute_toggled.connect(_on_strip_mute_toggled)
 		strip.solo_toggled.connect(_on_strip_solo_toggled)
+		strip.bypass_toggled.connect(_on_strip_bypass_toggled)
+		strip.bus_renamed.connect(_on_strip_bus_renamed)
+		strip.send_target_changed.connect(_on_strip_send_target_changed)
 		_strips_by_bus_id[b.id] = strip
+
+	var add_slot := CodaMixerAddBusSlotScript.new()
+	add_slot.add_bus_requested.connect(_on_add_bus_pressed)
+	_strip_row.add_child(add_slot)
 
 
 func _refresh_snapshot_picker() -> void:
@@ -200,6 +235,66 @@ func _on_strip_solo_toggled(bus_id: String, solo: bool) -> void:
 	_project.update_bus_solo(bus_id, solo)
 	# Solo is implemented as muting siblings; let mirror sync rebuild the truth.
 	CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root)
+
+
+func _on_strip_bypass_toggled(bus_id: String, bypass: bool) -> void:
+	if _project == null:
+		return
+	_project.update_bus_bypass(bus_id, bypass)
+	var idx: int = AudioServer.get_bus_index(_get_godot_bus_name(bus_id))
+	if idx >= 0:
+		AudioServer.set_bus_bypass_effects(idx, bypass)
+
+
+func _on_strip_bus_renamed(bus_id: String, new_name: String) -> void:
+	if _project == null:
+		return
+	_project.rename_bus(bus_id, new_name)
+
+
+func _ancestor_send_targets(bus: CodaBus) -> Array[CodaBus]:
+	var out: Array[CodaBus] = []
+	if _project == null or _project.bus_root == null:
+		return out
+	var cur_id: String = bus.id
+	while true:
+		var p: CodaBus = _project.parent_bus_of(cur_id)
+		if p == null:
+			break
+		out.append(p)
+		cur_id = p.id
+	out.reverse()
+	return out
+
+
+func _on_strip_send_target_changed(bus_id: String, target_bus_id: String) -> void:
+	if _project == null:
+		return
+	_project.update_bus_send_target(bus_id, target_bus_id)
+	CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root)
+
+
+func on_bus_strip_drop_at_flat_index(drag_bus_id: String, insert_before_flat: int) -> void:
+	if _project == null or _project.bus_root == null:
+		return
+	var flat: Array[CodaBus] = _project.bus_root.collect_flat([])
+	if flat.is_empty():
+		return
+	var ix: int = insert_before_flat
+	if ix <= 0:
+		ix = 1
+	if drag_bus_id == _project.bus_root.id:
+		return
+	if ix >= flat.size():
+		var last: CodaBus = flat[flat.size() - 1]
+		if last.id == drag_bus_id:
+			return
+		_project.move_bus_after_in_tree(drag_bus_id, last.id)
+	else:
+		var before_b: CodaBus = flat[ix]
+		if before_b.id == drag_bus_id:
+			return
+		_project.move_bus_before_in_tree(drag_bus_id, before_b.id)
 
 
 func _get_godot_bus_name(bus_id: String) -> String:

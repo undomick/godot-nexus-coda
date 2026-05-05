@@ -2,92 +2,258 @@
 class_name CodaBusStrip
 extends PanelContainer
 
-## Vertical strip for one CodaBus: name + fader + dB readout + mute/solo + peak meter.
+## Bus strip: name, L/R meters + fader + vertical M/S/B, dB field, send target, drag reorder.
 
 signal volume_changed(bus_id: String, volume_db: float)
 signal mute_toggled(bus_id: String, mute: bool)
 signal solo_toggled(bus_id: String, solo: bool)
+signal bypass_toggled(bus_id: String, bypass: bool)
+signal bus_renamed(bus_id: String, new_name: String)
+signal send_target_changed(bus_id: String, target_bus_id: String)
+
+const DND_TYPE := &"coda_bus_strip"
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 const CodaAudioBusMirrorScript := preload("res://addons/nexus_coda/runtime/coda_audio_bus_mirror.gd")
 
+const FADER_MIN_DB := -60.0
+const FADER_MAX_DB := 12.0
+const FADER_STEP := 0.1
+
+
+class VerticalDragFader extends Control:
+	signal fader_value_changed(value: float)
+
+	const _Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
+
+	var _value: float = 0.0
+	var _dragging: bool = false
+	var _min_db: float
+	var _max_db: float
+	var _step: float
+
+	func _init(
+		min_db: float,
+		max_db: float,
+		step: float
+	) -> void:
+		_min_db = min_db
+		_max_db = max_db
+		_step = step
+		custom_minimum_size = Vector2(22, 32)
+		size_flags_vertical = Control.SIZE_EXPAND_FILL
+		mouse_default_cursor_shape = Control.CURSOR_MOVE
+		tooltip_text = "Drag vertically to adjust level"
+
+	func get_fader_value() -> float:
+		return _value
+
+	func set_value_no_signal(v: float) -> void:
+		_value = clampf(snapped(v, _step), _min_db, _max_db)
+		queue_redraw()
+
+	func _db_from_local_y(local_y: float) -> float:
+		var h: float = size.y
+		if h <= 0.0:
+			return _value
+		var t: float = 1.0 - clampf(local_y / h, 0.0, 1.0)
+		return lerpf(_min_db, _max_db, t)
+
+	func _y_center_for_db(db: float) -> float:
+		var h: float = size.y
+		var t: float = inverse_lerp(_min_db, _max_db, clampf(db, _min_db, _max_db))
+		return (1.0 - t) * h
+
+	func _apply_from_y(local_y: float) -> void:
+		var nv: float = clampf(snapped(_db_from_local_y(local_y), _step), _min_db, _max_db)
+		if is_equal_approx(nv, _value):
+			return
+		_value = nv
+		queue_redraw()
+		fader_value_changed.emit(_value)
+
+	func _gui_input(event: InputEvent) -> void:
+		if event is InputEventMouseButton:
+			var mb: InputEventMouseButton = event as InputEventMouseButton
+			if mb.button_index != MOUSE_BUTTON_LEFT:
+				return
+			if mb.pressed:
+				_dragging = true
+				_apply_from_y(mb.position.y)
+			else:
+				_dragging = false
+			accept_event()
+		elif event is InputEventMouseMotion and _dragging:
+			var mm: InputEventMouseMotion = event as InputEventMouseMotion
+			_apply_from_y(mm.position.y)
+			accept_event()
+
+	func _draw() -> void:
+		var r: Rect2 = Rect2(Vector2.ZERO, size)
+		draw_rect(r, _Tokens.SURFACE_SUNKEN, true)
+		draw_rect(r, _Tokens.SURFACE_BORDER, false, 1.0)
+		var thumb_h: float = maxf(10.0, size.y * 0.07)
+		var yc: float = _y_center_for_db(_value)
+		var thumb: Rect2 = Rect2(2.0, yc - thumb_h * 0.5, maxf(0.0, size.x - 4.0), thumb_h)
+		draw_rect(thumb, _Tokens.ACCENT_DIM, true)
+
+
 var _bus: CodaBus = null
-var _name_label: Label
-var _fader: VSlider
-var _db_label: Label
-var _mute_btn: CheckButton
-var _solo_btn: CheckButton
+var _syncing_ui: bool = false
+var _is_master_bus: bool = false
+
+var _name_edit: LineEdit
+var _fader: VerticalDragFader
+var _db_edit: LineEdit
+var _mute_btn: Button
+var _solo_btn: Button
+var _bypass_btn: Button
 var _meter_l: ProgressBar
 var _meter_r: ProgressBar
+var _send_option: OptionButton
 var _godot_bus_name: String = ""
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(96, 240)
+	custom_minimum_size = Vector2(104, 160)
+	size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_theme_stylebox_override(
 		&"panel",
 		Tokens.make_panel_stylebox(Tokens.SURFACE_RAISED, Tokens.SURFACE_BORDER, Tokens.RADIUS_SM)
 	)
 
 	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
 	add_child(col)
 
-	_name_label = Label.new()
-	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_name_label.add_theme_color_override(&"font_color", Tokens.TEXT_PRIMARY)
-	_name_label.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
-	col.add_child(_name_label)
+	_name_edit = LineEdit.new()
+	_name_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_name_edit.custom_minimum_size = Vector2(0, 26)
+	_name_edit.placeholder_text = "Bus name"
+	_name_edit.add_theme_color_override(&"font_color", Tokens.TEXT_PRIMARY)
+	_name_edit.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
+	_name_edit.text_submitted.connect(func(_t: String) -> void: _commit_bus_name_if_needed())
+	_name_edit.focus_exited.connect(_commit_bus_name_if_needed)
+	col.add_child(_name_edit)
 
-	var meter_row := HBoxContainer.new()
-	meter_row.add_theme_constant_override(&"separation", 2)
-	meter_row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	col.add_child(meter_row)
+	var main_row := HBoxContainer.new()
+	main_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main_row.add_theme_constant_override(&"separation", 4)
+	col.add_child(main_row)
+
+	var meters_fader := HBoxContainer.new()
+	meters_fader.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	meters_fader.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	meters_fader.add_theme_constant_override(&"separation", 4)
+	main_row.add_child(meters_fader)
 
 	_meter_l = _make_meter()
 	_meter_r = _make_meter()
-	meter_row.add_child(_meter_l)
-	meter_row.add_child(_meter_r)
+	meters_fader.add_child(_meter_l)
+	meters_fader.add_child(_meter_r)
 
-	var fader_row := HBoxContainer.new()
-	fader_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	fader_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	fader_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	col.add_child(fader_row)
+	_fader = VerticalDragFader.new(FADER_MIN_DB, FADER_MAX_DB, FADER_STEP)
+	meters_fader.add_child(_fader)
+	_fader.fader_value_changed.connect(_on_vertical_fader_changed)
 
-	_fader = VSlider.new()
-	_fader.min_value = -60.0
-	_fader.max_value = 12.0
-	_fader.step = 0.1
-	_fader.value = 0.0
-	_fader.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_fader.custom_minimum_size = Vector2(24, 140)
-	_fader.value_changed.connect(_on_fader_changed)
-	fader_row.add_child(_fader)
+	var btn_col := VBoxContainer.new()
+	btn_col.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
+	btn_col.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	btn_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	main_row.add_child(btn_col)
 
-	_db_label = Label.new()
-	_db_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_db_label.text = "0.0 dB"
-	_db_label.add_theme_color_override(&"font_color", Tokens.TEXT_SECONDARY)
-	_db_label.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
-	col.add_child(_db_label)
+	_mute_btn = _make_toggle_strip_button("M", "Mute")
+	_solo_btn = _make_toggle_strip_button("S", "Solo")
+	_bypass_btn = _make_toggle_strip_button("B", "Bypass bus effects")
+	_mute_btn.toggled.connect(_on_mute_toggled_ui)
+	_solo_btn.toggled.connect(_on_solo_toggled_ui)
+	_bypass_btn.toggled.connect(_on_bypass_toggled_ui)
+	btn_col.add_child(_mute_btn)
+	btn_col.add_child(_solo_btn)
+	btn_col.add_child(_bypass_btn)
 
-	var btn_row := HBoxContainer.new()
-	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_row.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
-	col.add_child(btn_row)
+	_db_edit = LineEdit.new()
+	_db_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_db_edit.custom_minimum_size = Vector2(0, 26)
+	_db_edit.placeholder_text = "dB value"
+	_db_edit.add_theme_color_override(&"font_color", Tokens.TEXT_SECONDARY)
+	_db_edit.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
+	_db_edit.text_submitted.connect(func(_t: String) -> void: _commit_db_field())
+	_db_edit.focus_exited.connect(_commit_db_field)
+	col.add_child(_db_edit)
 
-	_mute_btn = CheckButton.new()
-	_mute_btn.text = "M"
-	_mute_btn.tooltip_text = "Mute"
-	_mute_btn.toggled.connect(_on_mute_toggled)
-	btn_row.add_child(_mute_btn)
+	_send_option = OptionButton.new()
+	_send_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_send_option.custom_minimum_size = Vector2(0, 26)
+	_send_option.tooltip_text = "Audio bus send / link target (toward Master)"
+	_send_option.item_selected.connect(_on_send_item_selected)
+	col.add_child(_send_option)
 
-	_solo_btn = CheckButton.new()
-	_solo_btn.text = "S"
-	_solo_btn.tooltip_text = "Solo"
-	_solo_btn.toggled.connect(_on_solo_toggled)
-	btn_row.add_child(_solo_btn)
+
+func _get_drag_data(at_position: Vector2) -> Variant:
+	if _bus == null or _is_master_bus:
+		return null
+	var preview := Label.new()
+	preview.text = _bus.bus_name
+	preview.add_theme_color_override(&"font_color", Tokens.TEXT_PRIMARY)
+	set_drag_preview(preview)
+	return {"type": DND_TYPE, "bus_id": _bus.id}
+
+
+func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
+	return typeof(data) == TYPE_DICTIONARY and String(data.get("type", "")) == DND_TYPE
+
+
+func _drop_data(at_position: Vector2, data: Variant) -> void:
+	var row := get_parent()
+	if row == null:
+		return
+	var lx: float = (row as Control).get_local_mouse_position().x
+	if row.has_method(&"drop_bus_at_local_x"):
+		row.call(&"drop_bus_at_local_x", data, lx)
+
+
+func _make_toggle_strip_button(p_text: String, p_tooltip: String) -> Button:
+	var btn := Button.new()
+	btn.text = p_text
+	btn.tooltip_text = p_tooltip
+	btn.toggle_mode = true
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.custom_minimum_size = Vector2(28, 22)
+	btn.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Tokens.SURFACE_SUNKEN
+	normal.set_corner_radius_all(Tokens.RADIUS_SM)
+	normal.content_margin_left = 2
+	normal.content_margin_right = 2
+	normal.content_margin_top = 1
+	normal.content_margin_bottom = 1
+	btn.add_theme_stylebox_override(&"normal", normal)
+	btn.add_theme_stylebox_override(&"hover", normal.duplicate())
+	var hover: StyleBoxFlat = btn.get_theme_stylebox(&"hover") as StyleBoxFlat
+	if hover != null:
+		hover.bg_color = Tokens.SURFACE_RAISED
+	var pressed_style := StyleBoxFlat.new()
+	pressed_style.bg_color = Tokens.ACCENT_DIM
+	pressed_style.border_color = Tokens.ACCENT
+	pressed_style.set_border_width_all(1)
+	pressed_style.set_corner_radius_all(Tokens.RADIUS_SM)
+	pressed_style.content_margin_left = 2
+	pressed_style.content_margin_right = 2
+	pressed_style.content_margin_top = 1
+	pressed_style.content_margin_bottom = 1
+	btn.add_theme_stylebox_override(&"pressed", pressed_style)
+	return btn
+
+
+func _set_toggle_font_emphasis(btn: Button, active: bool) -> void:
+	if active:
+		btn.add_theme_color_override(&"font_color", Tokens.ACCENT)
+	else:
+		btn.add_theme_color_override(&"font_color", Tokens.TEXT_SECONDARY)
 
 
 func _make_meter() -> ProgressBar:
@@ -98,18 +264,61 @@ func _make_meter() -> ProgressBar:
 	pb.step = 0.001
 	pb.value = 0.0
 	pb.fill_mode = ProgressBar.FILL_BOTTOM_TO_TOP
-	pb.custom_minimum_size = Vector2(7, 140)
+	pb.custom_minimum_size = Vector2(7, 32)
+	pb.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	return pb
 
 
-func bind(bus: CodaBus, godot_bus_name: String) -> void:
+func bind(
+	bus: CodaBus,
+	godot_bus_name: String,
+	is_master_strip: bool,
+	send_targets: Array[CodaBus],
+	default_send_target_id: String
+) -> void:
 	_bus = bus
 	_godot_bus_name = godot_bus_name
-	_name_label.text = bus.bus_name
+	_is_master_bus = is_master_strip
+	_syncing_ui = true
+	_name_edit.text = bus.bus_name
 	_fader.set_value_no_signal(bus.volume_db)
-	_db_label.text = "%+0.1f dB" % bus.volume_db
+	_set_db_field_text(bus.volume_db)
 	_mute_btn.set_pressed_no_signal(bus.mute)
 	_solo_btn.set_pressed_no_signal(bus.solo)
+	_bypass_btn.set_pressed_no_signal(bus.bypass)
+	_set_toggle_font_emphasis(_mute_btn, bus.mute)
+	_set_toggle_font_emphasis(_solo_btn, bus.solo)
+	_set_toggle_font_emphasis(_bypass_btn, bus.bypass)
+
+	_send_option.clear()
+	_send_option.visible = not _is_master_bus
+	if not _is_master_bus:
+		var want: String = String(bus.send_target_id).strip_edges()
+		if want.is_empty():
+			want = String(default_send_target_id).strip_edges()
+		var sel_idx: int = 0
+		for i in send_targets.size():
+			var t: CodaBus = send_targets[i]
+			var label: String = String(t.bus_name).strip_edges()
+			if label.is_empty():
+				label = "Bus"
+			_send_option.add_item(label)
+			_send_option.set_item_metadata(i, t.id)
+			if t.id == want:
+				sel_idx = i
+		if _send_option.item_count > 0:
+			_send_option.select(clampi(sel_idx, 0, _send_option.item_count - 1))
+
+	_syncing_ui = false
+
+
+func _on_send_item_selected(index: int) -> void:
+	if _syncing_ui or _bus == null:
+		return
+	if index < 0 or index >= _send_option.item_count:
+		return
+	var tid: String = str(_send_option.get_item_metadata(index))
+	send_target_changed.emit(_bus.id, tid)
 
 
 func update_meter() -> void:
@@ -123,25 +332,70 @@ func update_meter() -> void:
 func _peak_db_to_meter(db: float) -> float:
 	if db <= -80.0:
 		return 0.0
-	# Map [-60..0] dB to [0..1] (clamped) so the strip looks lively but doesn't pin to top.
 	var t: float = clampf((db + 60.0) / 60.0, 0.0, 1.0)
 	return t
 
 
-func _on_fader_changed(v: float) -> void:
-	if _bus == null:
+func _set_db_field_text(vol_db: float) -> void:
+	_db_edit.text = "%+.1f" % vol_db
+
+
+func _commit_bus_name_if_needed() -> void:
+	if _syncing_ui or _bus == null:
 		return
-	_db_label.text = "%+0.1f dB" % v
+	var trimmed: String = _name_edit.text.strip_edges()
+	if trimmed.is_empty():
+		_syncing_ui = true
+		_name_edit.text = _bus.bus_name
+		_syncing_ui = false
+		return
+	if trimmed == _bus.bus_name:
+		return
+	bus_renamed.emit(_bus.id, trimmed)
+
+
+func _commit_db_field() -> void:
+	if _syncing_ui or _bus == null:
+		return
+	var raw: String = _db_edit.text.strip_edges().to_lower()
+	raw = raw.replace("db", "").replace(",", ".").strip_edges()
+	if raw.is_empty():
+		_syncing_ui = true
+		_set_db_field_text(_fader.get_fader_value())
+		_syncing_ui = false
+		return
+	var v: float = raw.to_float()
+	v = clampf(snapped(v, FADER_STEP), FADER_MIN_DB, FADER_MAX_DB)
+	_syncing_ui = true
+	_fader.set_value_no_signal(v)
+	_set_db_field_text(v)
+	_syncing_ui = false
 	volume_changed.emit(_bus.id, v)
 
 
-func _on_mute_toggled(state: bool) -> void:
-	if _bus == null:
+func _on_vertical_fader_changed(v: float) -> void:
+	if _bus == null or _syncing_ui:
 		return
-	mute_toggled.emit(_bus.id, state)
+	_set_db_field_text(v)
+	volume_changed.emit(_bus.id, v)
 
 
-func _on_solo_toggled(state: bool) -> void:
-	if _bus == null:
+func _on_mute_toggled_ui(active: bool) -> void:
+	if _bus == null or _syncing_ui:
 		return
-	solo_toggled.emit(_bus.id, state)
+	_set_toggle_font_emphasis(_mute_btn, active)
+	mute_toggled.emit(_bus.id, active)
+
+
+func _on_solo_toggled_ui(active: bool) -> void:
+	if _bus == null or _syncing_ui:
+		return
+	_set_toggle_font_emphasis(_solo_btn, active)
+	solo_toggled.emit(_bus.id, active)
+
+
+func _on_bypass_toggled_ui(active: bool) -> void:
+	if _bus == null or _syncing_ui:
+		return
+	_set_toggle_font_emphasis(_bypass_btn, active)
+	bypass_toggled.emit(_bus.id, active)

@@ -2,6 +2,8 @@ class_name CodaState
 extends RefCounted
 
 signal structure_changed
+## Bus volume/mute/bypass and other non-structural edits; marks unsaved state without forcing full UI rebuilds.
+signal project_dirty
 
 var events_root: CodaBrowserNode
 var assets_root: CodaBrowserNode
@@ -418,13 +420,15 @@ func move_assets_drop(moving_id: String, target_id: String, section: int) -> boo
 	return true
 
 
-## Bus mutation API. All emit structure_changed so save flow marks dirty and the mixer panel rebuilds.
+## Bus mutation API.
+## Tree/layout changes emit `structure_changed`; parameter-only edits emit `project_dirty` to avoid
+## synchronous mixer strip rebuilds during control signal handlers (LineEdit, etc.).
 func update_bus_volume(bus_id: String, volume_db: float) -> void:
 	var b: CodaBus = bus_root.find_by_id(bus_id)
 	if b == null:
 		return
 	b.volume_db = volume_db
-	structure_changed.emit()
+	project_dirty.emit()
 
 
 func update_bus_mute(bus_id: String, mute: bool) -> void:
@@ -432,7 +436,7 @@ func update_bus_mute(bus_id: String, mute: bool) -> void:
 	if b == null:
 		return
 	b.mute = mute
-	structure_changed.emit()
+	project_dirty.emit()
 
 
 func update_bus_solo(bus_id: String, solo: bool) -> void:
@@ -441,6 +445,128 @@ func update_bus_solo(bus_id: String, solo: bool) -> void:
 		return
 	b.solo = solo
 	structure_changed.emit()
+
+
+func update_bus_bypass(bus_id: String, bypass: bool) -> void:
+	var b: CodaBus = bus_root.find_by_id(bus_id)
+	if b == null:
+		return
+	b.bypass = bypass
+	project_dirty.emit()
+
+
+func update_bus_send_target(bus_id: String, target_bus_id: String) -> void:
+	var b: CodaBus = bus_root.find_by_id(bus_id)
+	if b == null or b.id == bus_root.id:
+		return
+	var tid: String = String(target_bus_id).strip_edges()
+	if not tid.is_empty():
+		var t: CodaBus = bus_root.find_by_id(tid)
+		if t == null:
+			return
+		if not _bus_is_strict_ancestor(tid, bus_id):
+			return
+	b.send_target_id = tid
+	structure_changed.emit()
+
+
+## Reparent/move `drag_bus_id` so it appears before `before_bus_id` in depth-first order (same parent chain rules as the mixer strips).
+func move_bus_before_in_tree(drag_bus_id: String, before_bus_id: String) -> bool:
+	if bus_root == null or drag_bus_id == bus_root.id:
+		return false
+	if before_bus_id == bus_root.id:
+		return false
+	var drag_b: CodaBus = bus_root.find_by_id(drag_bus_id)
+	var before_b: CodaBus = bus_root.find_by_id(before_bus_id)
+	if drag_b == null or before_b == null:
+		return false
+	if _bus_subtree_contains(drag_b, before_bus_id):
+		return false
+	var p_drag: CodaBus = parent_bus_of(drag_bus_id)
+	if p_drag == null:
+		return false
+	var i_drag: int = p_drag.children.find(drag_b)
+	if i_drag < 0:
+		return false
+	var p_before: CodaBus = parent_bus_of(before_bus_id)
+	if p_before == null:
+		return false
+	var i_before: int = p_before.children.find(before_b)
+	if i_before < 0:
+		return false
+	p_drag.children.remove_at(i_drag)
+	if p_drag == p_before and i_drag < i_before:
+		i_before -= 1
+	p_before.children.insert(i_before, drag_b)
+	structure_changed.emit()
+	return true
+
+
+## Place `drag_bus_id` immediately after `after_bus_id` among siblings.
+func move_bus_after_in_tree(drag_bus_id: String, after_bus_id: String) -> bool:
+	if bus_root == null or drag_bus_id == bus_root.id:
+		return false
+	var drag_b: CodaBus = bus_root.find_by_id(drag_bus_id)
+	var after_b: CodaBus = bus_root.find_by_id(after_bus_id)
+	if drag_b == null or after_b == null:
+		return false
+	if _bus_subtree_contains(drag_b, after_bus_id):
+		return false
+	var p_drag: CodaBus = parent_bus_of(drag_bus_id)
+	if p_drag == null:
+		return false
+	var i_drag: int = p_drag.children.find(drag_b)
+	if i_drag < 0:
+		return false
+	var p_after: CodaBus = parent_bus_of(after_bus_id)
+	if p_after == null:
+		return false
+	var i_after: int = p_after.children.find(after_b)
+	if i_after < 0:
+		return false
+	p_drag.children.remove_at(i_drag)
+	if p_drag == p_after and i_drag <= i_after:
+		i_after -= 1
+	p_after.children.insert(i_after + 1, drag_b)
+	structure_changed.emit()
+	return true
+
+
+func parent_bus_of(child_bus_id: String) -> CodaBus:
+	return _parent_bus_find(bus_root, child_bus_id)
+
+
+func _parent_bus_find(root: CodaBus, child_id: String) -> CodaBus:
+	if root.id == child_id:
+		return null
+	for c in root.children:
+		if c.id == child_id:
+			return root
+		var p: CodaBus = _parent_bus_find(c, child_id)
+		if p != null:
+			return p
+	return null
+
+
+func _bus_subtree_contains(root: CodaBus, target_id: String) -> bool:
+	if root.id == target_id:
+		return true
+	for c in root.children:
+		if _bus_subtree_contains(c, target_id):
+			return true
+	return false
+
+
+func _bus_is_strict_ancestor(ancestor_id: String, descendant_id: String) -> bool:
+	var cur_id: String = descendant_id
+	while true:
+		var p: CodaBus = parent_bus_of(cur_id)
+		if p == null:
+			return false
+		if p.id == ancestor_id:
+			return true
+		cur_id = p.id
+	return false
 
 
 func add_child_bus(parent_id: String, bus_name: String = "Bus") -> CodaBus:
@@ -478,7 +604,13 @@ func add_snapshot(p_name: String = "Snapshot") -> CodaSnapshot:
 	var s: CodaSnapshot = CodaSnapshot.new(p_name)
 	# Pre-fill with current bus values so apply() roundtrips back to current state by default.
 	for b in bus_root.collect_flat():
-		s.bus_overrides[b.id] = {"volume_db": b.volume_db, "mute": b.mute}
+		s.bus_overrides[b.id] = {
+			"volume_db": b.volume_db,
+			"mute": b.mute,
+			"solo": b.solo,
+			"bypass": b.bypass,
+			"send_target_id": b.send_target_id,
+		}
 	snapshots.append(s)
 	structure_changed.emit()
 	return s
@@ -533,6 +665,9 @@ func apply_snapshot(snapshot_id: String) -> bool:
 		var entry: Dictionary = s.bus_overrides[bus_id]
 		b.volume_db = float(entry.get("volume_db", b.volume_db))
 		b.mute = bool(entry.get("mute", b.mute))
+		b.solo = bool(entry.get("solo", b.solo))
+		b.bypass = bool(entry.get("bypass", b.bypass))
+		b.send_target_id = str(entry.get("send_target_id", b.send_target_id))
 	structure_changed.emit()
 	return true
 
