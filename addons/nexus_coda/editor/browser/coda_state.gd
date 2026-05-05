@@ -582,10 +582,22 @@ func add_child_bus(parent_id: String, bus_name: String = "Bus") -> CodaBus:
 func remove_bus(bus_id: String) -> bool:
 	if bus_root != null and bus_id == bus_root.id:
 		return false  ## Master bus cannot be removed.
-	if bus_root.remove_child_by_id(bus_id):
-		structure_changed.emit()
-		return true
-	return false
+	if not bus_root.remove_child_by_id(bus_id):
+		return false
+	_sanitize_send_targets_after_bus_removed(bus_id)
+	structure_changed.emit()
+	return true
+
+
+## Clears `send_target_id` on buses that still referenced a removed bus.
+## Stale ids make the audio mirror fall back to tree-parent routing by bus display name; duplicate names then route to the wrong Godot bus.
+func _sanitize_send_targets_after_bus_removed(removed_bus_id: String) -> void:
+	var rid: String = String(removed_bus_id).strip_edges()
+	if rid.is_empty() or bus_root == null:
+		return
+	for b in bus_root.collect_flat([]):
+		if String(b.send_target_id).strip_edges() == rid:
+			b.send_target_id = ""
 
 
 func rename_bus(bus_id: String, new_name: String) -> bool:
