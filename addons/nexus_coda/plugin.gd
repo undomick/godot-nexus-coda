@@ -5,21 +5,30 @@ const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd"
 const EDITOR_WINDOW_SCENE := preload("res://addons/nexus_coda/editor/nexus_coda_editor_window.tscn")
 const EDITOR_WINDOW_SCRIPT := preload("res://addons/nexus_coda/editor/nexus_coda_editor_window.gd")
 const NCODA_IMPORT_PLUGIN := preload("res://addons/nexus_coda/editor/import/nexus_coda_ncoda_import_plugin.gd")
+const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
 
 const TOOLS_SUBMENU_NAME := "Nexus Coda"
 ## Menu item id (same as index for the single entry — matches Nexus Resonance tool menu pattern).
 const MENU_OPEN_EDITOR := 0
 
+## Autoload registered for gameplay code: `Coda.play("events/foo")` etc.
+const AUTOLOAD_NAME := "Coda"
+const AUTOLOAD_PATH := "res://addons/nexus_coda/runtime/coda_runtime.gd"
+
 var _tools_menu: PopupMenu
 var _ncoda_import_plugin: EditorImportPlugin
 ## All open Nexus Coda editor windows (multiple instances supported).
 var _editor_windows: Array[Window] = []
+## Editor-side runtime used for preview from inside the Nexus Coda window.
+var _editor_runtime: CodaRuntime
 
 
 func _enter_tree() -> void:
 	NexusCodaLog.print_ready_banner()
+	add_autoload_singleton(AUTOLOAD_NAME, AUTOLOAD_PATH)
 	_ncoda_import_plugin = NCODA_IMPORT_PLUGIN.new() as EditorImportPlugin
 	add_import_plugin(_ncoda_import_plugin)
+	_install_editor_runtime()
 	_tools_menu = PopupMenu.new()
 	_tools_menu.name = "NexusCodaToolsMenu"
 	_tools_menu.add_item("Open Editor", MENU_OPEN_EDITOR)
@@ -39,10 +48,31 @@ func _exit_tree() -> void:
 		if is_instance_valid(w):
 			w.queue_free()
 	_editor_windows.clear()
+	_uninstall_editor_runtime()
 	remove_tool_menu_item(TOOLS_SUBMENU_NAME)
 	if _tools_menu != null and is_instance_valid(_tools_menu):
 		_tools_menu.queue_free()
 		_tools_menu = null
+	remove_autoload_singleton(AUTOLOAD_NAME)
+
+
+func get_editor_runtime() -> CodaRuntime:
+	return _editor_runtime
+
+
+func _install_editor_runtime() -> void:
+	_editor_runtime = CodaRuntimeScript.new() as CodaRuntime
+	_editor_runtime.name = "NexusCodaEditorRuntime"
+	# Parent it under the editor base control so it lives as long as the plugin and gets a SceneTree.
+	var base: Control = get_editor_interface().get_base_control()
+	base.add_child(_editor_runtime)
+
+
+func _uninstall_editor_runtime() -> void:
+	if _editor_runtime != null and is_instance_valid(_editor_runtime):
+		_editor_runtime.stop_all()
+		_editor_runtime.queue_free()
+	_editor_runtime = null
 
 
 ## Mirrors Nexus Resonance `_register_tool_shortcuts`: global shortcut on the Project → Tools entry.

@@ -4,6 +4,42 @@ extends Window
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
 const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.gd")
+const CodaBankExportScript := preload("res://addons/nexus_coda/editor/io/coda_bank_export.gd")
+const CodaDesignTokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
+const CodaSampleProjectScript := preload(
+	"res://addons/nexus_coda/editor/samples/coda_sample_project.gd"
+)
+const CodaCommandPaletteScript := preload(
+	"res://addons/nexus_coda/editor/panels/palette/coda_command_palette.gd"
+)
+const CodaShortcutSheetScript := preload(
+	"res://addons/nexus_coda/editor/panels/help/coda_shortcut_sheet.gd"
+)
+const CodaStatusBarScript := preload(
+	"res://addons/nexus_coda/editor/panels/statusbar/coda_status_bar.gd"
+)
+const CodaDockHostScript := preload("res://addons/nexus_coda/editor/layout/coda_dock_host.gd")
+const CodaDockManagerScript := preload("res://addons/nexus_coda/editor/layout/coda_dock_manager.gd")
+const CodaDockPanelInfoScript := preload("res://addons/nexus_coda/editor/layout/coda_dock_panel_base.gd")
+const BrowserPanelScene := preload("res://addons/nexus_coda/editor/coda_browser_panel.tscn")
+const InspectorPanelScript := preload(
+	"res://addons/nexus_coda/editor/panels/inspector/coda_inspector_panel.gd"
+)
+const GraphPanelScript := preload(
+	"res://addons/nexus_coda/editor/panels/graph/coda_event_graph_panel.gd"
+)
+const MixerPanelScript := preload(
+	"res://addons/nexus_coda/editor/panels/mixer/coda_mixer_panel.gd"
+)
+const LogPanelScript := preload(
+	"res://addons/nexus_coda/editor/panels/log/coda_log_panel.gd"
+)
+
+const PANEL_BROWSER := &"browser"
+const PANEL_GRAPH := &"graph"
+const PANEL_INSPECTOR := &"inspector"
+const PANEL_MIXER := &"mixer"
+const PANEL_LOG := &"log"
 
 const MID_NEW := 1
 const MID_OPEN := 2
@@ -11,15 +47,47 @@ const MID_CLOSE := 3
 const MID_SAVE := 4
 const MID_SAVE_AS := 5
 
+const VID_RESET_LAYOUT := 100
+const VID_TOGGLE_BROWSER := 110
+const VID_TOGGLE_GRAPH := 111
+const VID_TOGGLE_INSPECTOR := 112
+const VID_TOGGLE_MIXER := 113
+const VID_TOGGLE_LOG := 114
+
+const BID_NEW_BANK := 200
+const BID_VALIDATE_BANKS := 201
+const BID_EXPORT_BANK_BASE := 300  ## offset by bank index
+
+const HID_OPEN_SAMPLE := 400
+const HID_SHORTCUTS := 401
+const HID_TOGGLE_THEME_MODE := 402
+const HID_PICK_ACCENT := 403
+const HID_COMMAND_PALETTE := 404
+
 const RECENT_ID_BASE := 1000
 
 @onready var _menu_bar: MenuBar = $RootVBox/MenuBar
-@onready var _browser_panel: Control = $RootVBox/RootMargin/CodaEditorLayout/BrowserPanel
+@onready var _dock_host: CodaDockHost = $RootVBox/RootMargin/DockHost
 
 var _plugin: EditorPlugin
 
 var _file_menu: PopupMenu
+var _view_menu: PopupMenu
+var _build_menu: PopupMenu
+var _help_menu: PopupMenu
 var _recent_menu: PopupMenu
+
+var _command_palette: CodaCommandPalette
+var _shortcut_sheet: CodaShortcutSheet
+var _status_bar: CodaStatusBar
+var _color_picker_dialog: AcceptDialog
+var _project_theme: Theme
+
+var _browser_panel: Control
+var _graph_panel: CodaEventGraphPanel
+var _inspector_panel: CodaInspectorPanel
+var _mixer_panel: CodaMixerPanel
+var _log_panel: CodaLogPanel
 
 var _current_path: String = ""
 var _dirty: bool = false
@@ -46,13 +114,144 @@ func setup_editor_plugin(plugin: EditorPlugin) -> void:
 func _ready() -> void:
 	close_requested.connect(_on_close_requested)
 	_build_menus()
+	_install_status_bar()
+	_install_overlays()
+	if _dock_host.is_node_ready():
+		call_deferred(&"_register_panels")
+	else:
+		_dock_host.panels_ready.connect(_register_panels, CONNECT_ONE_SHOT)
+
+
+func _install_status_bar() -> void:
+	if _status_bar != null:
+		return
+	_status_bar = CodaStatusBarScript.new()
+	_status_bar.name = "StatusBar"
+	# Sit beneath the dock host so it stays visible regardless of docked panels.
+	var root: Node = $RootVBox
+	if root != null:
+		root.add_child(_status_bar)
+
+
+func _install_overlays() -> void:
+	_command_palette = CodaCommandPaletteScript.new()
+	_command_palette.name = "CommandPalette"
+	_command_palette.visible = false
+	add_child(_command_palette)
+
+	_shortcut_sheet = CodaShortcutSheetScript.new()
+	_shortcut_sheet.name = "ShortcutSheet"
+	_shortcut_sheet.visible = false
+	add_child(_shortcut_sheet)
+
+
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey):
+		return
+	var k: InputEventKey = event
+	if not k.pressed or k.echo:
+		return
+	# Ctrl+P opens the command palette; F1 opens the shortcut sheet.
+	if k.keycode == KEY_P and k.ctrl_pressed and not k.alt_pressed and not k.shift_pressed:
+		_open_command_palette()
+		get_viewport().set_input_as_handled()
+		return
+	if k.keycode == KEY_F1:
+		_open_shortcut_sheet()
+		get_viewport().set_input_as_handled()
+
+
+func _register_panels() -> void:
+	var dm: CodaDockManager = _dock_host.dock_manager
+	if dm == null:
+		NexusCodaLog.warn("editor_window", "dock manager missing; cannot register panels")
+		return
+
+	_browser_panel = BrowserPanelScene.instantiate() as Control
+	_graph_panel = GraphPanelScript.new()
+	_inspector_panel = InspectorPanelScript.new()
+	_mixer_panel = MixerPanelScript.new()
+	_log_panel = LogPanelScript.new()
+
+	dm.register_panel(CodaDockPanelInfoScript.make(
+		PANEL_BROWSER, "Browser", CodaDockHostScript.ZONE_LEFT, _browser_panel
+	))
+	dm.register_panel(CodaDockPanelInfoScript.make(
+		PANEL_GRAPH, "Graph", CodaDockHostScript.ZONE_CENTER, _graph_panel
+	))
+	dm.register_panel(CodaDockPanelInfoScript.make(
+		PANEL_INSPECTOR, "Inspector", CodaDockHostScript.ZONE_RIGHT, _inspector_panel
+	))
+	dm.register_panel(CodaDockPanelInfoScript.make(
+		PANEL_MIXER, "Mixer", CodaDockHostScript.ZONE_BOTTOM, _mixer_panel
+	))
+	dm.register_panel(CodaDockPanelInfoScript.make(
+		PANEL_LOG, "Log", CodaDockHostScript.ZONE_BOTTOM, _log_panel, null, false
+	))
+
+	dm.panel_visibility_changed.connect(_on_panel_visibility_changed)
+
+	_wire_browser_to_others()
+	_wire_runtime_to_panels()
 	call_deferred(&"_initial_bind")
+
+
+func _wire_browser_to_others() -> void:
+	if _browser_panel == null:
+		return
+	if _browser_panel.has_signal(&"event_selection_changed"):
+		var inspector_slot := Callable(_inspector_panel, &"on_browser_event_selected")
+		var graph_slot := Callable(_graph_panel, &"on_browser_event_selected")
+		if not _browser_panel.event_selection_changed.is_connected(inspector_slot):
+			_browser_panel.event_selection_changed.connect(inspector_slot)
+		if not _browser_panel.event_selection_changed.is_connected(graph_slot):
+			_browser_panel.event_selection_changed.connect(graph_slot)
+	if _inspector_panel != null:
+		_inspector_panel.attach_browser_panel(_browser_panel)
+	if _graph_panel != null and _browser_panel.has_method(&"get_project"):
+		_graph_panel.attach_project(_browser_panel.get_project())
+
+
+func _wire_runtime_to_panels() -> void:
+	if _plugin == null or not _plugin.has_method(&"get_editor_runtime"):
+		return
+	var rt: CodaRuntime = _plugin.get_editor_runtime() as CodaRuntime
+	if rt == null:
+		return
+	if _inspector_panel != null:
+		_inspector_panel.attach_runtime(rt)
+	if _graph_panel != null:
+		_graph_panel.attach_runtime(rt)
+	if _mixer_panel != null:
+		_mixer_panel.attach_runtime(rt)
 
 
 func _initial_bind() -> void:
 	if _browser_panel != null and _browser_panel.has_method(&"get_project"):
-		_bind_project_signals(_browser_panel.get_project())
+		var st: Variant = _browser_panel.get_project()
+		_bind_project_signals(st)
+		_push_project_to_runtime(st)
+		if _graph_panel != null and st is CodaState:
+			_graph_panel.attach_project(st as CodaState)
+		if _inspector_panel != null and st is CodaState:
+			_inspector_panel.attach_project(st as CodaState)
+		if _mixer_panel != null and st is CodaState:
+			_mixer_panel.attach_project(st as CodaState)
+	if _browser_panel != null and _browser_panel.has_method(&"pulse_events_selection_to_editor"):
+		_browser_panel.pulse_events_selection_to_editor()
 	_update_title()
+	_refresh_view_menu_check_marks()
+	var st0: CodaState = _current_state() as CodaState
+	if st0 != null:
+		_apply_theme_appearance(st0.theme_mode, st0.accent_color)
+
+
+func _push_project_to_runtime(state: Variant) -> void:
+	if _plugin == null or not _plugin.has_method(&"get_editor_runtime"):
+		return
+	var rt: CodaRuntime = _plugin.get_editor_runtime() as CodaRuntime
+	if rt != null:
+		rt.set_project(state)
 
 
 func _build_menus() -> void:
@@ -60,14 +259,35 @@ func _build_menus() -> void:
 	_file_menu.name = "File"
 	_menu_bar.add_child(_file_menu)
 
+	_view_menu = PopupMenu.new()
+	_view_menu.name = "View"
+	_menu_bar.add_child(_view_menu)
+
+	_build_menu = PopupMenu.new()
+	_build_menu.name = "Build"
+	_menu_bar.add_child(_build_menu)
+
+	_help_menu = PopupMenu.new()
+	_help_menu.name = "Help"
+	_menu_bar.add_child(_help_menu)
+
 	_recent_menu = PopupMenu.new()
 	_recent_menu.name = "NexusCodaRecentSub"
 	_file_menu.add_child(_recent_menu)
 
 	_rebuild_file_menu_items()
+	_rebuild_view_menu_items()
+	_rebuild_help_menu_items()
 	_file_menu.id_pressed.connect(_on_file_id_pressed)
+	_view_menu.id_pressed.connect(_on_view_id_pressed)
+	_view_menu.about_to_popup.connect(_refresh_view_menu_check_marks)
+	_build_menu.id_pressed.connect(_on_build_id_pressed)
+	_build_menu.about_to_popup.connect(_rebuild_build_menu_items)
+	_help_menu.id_pressed.connect(_on_help_id_pressed)
+	_help_menu.about_to_popup.connect(_rebuild_help_menu_items)
 	_recent_menu.id_pressed.connect(_on_recent_id_pressed)
 	_recent_menu.about_to_popup.connect(_fill_recent_menu)
+	_rebuild_build_menu_items()
 
 
 func _rebuild_file_menu_items() -> void:
@@ -81,6 +301,367 @@ func _rebuild_file_menu_items() -> void:
 	_file_menu.add_separator()
 	_file_menu.add_item("Save", MID_SAVE)
 	_file_menu.add_item("Save As...", MID_SAVE_AS)
+
+
+func _rebuild_view_menu_items() -> void:
+	_view_menu.clear()
+	_view_menu.add_check_item("Show Browser", VID_TOGGLE_BROWSER)
+	_view_menu.add_check_item("Show Graph", VID_TOGGLE_GRAPH)
+	_view_menu.add_check_item("Show Inspector", VID_TOGGLE_INSPECTOR)
+	_view_menu.add_check_item("Show Mixer", VID_TOGGLE_MIXER)
+	_view_menu.add_check_item("Show Log", VID_TOGGLE_LOG)
+	_view_menu.add_separator()
+	_view_menu.add_item("Reset Layout", VID_RESET_LAYOUT)
+
+
+func _refresh_view_menu_check_marks() -> void:
+	if _view_menu == null or _dock_host == null or _dock_host.dock_manager == null:
+		return
+	var dm: CodaDockManager = _dock_host.dock_manager
+	_set_check(VID_TOGGLE_BROWSER, dm.is_panel_visible(PANEL_BROWSER))
+	_set_check(VID_TOGGLE_GRAPH, dm.is_panel_visible(PANEL_GRAPH))
+	_set_check(VID_TOGGLE_INSPECTOR, dm.is_panel_visible(PANEL_INSPECTOR))
+	_set_check(VID_TOGGLE_MIXER, dm.is_panel_visible(PANEL_MIXER))
+	_set_check(VID_TOGGLE_LOG, dm.is_panel_visible(PANEL_LOG))
+
+
+func _set_check(item_id: int, checked: bool) -> void:
+	var idx: int = _view_menu.get_item_index(item_id)
+	if idx >= 0:
+		_view_menu.set_item_checked(idx, checked)
+
+
+func _rebuild_build_menu_items() -> void:
+	if _build_menu == null:
+		return
+	_build_menu.clear()
+	_build_menu.add_item("New Bank…", BID_NEW_BANK)
+	_build_menu.add_item("Validate All Banks", BID_VALIDATE_BANKS)
+	_build_menu.add_separator()
+	var st: Variant = _current_state()
+	if st == null or (st as CodaState).banks.is_empty():
+		_build_menu.add_item("(no banks defined)", -1)
+		_build_menu.set_item_disabled(_build_menu.item_count - 1, true)
+		return
+	var state: CodaState = st as CodaState
+	for i in state.banks.size():
+		_build_menu.add_item("Export “%s”…" % state.banks[i].bank_name, BID_EXPORT_BANK_BASE + i)
+
+
+func _current_state() -> Variant:
+	if _browser_panel != null and _browser_panel.has_method(&"get_project"):
+		return _browser_panel.get_project()
+	return null
+
+
+func _on_build_id_pressed(id: int) -> void:
+	match id:
+		BID_NEW_BANK:
+			_action_new_bank()
+		BID_VALIDATE_BANKS:
+			_action_validate_banks()
+		_:
+			if id >= BID_EXPORT_BANK_BASE:
+				await _action_export_bank_async(id - BID_EXPORT_BANK_BASE)
+
+
+func _action_new_bank() -> void:
+	var st: Variant = _current_state()
+	if st == null:
+		return
+	var state: CodaState = st as CodaState
+	var b: CodaBank = state.add_bank("Bank %d" % (state.banks.size() + 1))
+	NexusCodaLog.info("bank", 'Created bank "%s"' % b.bank_name)
+
+
+func _action_validate_banks() -> void:
+	var st: Variant = _current_state()
+	if st == null:
+		return
+	var state: CodaState = st as CodaState
+	if state.banks.is_empty():
+		_editor_notify("No banks defined.", false)
+		return
+	var problems_total: int = 0
+	for b in state.banks:
+		var problems: PackedStringArray = CodaBankExportScript.validate_bank(state, b)
+		if problems.is_empty():
+			NexusCodaLog.info("bank", '"%s" passes validation.' % b.bank_name)
+			continue
+		problems_total += problems.size()
+		for p in problems:
+			NexusCodaLog.warn("bank", '"%s": %s' % [b.bank_name, p])
+	_editor_notify(
+		"Validation finished: %d issue(s) — see Log panel." % problems_total,
+		problems_total > 0
+	)
+
+
+func _action_export_bank_async(bank_index: int) -> void:
+	var st: Variant = _current_state()
+	if st == null:
+		return
+	var state: CodaState = st as CodaState
+	if bank_index < 0 or bank_index >= state.banks.size():
+		return
+	var bank: CodaBank = state.banks[bank_index]
+	var problems: PackedStringArray = CodaBankExportScript.validate_bank(state, bank)
+	if not problems.is_empty():
+		for p in problems:
+			NexusCodaLog.warn("bank_export", '"%s": %s' % [bank.bank_name, p])
+		_editor_notify(
+			'Bank "%s" has %d validation issue(s) — fix in Log panel before exporting.'
+			% [bank.bank_name, problems.size()],
+			true
+		)
+		return
+	var p: String = await _pick_bank_save_path(bank.bank_name)
+	if p.is_empty():
+		return
+	if p.get_extension().to_lower() != CodaBankExportScript.FORMAT_EXTENSION:
+		p = "%s.%s" % [p, CodaBankExportScript.FORMAT_EXTENSION]
+	var err: String = CodaBankExportScript.write_to_path(state, bank, p)
+	if not err.is_empty():
+		_editor_notify(err, true)
+		return
+	_editor_notify('Exported bank "%s" to %s' % [bank.bank_name, p], false)
+
+
+func _pick_bank_save_path(suggest_name: String) -> String:
+	if _plugin == null:
+		return ""
+	var base: Control = _plugin.get_editor_interface().get_base_control()
+	var dlg := EditorFileDialog.new()
+	dlg.use_native_dialog = false
+	dlg.access = EditorFileDialog.ACCESS_RESOURCES
+	dlg.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
+	dlg.title = "Export Nexus Coda Bank"
+	dlg.clear_filters()
+	dlg.add_filter(CodaBankExportScript.FORMAT_FILTER)
+	dlg.current_dir = "res://"
+	dlg.current_file = "%s.%s" % [
+		suggest_name.strip_edges().replace(" ", "_").to_lower(),
+		CodaBankExportScript.FORMAT_EXTENSION,
+	]
+	base.add_child(dlg)
+	var path: String = await _await_editor_file_path(dlg)
+	dlg.queue_free()
+	return path
+
+
+func _rebuild_help_menu_items() -> void:
+	if _help_menu == null:
+		return
+	_help_menu.clear()
+	_help_menu.add_item("Command Palette…", HID_COMMAND_PALETTE)
+	_help_menu.add_item("Keyboard Shortcuts…", HID_SHORTCUTS)
+	_help_menu.add_separator()
+	_help_menu.add_item("Open Sample Project", HID_OPEN_SAMPLE)
+	_help_menu.add_separator()
+	var st: CodaState = _current_state() as CodaState
+	var mode_label: String = "Switch to Light Theme"
+	if st != null and st.theme_mode == "light":
+		mode_label = "Switch to Dark Theme"
+	_help_menu.add_item(mode_label, HID_TOGGLE_THEME_MODE)
+	_help_menu.add_item("Pick Accent Color…", HID_PICK_ACCENT)
+
+
+func _on_help_id_pressed(id: int) -> void:
+	match id:
+		HID_COMMAND_PALETTE:
+			_open_command_palette()
+		HID_SHORTCUTS:
+			_open_shortcut_sheet()
+		HID_OPEN_SAMPLE:
+			await _action_open_sample_async()
+		HID_TOGGLE_THEME_MODE:
+			_action_toggle_theme_mode()
+		HID_PICK_ACCENT:
+			_action_pick_accent_color()
+		_:
+			pass
+
+
+func _action_open_sample_async() -> void:
+	var ok: bool = await _confirm_unsaved_async()
+	if not ok:
+		return
+	var sample: CodaState = CodaSampleProjectScript.build()
+	_apply_loaded_state(sample)
+	_current_path = ""
+	_dirty = true
+	_update_title()
+	_apply_theme_appearance(sample.theme_mode, sample.accent_color)
+	NexusCodaLog.info(
+		"sample",
+		"Opened onboarding sample. Drag your own audio onto the SOUND nodes to hear it."
+	)
+
+
+func _action_toggle_theme_mode() -> void:
+	var st: CodaState = _current_state() as CodaState
+	if st == null:
+		return
+	var next_mode: String = "light" if st.theme_mode == "dark" else "dark"
+	st.set_theme_appearance(next_mode, st.accent_color)
+	_apply_theme_appearance(st.theme_mode, st.accent_color)
+
+
+func _action_pick_accent_color() -> void:
+	var st: CodaState = _current_state() as CodaState
+	if st == null:
+		return
+	if _color_picker_dialog != null and is_instance_valid(_color_picker_dialog):
+		_color_picker_dialog.queue_free()
+	_color_picker_dialog = AcceptDialog.new()
+	_color_picker_dialog.title = "Pick Accent Color"
+	add_child(_color_picker_dialog)
+	var picker := ColorPicker.new()
+	picker.color = st.accent_color
+	picker.edit_alpha = false
+	_color_picker_dialog.add_child(picker)
+	picker.color_changed.connect(
+		func(c: Color) -> void:
+			st.set_theme_appearance(st.theme_mode, c)
+			_apply_theme_appearance(st.theme_mode, c)
+	)
+	_color_picker_dialog.popup_centered_ratio(0.4)
+
+
+func _apply_theme_appearance(theme_mode: String, accent: Color) -> void:
+	_project_theme = CodaDesignTokens.make_project_theme(theme_mode, accent)
+	# Window inherits Theme via the root control.
+	var root: Control = $RootVBox
+	if root != null:
+		root.theme = _project_theme
+
+
+func _open_command_palette() -> void:
+	if _command_palette == null:
+		return
+	_command_palette.set_entries(_collect_palette_entries())
+	_command_palette.open()
+
+
+func _open_shortcut_sheet() -> void:
+	if _shortcut_sheet == null:
+		return
+	_shortcut_sheet.open()
+
+
+func _collect_palette_entries() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var dm: CodaDockManager = _dock_host.dock_manager if _dock_host != null else null
+
+	# File actions.
+	out.append({"title": "New Project", "subtitle": "Ctrl+N", "category": "File",
+		"callable": Callable(self, "_action_new_async")})
+	out.append({"title": "Open Project…", "subtitle": "Ctrl+O", "category": "File",
+		"callable": Callable(self, "_action_open_async")})
+	out.append({"title": "Save", "subtitle": "Ctrl+S", "category": "File",
+		"callable": Callable(self, "_action_save_async")})
+	out.append({"title": "Save As…", "subtitle": "Ctrl+Shift+S", "category": "File",
+		"callable": Callable(self, "_action_save_as_async")})
+	out.append({"title": "Close Window", "subtitle": "", "category": "File",
+		"callable": Callable(self, "_action_close_window_async")})
+
+	# View toggles.
+	if dm != null:
+		var panels: Array = [
+			[PANEL_BROWSER, "Toggle Browser Panel"],
+			[PANEL_GRAPH, "Toggle Graph Panel"],
+			[PANEL_INSPECTOR, "Toggle Inspector Panel"],
+			[PANEL_MIXER, "Toggle Mixer Panel"],
+			[PANEL_LOG, "Toggle Log Panel"],
+		]
+		for entry_v in panels:
+			var arr: Array = entry_v as Array
+			var pid: StringName = arr[0]
+			var title: String = arr[1]
+			out.append({"title": title, "subtitle": "", "category": "View",
+				"callable": Callable(dm, "toggle_panel").bind(pid)})
+		out.append({"title": "Reset Layout", "subtitle": "", "category": "View",
+			"callable": Callable(dm, "reset_to_default_layout")})
+
+	# Build/banks.
+	out.append({"title": "Create New Bank", "subtitle": "", "category": "Build",
+		"callable": Callable(self, "_action_new_bank")})
+	out.append({"title": "Validate All Banks", "subtitle": "", "category": "Build",
+		"callable": Callable(self, "_action_validate_banks")})
+
+	# Help / theme.
+	out.append({"title": "Open Sample Project", "subtitle": "", "category": "Help",
+		"callable": Callable(self, "_action_open_sample_async")})
+	out.append({"title": "Keyboard Shortcuts", "subtitle": "F1", "category": "Help",
+		"callable": Callable(self, "_open_shortcut_sheet")})
+	out.append({"title": "Toggle Theme Mode", "subtitle": "Light/Dark", "category": "Theme",
+		"callable": Callable(self, "_action_toggle_theme_mode")})
+	out.append({"title": "Pick Accent Color…", "subtitle": "", "category": "Theme",
+		"callable": Callable(self, "_action_pick_accent_color")})
+
+	# Event navigation: jump to event in browser/graph.
+	var st: CodaState = _current_state() as CodaState
+	if st != null and _browser_panel != null:
+		var paths: Array[Dictionary] = []
+		_collect_event_paths(st.events_root, "", paths)
+		for p in paths:
+			var event_id: String = str(p.get("id", ""))
+			var path: String = str(p.get("path", ""))
+			if event_id.is_empty():
+				continue
+			out.append({
+				"title": path,
+				"subtitle": "Open in browser",
+				"category": "Event",
+				"callable": Callable(self, "_select_event_by_id").bind(event_id),
+			})
+	return out
+
+
+func _collect_event_paths(folder: CodaBrowserNode, prefix: String, out: Array[Dictionary]) -> void:
+	for child in folder.children:
+		var path: String = "%s/%s" % [prefix, child.name] if not prefix.is_empty() else child.name
+		if child.kind == CodaBrowserNode.Kind.EVENT:
+			out.append({"id": child.id, "path": path})
+		elif child.is_folder():
+			_collect_event_paths(child, path, out)
+
+
+func _select_event_by_id(event_id: String) -> void:
+	if _browser_panel == null:
+		return
+	if _browser_panel.has_method(&"select_event_by_id"):
+		_browser_panel.select_event_by_id(event_id)
+	elif _browser_panel.has_method(&"focus_event"):
+		_browser_panel.focus_event(event_id)
+	else:
+		NexusCodaLog.info("palette", "Event id=%s — open the Browser to select it." % event_id)
+
+
+func _on_view_id_pressed(id: int) -> void:
+	if _dock_host == null or _dock_host.dock_manager == null:
+		return
+	var dm: CodaDockManager = _dock_host.dock_manager
+	match id:
+		VID_TOGGLE_BROWSER:
+			dm.toggle_panel(PANEL_BROWSER)
+		VID_TOGGLE_GRAPH:
+			dm.toggle_panel(PANEL_GRAPH)
+		VID_TOGGLE_INSPECTOR:
+			dm.toggle_panel(PANEL_INSPECTOR)
+		VID_TOGGLE_MIXER:
+			dm.toggle_panel(PANEL_MIXER)
+		VID_TOGGLE_LOG:
+			dm.toggle_panel(PANEL_LOG)
+		VID_RESET_LAYOUT:
+			dm.reset_to_default_layout()
+		_:
+			pass
+	_refresh_view_menu_check_marks()
+
+
+func _on_panel_visibility_changed(_panel_id: StringName, _is_visible: bool) -> void:
+	_refresh_view_menu_check_marks()
 
 
 func _fill_recent_menu() -> void:
@@ -176,28 +757,41 @@ func _update_title() -> void:
 	if not _current_path.is_empty():
 		doc_name = _current_path.get_file()
 	title = "Nexus Coda — %s%s" % [doc_name, " *" if _dirty else ""]
+	if _status_bar != null:
+		_status_bar.set_project_state(_current_path, _dirty)
 
 
 func _load_empty_project() -> void:
 	_suppress_dirty = true
 	var st: CodaState = CodaStateScript.new()
 	st.clear_to_empty_project()
-	if _browser_panel.has_method(&"set_project"):
-		_browser_panel.set_project(st)
-	_bind_project_signals(st)
-	if _browser_panel.has_method(&"pulse_events_selection_to_editor"):
-		_browser_panel.pulse_events_selection_to_editor()
+	_apply_state_to_panels(st)
 	_suppress_dirty = false
 
 
 func _apply_loaded_state(st: CodaState) -> void:
 	_suppress_dirty = true
-	if _browser_panel.has_method(&"set_project"):
+	_apply_state_to_panels(st)
+	_suppress_dirty = false
+
+
+func _apply_state_to_panels(st: CodaState) -> void:
+	if _browser_panel != null and _browser_panel.has_method(&"set_project"):
 		_browser_panel.set_project(st)
 	_bind_project_signals(st)
-	if _browser_panel.has_method(&"pulse_events_selection_to_editor"):
+	_push_project_to_runtime(st)
+	if _graph_panel != null:
+		_graph_panel.attach_project(st)
+		_graph_panel.on_browser_event_selected(null)
+	if _inspector_panel != null:
+		_inspector_panel.attach_project(st)
+		_inspector_panel.on_browser_event_selected(null)
+	if _mixer_panel != null:
+		_mixer_panel.attach_project(st)
+	if _browser_panel != null and _browser_panel.has_method(&"pulse_events_selection_to_editor"):
 		_browser_panel.pulse_events_selection_to_editor()
-	_suppress_dirty = false
+	if st != null:
+		_apply_theme_appearance(st.theme_mode, st.accent_color)
 
 
 func _action_new_async() -> void:

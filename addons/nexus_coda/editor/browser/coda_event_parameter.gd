@@ -1,8 +1,9 @@
 class_name CodaEventParameter
 extends RefCounted
 
-## MVP event authoring uses GDScript-only parameter descriptors (no C++ core yet).
-## Optional later: migrate schema to GDExtension for shared runtime/editor logic.
+## Designer-defined parameter descriptor. Phase 4 promotes parameters from passive metadata
+## to active modulators: their current value drives Sound volume/pitch, Switch branch and
+## Blend mix at runtime.
 
 enum ParamType { FLOAT = 0, INT = 1, BOOL = 2, STRING = 3 }
 
@@ -10,10 +11,12 @@ var id: String
 var param_name: String = "Parameter"
 var param_type: ParamType = ParamType.FLOAT
 var default_value: Variant = 0.0
-## Optional bounds for float/int (null = unset).
+## Optional bounds for float/int (null = unset). Exposed in the Inspector and respected by clamp().
 var min_value: Variant = null
 var max_value: Variant = null
 var unit_hint: String = ""
+## Optional first-order smoothing: 0 means instant, 50 means ~50 ms time constant.
+var smoothing_ms: float = 0.0
 
 
 func _init() -> void:
@@ -33,6 +36,7 @@ func duplicate_parameter() -> CodaEventParameter:
 	p.min_value = min_value
 	p.max_value = max_value
 	p.unit_hint = unit_hint
+	p.smoothing_ms = smoothing_ms
 	return p
 
 
@@ -45,6 +49,7 @@ func clone_keep_id() -> CodaEventParameter:
 	p.min_value = min_value
 	p.max_value = max_value
 	p.unit_hint = unit_hint
+	p.smoothing_ms = smoothing_ms
 	return p
 
 
@@ -57,6 +62,7 @@ func to_dictionary() -> Dictionary:
 		"min": min_value,
 		"max": max_value,
 		"unit": unit_hint,
+		"smoothing_ms": smoothing_ms,
 	}
 
 
@@ -79,7 +85,32 @@ static func from_dictionary(data: Dictionary) -> CodaEventParameter:
 	p.min_value = data.get("min", null)
 	p.max_value = data.get("max", null)
 	p.unit_hint = str(data.get("unit", ""))
+	p.smoothing_ms = float(data.get("smoothing_ms", 0.0))
 	return p
+
+
+## Clamps `raw` to this parameter's bounds (only when bounds and type are numeric).
+func clamp_value(raw: Variant) -> Variant:
+	if param_type == ParamType.FLOAT or param_type == ParamType.INT:
+		var v: float = float(raw) if typeof(raw) in [TYPE_FLOAT, TYPE_INT] else 0.0
+		if min_value != null and typeof(min_value) in [TYPE_FLOAT, TYPE_INT]:
+			v = max(v, float(min_value))
+		if max_value != null and typeof(max_value) in [TYPE_FLOAT, TYPE_INT]:
+			v = min(v, float(max_value))
+		if param_type == ParamType.INT:
+			return int(v)
+		return v
+	return raw
+
+
+## Returns numeric value as float or 0.0 for non-numeric types.
+static func to_float_value(value: Variant) -> float:
+	match typeof(value):
+		TYPE_FLOAT, TYPE_INT:
+			return float(value)
+		TYPE_BOOL:
+			return 1.0 if bool(value) else 0.0
+	return 0.0
 
 
 static func _default_for_type(t: ParamType) -> Variant:

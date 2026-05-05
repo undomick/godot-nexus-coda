@@ -78,6 +78,19 @@ func pulse_events_selection_to_editor() -> void:
 	_emit_events_selection_to_editor()
 
 
+## Programmatic selection by event id; used by the command palette to jump to events.
+func select_event_by_id(event_id: String) -> bool:
+	if event_id.is_empty():
+		return false
+	if not is_instance_valid(_events_tree):
+		return false
+	if _tabs != null and is_instance_valid(_tabs):
+		_tabs.current_tab = 0
+	_select_tree_item_by_node_id(_events_tree, event_id)
+	_emit_events_selection_to_editor()
+	return true
+
+
 func set_project(project: Variant) -> void:
 	if project == null:
 		return

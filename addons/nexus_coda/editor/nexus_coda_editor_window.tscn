@@ -1,14 +1,14 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="PackedScene" path="res://addons/nexus_coda/editor/coda_editor_layout.tscn" id="1_layout"]
+[ext_resource type="Script" path="res://addons/nexus_coda/editor/layout/coda_dock_host.gd" id="1_dock_host"]
 
 [node name="NexusCodaEditorWindow" type="Window"]
 visible = false
 force_native = true
 initial_position = 2
 title = "Nexus Coda"
-size = Vector2i(960, 600)
-min_size = Vector2i(400, 300)
+size = Vector2i(1280, 800)
+min_size = Vector2i(640, 400)
 
 [node name="RootVBox" type="VBoxContainer" parent="."]
 layout_mode = 1
@@ -25,12 +25,13 @@ size_flags_vertical = 0
 [node name="RootMargin" type="MarginContainer" parent="RootVBox"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/margin_left = 16
-theme_override_constants/margin_top = 8
-theme_override_constants/margin_right = 16
-theme_override_constants/margin_bottom = 16
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 6
 
-[node name="CodaEditorLayout" parent="RootVBox/RootMargin" instance=ExtResource("1_layout")]
+[node name="DockHost" type="VBoxContainer" parent="RootVBox/RootMargin"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+script = ExtResource("1_dock_host")

@@ -3,17 +3,27 @@ extends RefCounted
 
 enum Kind { FOLDER, EVENT, ASSET }
 
+const CodaEventGraphScript := preload("res://addons/nexus_coda/editor/browser/coda_event_graph.gd")
+const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
+
 var id: String
 var name: String
 var kind: Kind = Kind.FOLDER
 ## Physical source path for imported assets (Kind.ASSET); empty for synthesized entries.
 var asset_source_path: String = ""
 ## Kind.EVENT: authoring schema version for forward compatibility.
-var event_def_version: int = 1
+## v1: flat event_audio_paths list. v2: event_graph node-graph (Phase 3).
+var event_def_version: int = 2
 ## Kind.EVENT: designer-defined parameters (gameplay will set these at runtime later).
 var event_parameters: Array[CodaEventParameter] = []
-## Kind.EVENT: res:// paths to AudioStream resources (no banks in MVP).
+## Kind.EVENT: legacy flat list, kept for backwards-compatible reads. Phase 3 always migrates to event_graph on load.
 var event_audio_paths: PackedStringArray = PackedStringArray()
+## Kind.EVENT: node graph driving playback (Phase 3+).
+var event_graph: CodaEventGraph = null
+## Kind.EVENT: modulation rules from parameters to graph node properties (Phase 4+).
+var event_modulations: Array[CodaModulation] = []
+## Kind.EVENT: id of the CodaBus this event routes to. Empty = master.
+var event_output_bus_id: String = ""
 var children: Array[CodaBrowserNode] = []
 
 
@@ -21,6 +31,9 @@ func _init(p_name: String = "Node", p_kind: Kind = Kind.FOLDER) -> void:
 	id = _generate_id()
 	name = p_name
 	kind = p_kind
+	if kind == Kind.EVENT:
+		event_graph = CodaEventGraphScript.new()
+		event_graph.ensure_trigger_node()
 
 
 static func _generate_id() -> String:
@@ -85,7 +98,14 @@ func to_dictionary() -> Dictionary:
 		d["event_parameters"] = event_parameters.map(
 			func(p: CodaEventParameter) -> Dictionary: return p.to_dictionary()
 		)
+		# Persist legacy field for forward-compat tools and as a fallback if the graph is absent on read.
 		d["event_audio_paths"] = Array(event_audio_paths)
+		if event_graph != null:
+			d["event_graph"] = event_graph.to_dictionary()
+		d["event_modulations"] = event_modulations.map(
+			func(m: CodaModulation) -> Dictionary: return m.to_dictionary()
+		)
+		d["event_output_bus_id"] = event_output_bus_id
 	return d
 
 
@@ -119,6 +139,20 @@ static func from_dictionary(data: Dictionary) -> CodaBrowserNode:
 		if paths_raw is Array:
 			for s in paths_raw:
 				node.event_audio_paths.append(str(s))
+		var graph_raw: Variant = data.get("event_graph", null)
+		if graph_raw is Dictionary:
+			node.event_graph = CodaEventGraphScript.from_dictionary(graph_raw)
+		else:
+			# Migration v1 → v2: synthesize a default graph from the flat audio path list.
+			node.event_graph = CodaEventGraphScript.from_legacy_audio_paths(node.event_audio_paths)
+		if node.event_graph != null:
+			node.event_graph.ensure_trigger_node()
+		node.event_modulations.clear()
+		for md in data.get("event_modulations", []) as Array:
+			if md is Dictionary:
+				node.event_modulations.append(CodaModulationScript.from_dictionary(md))
+		node.event_output_bus_id = str(data.get("event_output_bus_id", "")).strip_edges()
+		node.event_def_version = max(node.event_def_version, 2)
 	for child_data in data.get("children", []) as Array:
 		if child_data is Dictionary:
 			node.children.append(from_dictionary(child_data))
