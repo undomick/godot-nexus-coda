@@ -163,7 +163,7 @@ func _rebuild_strips() -> void:
 		var strip := CodaBusStripScript.new()
 		_strip_row.add_child(strip)
 		var is_master: bool = b.id == _project.bus_root.id
-		var send_targets: Array[CodaBus] = _ancestor_send_targets(b)
+		var send_targets: Array[CodaBus] = _previous_flat_send_targets(b, flat)
 		var default_send: String = ""
 		var pbus: CodaBus = _project.parent_bus_of(b.id)
 		if pbus != null:
@@ -252,18 +252,19 @@ func _on_strip_bus_renamed(bus_id: String, new_name: String) -> void:
 	_project.rename_bus(bus_id, new_name)
 
 
-func _ancestor_send_targets(bus: CodaBus) -> Array[CodaBus]:
+func _previous_flat_send_targets(bus: CodaBus, flat: Array[CodaBus]) -> Array[CodaBus]:
 	var out: Array[CodaBus] = []
 	if _project == null or _project.bus_root == null:
 		return out
-	var cur_id: String = bus.id
-	while true:
-		var p: CodaBus = _project.parent_bus_of(cur_id)
-		if p == null:
+	var idx: int = -1
+	for i in flat.size():
+		if (flat[i] as CodaBus).id == bus.id:
+			idx = i
 			break
-		out.append(p)
-		cur_id = p.id
-	out.reverse()
+	if idx <= 0:
+		return out
+	for i in idx:
+		out.append(flat[i] as CodaBus)
 	return out
 
 

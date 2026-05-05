@@ -98,6 +98,52 @@ class VerticalDragFader extends Control:
 		draw_rect(thumb, _Tokens.ACCENT_DIM, true)
 
 
+class BusDragPreview extends Control:
+	const _Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
+	var _label: Label
+
+	func _init(p_text: String) -> void:
+		custom_minimum_size = Vector2(104, 120)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_label = Label.new()
+		_label.text = p_text
+		_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		_label.add_theme_font_size_override(&"font_size", _Tokens.FONT_LABEL_SIZE)
+		_label.add_theme_color_override(&"font_color", _Tokens.TEXT_PRIMARY)
+		_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+		add_child(_label)
+
+	func _draw() -> void:
+		var fill := _Tokens.SURFACE_RAISED
+		fill.a = 0.2
+		draw_rect(Rect2(Vector2.ZERO, size), fill, true)
+		var col: Color = _Tokens.SURFACE_BORDER
+		var margin := 2.0
+		var rect := Rect2(Vector2(margin, margin), size - Vector2(margin * 2.0, margin * 2.0))
+		var dash: float = 5.0
+		var gap: float = 4.0
+		var w: float = 1.25
+		_draw_dashed_line(rect.position, Vector2(rect.end.x, rect.position.y), col, dash, gap, w)
+		_draw_dashed_line(Vector2(rect.end.x, rect.position.y), rect.end, col, dash, gap, w)
+		_draw_dashed_line(rect.end, Vector2(rect.position.x, rect.end.y), col, dash, gap, w)
+		_draw_dashed_line(Vector2(rect.position.x, rect.end.y), rect.position, col, dash, gap, w)
+
+	func _draw_dashed_line(from: Vector2, to: Vector2, color: Color, dash: float, gap: float, width: float) -> void:
+		var full: Vector2 = to - from
+		var total_len: float = full.length()
+		if total_len <= 0.001:
+			return
+		var dir: Vector2 = full / total_len
+		var t: float = 0.0
+		while t < total_len:
+			var a: Vector2 = from + dir * t
+			var seg: float = minf(dash, total_len - t)
+			var b: Vector2 = a + dir * seg
+			draw_line(a, b, color, width)
+			t += dash + gap
+
+
 var _bus: CodaBus = null
 var _syncing_ui: bool = false
 var _is_master_bus: bool = false
@@ -137,6 +183,7 @@ func _ready() -> void:
 	_name_edit.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
 	_name_edit.text_submitted.connect(func(_t: String) -> void: _commit_bus_name_if_needed())
 	_name_edit.focus_exited.connect(_commit_bus_name_if_needed)
+	_name_edit.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	col.add_child(_name_edit)
 
 	var main_row := HBoxContainer.new()
@@ -152,22 +199,28 @@ func _ready() -> void:
 
 	_meter_l = _make_meter()
 	_meter_r = _make_meter()
+	_meter_l.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
+	_meter_r.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	meters_fader.add_child(_meter_l)
 	meters_fader.add_child(_meter_r)
 
 	_fader = VerticalDragFader.new(FADER_MIN_DB, FADER_MAX_DB, FADER_STEP)
+	_fader.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	meters_fader.add_child(_fader)
 	_fader.fader_value_changed.connect(_on_vertical_fader_changed)
 
 	var btn_col := VBoxContainer.new()
 	btn_col.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
 	btn_col.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	btn_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	btn_col.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	main_row.add_child(btn_col)
 
 	_mute_btn = _make_toggle_strip_button("M", "Mute")
 	_solo_btn = _make_toggle_strip_button("S", "Solo")
 	_bypass_btn = _make_toggle_strip_button("B", "Bypass bus effects")
+	_mute_btn.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
+	_solo_btn.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
+	_bypass_btn.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	_mute_btn.toggled.connect(_on_mute_toggled_ui)
 	_solo_btn.toggled.connect(_on_solo_toggled_ui)
 	_bypass_btn.toggled.connect(_on_bypass_toggled_ui)
@@ -183,6 +236,7 @@ func _ready() -> void:
 	_db_edit.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
 	_db_edit.text_submitted.connect(func(_t: String) -> void: _commit_db_field())
 	_db_edit.focus_exited.connect(_commit_db_field)
+	_db_edit.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	col.add_child(_db_edit)
 
 	_send_option = OptionButton.new()
@@ -190,15 +244,15 @@ func _ready() -> void:
 	_send_option.custom_minimum_size = Vector2(0, 26)
 	_send_option.tooltip_text = "Audio bus send / link target (toward Master)"
 	_send_option.item_selected.connect(_on_send_item_selected)
+	_send_option.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	col.add_child(_send_option)
 
 
 func _get_drag_data(at_position: Vector2) -> Variant:
 	if _bus == null or _is_master_bus:
 		return null
-	var preview := Label.new()
-	preview.text = _bus.bus_name
-	preview.add_theme_color_override(&"font_color", Tokens.TEXT_PRIMARY)
+	var preview := BusDragPreview.new(_bus.bus_name)
+	preview.custom_minimum_size = size
 	set_drag_preview(preview)
 	return {"type": DND_TYPE, "bus_id": _bus.id}
 

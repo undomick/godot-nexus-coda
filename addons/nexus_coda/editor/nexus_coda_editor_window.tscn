@@ -25,10 +25,10 @@ size_flags_vertical = 0
 [node name="RootMargin" type="MarginContainer" parent="RootVBox"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/margin_left = 6
+theme_override_constants/margin_left = 4
 theme_override_constants/margin_top = 4
-theme_override_constants/margin_right = 6
-theme_override_constants/margin_bottom = 6
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
 
 [node name="DockHost" type="VBoxContainer" parent="RootVBox/RootMargin"]
 layout_mode = 2
