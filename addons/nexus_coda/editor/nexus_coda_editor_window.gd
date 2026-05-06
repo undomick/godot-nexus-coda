@@ -48,6 +48,9 @@ const MID_SAVE := 4
 const MID_SAVE_AS := 5
 
 const VID_RESET_LAYOUT := 100
+const VID_SAVE_LAYOUT := 101
+const VID_LOAD_LAYOUT := 102
+const VID_CLEAR_SAVED_LAYOUT := 103
 const VID_TOGGLE_BROWSER := 110
 const VID_TOGGLE_GRAPH := 111
 const VID_TOGGLE_INSPECTOR := 112
@@ -65,6 +68,13 @@ const HID_PICK_ACCENT := 403
 const HID_COMMAND_PALETTE := 404
 
 const RECENT_ID_BASE := 1000
+
+const CUSTOM_LAYOUT_SUBDIR := "nexus_coda"
+const CUSTOM_LAYOUT_FILENAME := "custom_layout.json"
+const CUSTOM_LAYOUT_PREFS_FILENAME := "layout_prefs.json"
+const CUSTOM_LAYOUT_PREFS_KEY := "preferred_layout"
+const CUSTOM_LAYOUT_PREF_FACTORY := "factory"
+const CUSTOM_LAYOUT_PREF_CUSTOM := "custom"
 
 @onready var _menu_bar: MenuBar = $RootVBox/MenuBar
 @onready var _dock_host: CodaDockHost = $RootVBox/RootMargin/DockHost
@@ -105,6 +115,7 @@ const FALLBACK_SAVE_RES_PATH := "res://nexus_coda_projects/untitled.ncoda"
 
 var _file_dialog_pick_result: String = ""
 var _file_dialog_pick_complete: bool = false
+var _teardown_done: bool = false
 
 
 func setup_editor_plugin(plugin: EditorPlugin) -> void:
@@ -190,10 +201,12 @@ func _register_panels() -> void:
 	))
 
 	dm.panel_visibility_changed.connect(_on_panel_visibility_changed)
+	dm.layout_changed.connect(_on_layout_changed)
 
 	_wire_browser_to_others()
 	_wire_runtime_to_panels()
 	call_deferred(&"_initial_bind")
+	call_deferred(&"_load_custom_layout_if_present")
 
 
 func _wire_browser_to_others() -> void:
@@ -310,6 +323,10 @@ func _rebuild_view_menu_items() -> void:
 	_view_menu.add_check_item("Show Inspector", VID_TOGGLE_INSPECTOR)
 	_view_menu.add_check_item("Show Mixer", VID_TOGGLE_MIXER)
 	_view_menu.add_check_item("Show Log", VID_TOGGLE_LOG)
+	_view_menu.add_separator()
+	_view_menu.add_item("Save Layout", VID_SAVE_LAYOUT)
+	_view_menu.add_item("Load Saved Layout", VID_LOAD_LAYOUT)
+	_view_menu.add_item("Clear Saved Layout", VID_CLEAR_SAVED_LAYOUT)
 	_view_menu.add_separator()
 	_view_menu.add_item("Reset Layout", VID_RESET_LAYOUT)
 
@@ -580,8 +597,14 @@ func _collect_palette_entries() -> Array[Dictionary]:
 			var title: String = arr[1]
 			out.append({"title": title, "subtitle": "", "category": "View",
 				"callable": Callable(dm, "toggle_panel").bind(pid)})
+		out.append({"title": "Save Layout", "subtitle": "", "category": "View",
+			"callable": Callable(self, "_save_custom_layout")})
+		out.append({"title": "Load Saved Layout", "subtitle": "", "category": "View",
+			"callable": Callable(self, "_load_custom_layout")})
+		out.append({"title": "Clear Saved Layout", "subtitle": "", "category": "View",
+			"callable": Callable(self, "_clear_custom_layout")})
 		out.append({"title": "Reset Layout", "subtitle": "", "category": "View",
-			"callable": Callable(dm, "reset_to_default_layout")})
+			"callable": Callable(self, "_reset_to_factory_layout")})
 
 	# Build/banks.
 	out.append({"title": "Create New Bank", "subtitle": "", "category": "Build",
@@ -643,6 +666,8 @@ func _on_view_id_pressed(id: int) -> void:
 		return
 	var dm: CodaDockManager = _dock_host.dock_manager
 	match id:
+		VID_SAVE_LAYOUT:
+			_save_custom_layout()
 		VID_TOGGLE_BROWSER:
 			dm.toggle_panel(PANEL_BROWSER)
 		VID_TOGGLE_GRAPH:
@@ -653,11 +678,157 @@ func _on_view_id_pressed(id: int) -> void:
 			dm.toggle_panel(PANEL_MIXER)
 		VID_TOGGLE_LOG:
 			dm.toggle_panel(PANEL_LOG)
+		VID_LOAD_LAYOUT:
+			_load_custom_layout()
+		VID_CLEAR_SAVED_LAYOUT:
+			_clear_custom_layout()
 		VID_RESET_LAYOUT:
-			dm.reset_to_default_layout()
+			_reset_to_factory_layout()
 		_:
 			pass
 	_refresh_view_menu_check_marks()
+
+
+func _reset_to_factory_layout() -> void:
+	if _dock_host == null or _dock_host.dock_manager == null:
+		return
+	_set_preferred_layout(CUSTOM_LAYOUT_PREF_FACTORY)
+	_dock_host.dock_manager.reset_to_default_layout()
+
+
+func _on_layout_changed() -> void:
+	# Intentionally no autosave: user chooses when to persist custom layout.
+	pass
+
+
+func _custom_layout_store_path() -> String:
+	if _plugin == null:
+		return ""
+	var cache: String = _plugin.get_editor_interface().get_editor_paths().get_cache_dir()
+	if cache.is_empty():
+		return ""
+	return cache.path_join(CUSTOM_LAYOUT_SUBDIR).path_join(CUSTOM_LAYOUT_FILENAME)
+
+
+func _layout_prefs_store_path() -> String:
+	if _plugin == null:
+		return ""
+	var cache: String = _plugin.get_editor_interface().get_editor_paths().get_cache_dir()
+	if cache.is_empty():
+		return ""
+	return cache.path_join(CUSTOM_LAYOUT_SUBDIR).path_join(CUSTOM_LAYOUT_PREFS_FILENAME)
+
+
+func _get_preferred_layout() -> String:
+	var p: String = _layout_prefs_store_path()
+	if p.is_empty() or not FileAccess.file_exists(p):
+		return CUSTOM_LAYOUT_PREF_CUSTOM  # Back-compat: custom layout file existing used to imply preference.
+	var text: String = FileAccess.get_file_as_string(p)
+	if text.is_empty():
+		return CUSTOM_LAYOUT_PREF_CUSTOM
+	var json := JSON.new()
+	if json.parse(text) != OK:
+		return CUSTOM_LAYOUT_PREF_CUSTOM
+	var root: Variant = json.data
+	if typeof(root) != TYPE_DICTIONARY:
+		return CUSTOM_LAYOUT_PREF_CUSTOM
+	var pref: String = str((root as Dictionary).get(CUSTOM_LAYOUT_PREFS_KEY, CUSTOM_LAYOUT_PREF_CUSTOM))
+	return pref if pref in [CUSTOM_LAYOUT_PREF_FACTORY, CUSTOM_LAYOUT_PREF_CUSTOM] else CUSTOM_LAYOUT_PREF_CUSTOM
+
+
+func _set_preferred_layout(pref: String) -> void:
+	var p: String = _layout_prefs_store_path()
+	if p.is_empty():
+		return
+	var dir_path: String = p.get_base_dir()
+	if not dir_path.is_empty():
+		DirAccess.make_dir_recursive_absolute(dir_path)
+	var payload := {
+		"version": 1,
+		CUSTOM_LAYOUT_PREFS_KEY: pref,
+	}
+	var text: String = JSON.stringify(payload, "  ")
+	var f: FileAccess = FileAccess.open(p, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(text)
+	if f.has_method(&"flush"):
+		f.flush()
+	f.close()
+
+
+func _save_custom_layout() -> void:
+	if _dock_host == null or _dock_host.dock_manager == null:
+		return
+	var path: String = _custom_layout_store_path()
+	if path.is_empty():
+		return
+	var dir_path: String = path.get_base_dir()
+	if not dir_path.is_empty():
+		DirAccess.make_dir_recursive_absolute(dir_path)
+	var dm: CodaDockManager = _dock_host.dock_manager
+	var payload := {
+		"version": 1,
+		"layout": dm.get_layout_state(),
+	}
+	var text: String = JSON.stringify(payload, "  ")
+	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		NexusCodaLog.warn("layout", "Could not save custom layout (%s)" % str(FileAccess.get_open_error()))
+		return
+	f.store_string(text)
+	if f.has_method(&"flush"):
+		f.flush()
+	f.close()
+	_set_preferred_layout(CUSTOM_LAYOUT_PREF_CUSTOM)
+	NexusCodaLog.info("layout", "Saved custom layout.")
+
+
+func _load_custom_layout_if_present() -> void:
+	var path: String = _custom_layout_store_path()
+	if _get_preferred_layout() != CUSTOM_LAYOUT_PREF_CUSTOM:
+		return
+	if path.is_empty() or not FileAccess.file_exists(path):
+		return
+	_load_custom_layout()
+
+
+func _load_custom_layout() -> void:
+	if _dock_host == null or _dock_host.dock_manager == null:
+		return
+	var path: String = _custom_layout_store_path()
+	if path.is_empty() or not FileAccess.file_exists(path):
+		NexusCodaLog.info("layout", "No saved custom layout found.")
+		return
+	var text: String = FileAccess.get_file_as_string(path)
+	if text.is_empty():
+		return
+	var json := JSON.new()
+	if json.parse(text) != OK:
+		NexusCodaLog.warn("layout", "Saved custom layout is invalid JSON.")
+		return
+	var root: Variant = json.data
+	if typeof(root) != TYPE_DICTIONARY:
+		return
+	var layout: Variant = (root as Dictionary).get("layout", null)
+	if typeof(layout) != TYPE_DICTIONARY:
+		return
+	_dock_host.dock_manager.apply_layout_state(layout as Dictionary)
+	_set_preferred_layout(CUSTOM_LAYOUT_PREF_CUSTOM)
+	NexusCodaLog.info("layout", "Loaded custom layout.")
+
+
+func _clear_custom_layout() -> void:
+	var path: String = _custom_layout_store_path()
+	if path.is_empty():
+		return
+	if FileAccess.file_exists(path):
+		var err: Error = DirAccess.remove_absolute(path)
+		if err != OK:
+			NexusCodaLog.warn("layout", "Could not remove saved custom layout (%s)" % error_string(err))
+			return
+	_set_preferred_layout(CUSTOM_LAYOUT_PREF_FACTORY)
+	NexusCodaLog.info("layout", "Cleared saved custom layout.")
 
 
 func _on_panel_visibility_changed(_panel_id: StringName, _is_visible: bool) -> void:
@@ -1080,10 +1251,61 @@ func _on_close_requested() -> void:
 		var ok: bool = await _confirm_unsaved_async()
 		if not ok:
 			return
+	_teardown_before_close()
 	queue_free()
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE:
+		_teardown_before_close()
 		if has_node(UNSAVED_LAYER_NODEPATH):
 			get_node(UNSAVED_LAYER_NODEPATH).queue_free()
+
+
+func _teardown_before_close() -> void:
+	if _teardown_done:
+		return
+	_teardown_done = true
+
+	# Detach docked panels so their controls don't keep references alive through TabContainer internals.
+	if _dock_host != null and _dock_host.dock_manager != null:
+		var dm: CodaDockManager = _dock_host.dock_manager
+		var state: Dictionary = dm.get_layout_state()
+		for zone_id_s in state.keys():
+			var zone := dm.get_zone(StringName(str(zone_id_s)))
+			if zone == null:
+				continue
+			for ctrl in zone.panel_controls():
+				if ctrl != null and ctrl.get_parent() != null:
+					ctrl.get_parent().remove_child(ctrl)
+
+	# Free overlays explicitly (they may create internal fonts/textures/RIDs).
+	if _command_palette != null and is_instance_valid(_command_palette):
+		_command_palette.queue_free()
+	_command_palette = null
+	if _shortcut_sheet != null and is_instance_valid(_shortcut_sheet):
+		_shortcut_sheet.queue_free()
+	_shortcut_sheet = null
+	if _status_bar != null and is_instance_valid(_status_bar):
+		_status_bar.queue_free()
+	_status_bar = null
+	if _color_picker_dialog != null and is_instance_valid(_color_picker_dialog):
+		_color_picker_dialog.queue_free()
+	_color_picker_dialog = null
+
+	# Free panels explicitly (they are re-created on next open anyway).
+	if _browser_panel != null and is_instance_valid(_browser_panel):
+		_browser_panel.queue_free()
+	_browser_panel = null
+	if _graph_panel != null and is_instance_valid(_graph_panel):
+		_graph_panel.queue_free()
+	_graph_panel = null
+	if _inspector_panel != null and is_instance_valid(_inspector_panel):
+		_inspector_panel.queue_free()
+	_inspector_panel = null
+	if _mixer_panel != null and is_instance_valid(_mixer_panel):
+		_mixer_panel.queue_free()
+	_mixer_panel = null
+	if _log_panel != null and is_instance_valid(_log_panel):
+		_log_panel.queue_free()
+	_log_panel = null
