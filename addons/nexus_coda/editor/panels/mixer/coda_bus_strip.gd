@@ -10,6 +10,7 @@ signal solo_toggled(bus_id: String, solo: bool)
 signal bypass_toggled(bus_id: String, bypass: bool)
 signal bus_renamed(bus_id: String, new_name: String)
 signal send_target_changed(bus_id: String, target_bus_id: String)
+signal context_action_requested(bus_id: String, action: StringName)
 
 const DND_TYPE := &"coda_bus_strip"
 
@@ -159,6 +160,13 @@ var _meter_r: ProgressBar
 var _send_option: OptionButton
 var _godot_bus_name: String = ""
 
+const _CTX_ADD_BUS_HERE := 1
+const _CTX_DUPLICATE_BUS := 2
+const _CTX_DELETE_BUS := 3
+const _CTX_RESET_VOLUME := 4
+
+var _context_menu: PopupMenu
+
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(104, 160)
@@ -246,6 +254,29 @@ func _ready() -> void:
 	_send_option.item_selected.connect(_on_send_item_selected)
 	_send_option.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	col.add_child(_send_option)
+
+	_context_menu = PopupMenu.new()
+	_context_menu.name = "BusContextMenu"
+	_context_menu.add_item("Add bus here", _CTX_ADD_BUS_HERE)
+	_context_menu.add_item("Duplicate bus", _CTX_DUPLICATE_BUS)
+	_context_menu.add_item("Delete bus", _CTX_DELETE_BUS)
+	_context_menu.add_separator()
+	_context_menu.add_item("Reset volume", _CTX_RESET_VOLUME)
+	_context_menu.id_pressed.connect(_on_context_menu_id_pressed)
+	add_child(_context_menu)
+
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.button_index != MOUSE_BUTTON_RIGHT or not mb.pressed:
+			return
+		if _bus == null:
+			return
+		_refresh_context_menu_enabled()
+		var gp: Vector2 = get_global_mouse_position()
+		_context_menu.popup(Rect2i(Vector2i(int(gp.x), int(gp.y)), Vector2i(1, 1)))
+		accept_event()
 
 
 func _get_drag_data(at_position: Vector2) -> Variant:
@@ -388,6 +419,41 @@ func bind(
 			_send_option.select(clampi(sel_idx, 0, _send_option.item_count - 1))
 
 	_syncing_ui = false
+	_refresh_context_menu_enabled()
+
+
+func set_volume_no_signal(volume_db: float) -> void:
+	if _fader == null or _db_edit == null:
+		return
+	_syncing_ui = true
+	_fader.set_value_no_signal(volume_db)
+	_set_db_field_text(volume_db)
+	_syncing_ui = false
+
+
+func _refresh_context_menu_enabled() -> void:
+	if _context_menu == null:
+		return
+	# Disable destructive actions on Master (no parent, cannot be removed/duplicated).
+	var is_master: bool = _is_master_bus
+	_context_menu.set_item_disabled(_context_menu.get_item_index(_CTX_DUPLICATE_BUS), is_master)
+	_context_menu.set_item_disabled(_context_menu.get_item_index(_CTX_DELETE_BUS), is_master)
+
+
+func _on_context_menu_id_pressed(id: int) -> void:
+	if _bus == null:
+		return
+	match id:
+		_CTX_ADD_BUS_HERE:
+			context_action_requested.emit(_bus.id, &"add_bus_here")
+		_CTX_DUPLICATE_BUS:
+			context_action_requested.emit(_bus.id, &"duplicate_bus")
+		_CTX_DELETE_BUS:
+			context_action_requested.emit(_bus.id, &"delete_bus")
+		_CTX_RESET_VOLUME:
+			context_action_requested.emit(_bus.id, &"reset_volume")
+		_:
+			pass
 
 
 func _on_send_item_selected(index: int) -> void:

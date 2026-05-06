@@ -26,9 +26,20 @@ var base_pitch_scale: float = 1.0
 ## Extra weight (BLEND only): final volume_db = base_volume_db + 20*log10(blend_weight).
 var blend_weight: float = 1.0
 
+## Timeline-mode metadata (graph-mode handles ignore these).
+## [code]is_timeline[/code] flips the player-panel cursor source from the player position to
+## [code]timeline_cursor_seconds[/code], which the runtime advances each frame.
+var is_timeline: bool = false
+var timeline_cursor_seconds: float = 0.0
+var timeline_length_seconds: float = 0.0
+## When >= 0, the timeline dispatcher should jump the cursor to this time on the next tick
+## and re-plan voices. Reset to -1 after the dispatcher consumes it.
+var timeline_pending_seek_seconds: float = -1.0
+
 var _player: AudioStreamPlayer = null
 var _bus_name: String = "Master"
 var _alive: bool = true
+var _paused: bool = false
 
 
 func _init() -> void:
@@ -38,6 +49,10 @@ func _init() -> void:
 func is_playing() -> bool:
 	if not _alive:
 		return false
+	if is_timeline:
+		# Timeline handles stay alive across silent gaps between clips; the runtime dispatcher
+		# clears [code]_alive[/code] when the cursor reaches the end (and looping is off).
+		return true
 	if _player == null or not is_instance_valid(_player):
 		return false
 	return _player.playing
@@ -49,6 +64,60 @@ func stop(_fade_ms: int = 0) -> void:
 	if _player != null and is_instance_valid(_player) and _player.playing:
 		_player.stop()
 	finished.emit()
+
+
+## Editor preview controls. AudioStreamPlayer.stream_paused keeps `.playing == true`,
+## so is_playing() above continues to return true while paused — handles can resume cleanly.
+## Timeline-mode voices are paused by the runtime dispatcher via the [code]_paused[/code] flag.
+func pause() -> void:
+	_paused = true
+	if _player != null and is_instance_valid(_player):
+		_player.stream_paused = true
+
+
+func resume() -> void:
+	_paused = false
+	if _player != null and is_instance_valid(_player):
+		_player.stream_paused = false
+
+
+func is_paused() -> bool:
+	if is_timeline:
+		return _paused
+	if _player == null or not is_instance_valid(_player):
+		return false
+	return _player.stream_paused
+
+
+func seek(time_seconds: float) -> void:
+	if is_timeline:
+		timeline_pending_seek_seconds = maxf(0.0, time_seconds)
+		return
+	if _player == null or not is_instance_valid(_player):
+		return
+	_player.seek(maxf(0.0, time_seconds))
+
+
+func get_position() -> float:
+	if is_timeline:
+		return timeline_cursor_seconds
+	if _player == null or not is_instance_valid(_player):
+		return 0.0
+	return _player.get_playback_position()
+
+
+func get_length() -> float:
+	if is_timeline:
+		return timeline_length_seconds
+	if _player == null or not is_instance_valid(_player):
+		return 0.0
+	if _player.stream == null:
+		return 0.0
+	return _player.stream.get_length()
+
+
+func get_bus_name() -> String:
+	return _bus_name
 
 
 func _bind_player(player: AudioStreamPlayer) -> void:

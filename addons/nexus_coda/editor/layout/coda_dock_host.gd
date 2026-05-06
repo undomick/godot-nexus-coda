@@ -14,11 +14,14 @@ const CodaDockManagerScript := preload("res://addons/nexus_coda/editor/layout/co
 const ZONE_LEFT := &"left"
 const ZONE_CENTER := &"center"
 const ZONE_RIGHT := &"right"
+## Narrow strip left of the bottom dock (default: Player).
+const ZONE_BOTTOM_LEFT := &"bottom_left"
 const ZONE_BOTTOM := &"bottom"
 
 const SPLIT_LEFT_RATIO := 0.14
 const SPLIT_RIGHT_RATIO := 0.78
 const SPLIT_BOTTOM_RATIO := 0.72
+const SPLIT_BOTTOM_LEFT_RATIO := 0.22
 
 var dock_manager: CodaDockManager
 
@@ -28,12 +31,15 @@ var _middle_h_split: HSplitContainer
 var _zone_left: CodaDockZone
 var _zone_center: CodaDockZone
 var _zone_right: CodaDockZone
+var _bottom_h_split: HSplitContainer
+var _zone_bottom_left: CodaDockZone
 var _zone_bottom: CodaDockZone
 
 var _splits_initialized: bool = false
 var _user_adjusted_top: bool = false
 var _user_adjusted_middle: bool = false
 var _user_adjusted_outer: bool = false
+var _user_adjusted_bottom: bool = false
 
 
 func _ready() -> void:
@@ -65,8 +71,16 @@ func _ready() -> void:
 	_zone_right = _make_zone(ZONE_RIGHT)
 	_middle_h_split.add_child(_zone_right)
 
+	_bottom_h_split = HSplitContainer.new()
+	_bottom_h_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_bottom_h_split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_outer_v_split.add_child(_bottom_h_split)
+
+	_zone_bottom_left = _make_zone(ZONE_BOTTOM_LEFT)
+	_bottom_h_split.add_child(_zone_bottom_left)
+
 	_zone_bottom = _make_zone(ZONE_BOTTOM)
-	_outer_v_split.add_child(_zone_bottom)
+	_bottom_h_split.add_child(_zone_bottom)
 
 	dock_manager = CodaDockManagerScript.new()
 	dock_manager.name = "CodaDockManager"
@@ -74,12 +88,14 @@ func _ready() -> void:
 	dock_manager.register_zone(ZONE_LEFT, _zone_left)
 	dock_manager.register_zone(ZONE_CENTER, _zone_center)
 	dock_manager.register_zone(ZONE_RIGHT, _zone_right)
+	dock_manager.register_zone(ZONE_BOTTOM_LEFT, _zone_bottom_left)
 	dock_manager.register_zone(ZONE_BOTTOM, _zone_bottom)
 
 	resized.connect(_apply_proportional_splits)
 	_top_h_split.drag_ended.connect(func() -> void: _user_adjusted_top = true)
 	_middle_h_split.drag_ended.connect(func() -> void: _user_adjusted_middle = true)
 	_outer_v_split.drag_ended.connect(func() -> void: _user_adjusted_outer = true)
+	_bottom_h_split.drag_ended.connect(func() -> void: _user_adjusted_bottom = true)
 	call_deferred(&"_apply_proportional_splits")
 	call_deferred(&"_emit_ready")
 
@@ -112,6 +128,9 @@ func _apply_proportional_splits() -> void:
 	if h >= 64.0 and (not _splits_initialized or not _user_adjusted_outer):
 		var desired_top_h: float = h * SPLIT_BOTTOM_RATIO
 		_outer_v_split.split_offset = int(round(desired_top_h - h * 0.5))
+	if w >= 64.0 and (not _splits_initialized or not _user_adjusted_bottom):
+		var desired_bottom_left_w: float = w * SPLIT_BOTTOM_LEFT_RATIO
+		_bottom_h_split.split_offset = int(round(desired_bottom_left_w - w * 0.5))
 	_splits_initialized = true
 
 

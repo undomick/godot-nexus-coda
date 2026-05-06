@@ -22,7 +22,6 @@ var _toolbar: HBoxContainer
 var _scroll: ScrollContainer
 var _strip_row: HBoxContainer
 var _snapshot_picker: OptionButton
-var _add_bus_button: Button
 var _pick_bus_layout_path: Callable = Callable()
 var _complete_bus_layout_export: Callable = Callable()
 var _strips_by_bus_id: Dictionary = {}
@@ -38,12 +37,6 @@ func _ready() -> void:
 	_toolbar = HBoxContainer.new()
 	_toolbar.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
 	add_child(_toolbar)
-
-	_add_bus_button = Button.new()
-	_add_bus_button.text = "+ Bus"
-	_add_bus_button.tooltip_text = "Add a bus to Master"
-	_add_bus_button.pressed.connect(_on_add_bus_pressed)
-	_toolbar.add_child(_add_bus_button)
 
 	var sep := VSeparator.new()
 	_toolbar.add_child(sep)
@@ -193,6 +186,7 @@ func _rebuild_strips() -> void:
 		strip.bypass_toggled.connect(_on_strip_bypass_toggled)
 		strip.bus_renamed.connect(_on_strip_bus_renamed)
 		strip.send_target_changed.connect(_on_strip_send_target_changed)
+		strip.context_action_requested.connect(_on_strip_context_action_requested)
 		_strips_by_bus_id[b.id] = strip
 
 	var add_slot := CodaMixerAddBusSlotScript.new()
@@ -323,6 +317,27 @@ func _on_add_bus_pressed() -> void:
 	if _project == null:
 		return
 	_project.add_child_bus(_project.bus_root.id, "Bus %d" % (_project.bus_root.children.size() + 1))
+
+
+func _on_strip_context_action_requested(bus_id: String, action: StringName) -> void:
+	if _project == null or _project.bus_root == null:
+		return
+	match action:
+		&"add_bus_here":
+			_project.add_bus_after(bus_id, "Bus")
+		&"duplicate_bus":
+			_project.duplicate_bus(bus_id)
+		&"delete_bus":
+			_project.remove_bus(bus_id)
+		&"reset_volume":
+			_project.reset_bus_volume(bus_id)
+			# Push to Godot immediately and update the strip UI without a rebuild.
+			_on_strip_volume_changed(bus_id, 0.0)
+			var strip: CodaBusStrip = _strips_by_bus_id.get(bus_id, null) as CodaBusStrip
+			if strip != null:
+				strip.set_volume_no_signal(0.0)
+		_:
+			pass
 
 
 func _on_snapshot_picked(_idx: int) -> void:

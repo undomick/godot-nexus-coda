@@ -3,8 +3,15 @@ extends RefCounted
 
 enum Kind { FOLDER, EVENT, ASSET }
 
+## Authoring model that the runtime should use to schedule this event.
+## GRAPH = node-graph (default; Phase 3+); TIMELINE = per-event timeline (Phase C+).
+enum AuthoringMode { GRAPH = 0, TIMELINE = 1 }
+
 const CodaEventGraphScript := preload("res://addons/nexus_coda/editor/browser/coda_event_graph.gd")
 const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
+const CodaEventTimelineScript := preload(
+	"res://addons/nexus_coda/editor/browser/timeline/coda_event_timeline.gd"
+)
 
 var id: String
 var name: String
@@ -12,14 +19,18 @@ var kind: Kind = Kind.FOLDER
 ## Physical source path for imported assets (Kind.ASSET); empty for synthesized entries.
 var asset_source_path: String = ""
 ## Kind.EVENT: authoring schema version for forward compatibility.
-## v1: flat event_audio_paths list. v2: event_graph node-graph (Phase 3).
-var event_def_version: int = 2
+## v1: flat event_audio_paths list. v2: event_graph node-graph (Phase 3). v3: event_timeline alt-mode (Phase C).
+var event_def_version: int = 3
+## Kind.EVENT: which model should the runtime use to schedule this event.
+var event_authoring_mode: AuthoringMode = AuthoringMode.GRAPH
 ## Kind.EVENT: designer-defined parameters (gameplay will set these at runtime later).
 var event_parameters: Array[CodaEventParameter] = []
 ## Kind.EVENT: legacy flat list, kept for backwards-compatible reads. Phase 3 always migrates to event_graph on load.
 var event_audio_paths: PackedStringArray = PackedStringArray()
 ## Kind.EVENT: node graph driving playback (Phase 3+).
 var event_graph: CodaEventGraph = null
+## Kind.EVENT: alternative timeline-based authoring model (Phase C+). Lazy: created when authoring_mode flips.
+var event_timeline: CodaEventTimeline = null
 ## Kind.EVENT: modulation rules from parameters to graph node properties (Phase 4+).
 var event_modulations: Array[CodaModulation] = []
 ## Kind.EVENT: id of the CodaBus this event routes to. Empty = master.
@@ -95,6 +106,7 @@ func to_dictionary() -> Dictionary:
 	}
 	if kind == Kind.EVENT:
 		d["event_def_version"] = event_def_version
+		d["event_authoring_mode"] = int(event_authoring_mode)
 		d["event_parameters"] = event_parameters.map(
 			func(p: CodaEventParameter) -> Dictionary: return p.to_dictionary()
 		)
@@ -102,6 +114,8 @@ func to_dictionary() -> Dictionary:
 		d["event_audio_paths"] = Array(event_audio_paths)
 		if event_graph != null:
 			d["event_graph"] = event_graph.to_dictionary()
+		if event_timeline != null:
+			d["event_timeline"] = event_timeline.to_dictionary()
 		d["event_modulations"] = event_modulations.map(
 			func(m: CodaModulation) -> Dictionary: return m.to_dictionary()
 		)
@@ -130,6 +144,12 @@ static func from_dictionary(data: Dictionary) -> CodaBrowserNode:
 	node.asset_source_path = str(data.get("asset_source_path", ""))
 	if k == Kind.EVENT:
 		node.event_def_version = int(data.get("event_def_version", 1))
+		var mode_raw: int = int(data.get("event_authoring_mode", AuthoringMode.GRAPH))
+		match mode_raw:
+			AuthoringMode.GRAPH, AuthoringMode.TIMELINE:
+				node.event_authoring_mode = mode_raw as AuthoringMode
+			_:
+				node.event_authoring_mode = AuthoringMode.GRAPH
 		node.event_parameters.clear()
 		for pd in data.get("event_parameters", []) as Array:
 			if pd is Dictionary:
@@ -147,12 +167,17 @@ static func from_dictionary(data: Dictionary) -> CodaBrowserNode:
 			node.event_graph = CodaEventGraphScript.from_legacy_audio_paths(node.event_audio_paths)
 		if node.event_graph != null:
 			node.event_graph.ensure_trigger_node()
+		var timeline_raw: Variant = data.get("event_timeline", null)
+		if timeline_raw is Dictionary:
+			node.event_timeline = CodaEventTimelineScript.from_dictionary(timeline_raw)
+		else:
+			node.event_timeline = null
 		node.event_modulations.clear()
 		for md in data.get("event_modulations", []) as Array:
 			if md is Dictionary:
 				node.event_modulations.append(CodaModulationScript.from_dictionary(md))
 		node.event_output_bus_id = str(data.get("event_output_bus_id", "")).strip_edges()
-		node.event_def_version = max(node.event_def_version, 2)
+		node.event_def_version = max(node.event_def_version, 3)
 	for child_data in data.get("children", []) as Array:
 		if child_data is Dictionary:
 			node.children.append(from_dictionary(child_data))

@@ -73,6 +73,13 @@ func set_play_enabled(enabled: bool, hint: String = "") -> void:
 		_play_button.tooltip_text = "Audition this event"
 
 
+## Hosts that want to show their own (richer) status indicator can hide the built-in label
+## without pulling apart the bar's children.
+func set_status_label_visible(p_visible: bool) -> void:
+	if _status_label != null:
+		_status_label.visible = p_visible
+
+
 func is_loop_enabled() -> bool:
 	return _loop_button != null and _loop_button.button_pressed
 

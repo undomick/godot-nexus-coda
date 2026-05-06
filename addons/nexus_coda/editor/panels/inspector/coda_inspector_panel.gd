@@ -3,19 +3,19 @@ class_name CodaInspectorPanel
 extends VBoxContainer
 
 ## Stacked-section inspector for the currently selected browser node.
-## Phase 3 layout:
+## Layout:
 ##   - Header (event name)
-##   - Transport (Play / Stop / Loop)
 ##   - Parameters section
-##   - Output section (placeholder for Phase 5: bus picker)
+##   - Modulation section
+##   - Banks section
+##   - Output placeholder (bus routing lives in the Mixer)
+##
+## Transport (Play / Stop / Loop / Pause / time / meter) lives in the dedicated
+## Player panel. Inspector no longer owns playback state.
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
-const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaEmptyStateScript := preload("res://addons/nexus_coda/editor/theme/coda_empty_state.gd")
 const CodaSectionHeaderScript := preload("res://addons/nexus_coda/editor/theme/coda_section_header.gd")
-const CodaEventTransportBarScript := preload(
-	"res://addons/nexus_coda/editor/panels/inspector/coda_event_transport_bar.gd"
-)
 const CodaParametersSectionScript := preload(
 	"res://addons/nexus_coda/editor/panels/inspector/coda_parameters_section.gd"
 )
@@ -32,15 +32,14 @@ var _empty_state: CodaEmptyState
 var _scroll: ScrollContainer
 var _content: VBoxContainer
 var _header: CodaSectionHeader
-var _transport_bar: CodaEventTransportBar
+var _authoring_mode_row: HBoxContainer
+var _authoring_mode_picker: OptionButton
 var _parameters_section: CodaParametersSection
 var _modulation_section: CodaModulationSection
 var _banks_section: CodaBanksSection
 var _output_placeholder: Label
 var _selected_node: CodaBrowserNode = null
-
-var _runtime: CodaRuntime = null
-var _active_handle: CodaEventHandle = null
+var _suppress_authoring_mode_writeback: bool = false
 
 
 func _ready() -> void:
@@ -79,13 +78,23 @@ func _ready() -> void:
 	_header.heading = "Event"
 	_content.add_child(_header)
 
-	_transport_bar = CodaEventTransportBarScript.new()
-	_transport_bar.play_requested.connect(_on_play_requested)
-	_transport_bar.stop_requested.connect(_on_stop_requested)
-	_transport_bar.loop_toggled.connect(_on_loop_toggled)
-	_content.add_child(_transport_bar)
-
-	_content.add_child(HSeparator.new())
+	_authoring_mode_row = HBoxContainer.new()
+	_authoring_mode_row.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
+	_content.add_child(_authoring_mode_row)
+	var authoring_mode_label := Label.new()
+	authoring_mode_label.text = "Authoring Mode"
+	authoring_mode_label.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
+	authoring_mode_label.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
+	_authoring_mode_row.add_child(authoring_mode_label)
+	_authoring_mode_picker = OptionButton.new()
+	_authoring_mode_picker.add_item("Graph", CodaBrowserNode.AuthoringMode.GRAPH)
+	_authoring_mode_picker.add_item("Timeline", CodaBrowserNode.AuthoringMode.TIMELINE)
+	_authoring_mode_picker.tooltip_text = (
+		"Choose how this event is authored: Graph for branching/sequencing, Timeline for "
+		+ "track-based clips."
+	)
+	_authoring_mode_picker.item_selected.connect(_on_authoring_mode_picked)
+	_authoring_mode_row.add_child(_authoring_mode_picker)
 
 	_parameters_section = CodaParametersSectionScript.new()
 	_content.add_child(_parameters_section)
@@ -119,8 +128,6 @@ func _ready() -> void:
 
 	tooltip_text = "Inspector — properties of the event selected in the Browser."
 
-	set_process(true)
-
 
 func attach_browser_panel(browser_panel: Control) -> void:
 	_browser_panel = browser_panel
@@ -138,16 +145,11 @@ func attach_project(project: CodaState) -> void:
 		_banks_section.attach_project(project)
 
 
-func attach_runtime(runtime: CodaRuntime) -> void:
-	_runtime = runtime
-
-
 func on_browser_event_selected(node: Variant) -> void:
 	var bn := node as CodaBrowserNode
 	if bn == null or bn.kind != CodaBrowserNode.Kind.EVENT:
 		_selected_node = null
 		_show_empty()
-		_stop_active_voice()
 		if _parameters_section != null:
 			_parameters_section.set_event(null)
 		if _modulation_section != null:
@@ -158,7 +160,7 @@ func on_browser_event_selected(node: Variant) -> void:
 	_selected_node = bn
 	_header.heading = bn.name
 	_show_event()
-	_refresh_transport_enabled()
+	_sync_authoring_mode_picker(bn)
 	if _parameters_section != null:
 		_parameters_section.set_event(bn)
 	if _modulation_section != null:
@@ -167,11 +169,24 @@ func on_browser_event_selected(node: Variant) -> void:
 		_banks_section.set_event(bn)
 
 
-func _process(_delta: float) -> void:
-	if _active_handle != null and not _active_handle.is_playing():
-		_active_handle = null
-		if _transport_bar != null:
-			_transport_bar.set_playing(false)
+func _sync_authoring_mode_picker(node: CodaBrowserNode) -> void:
+	if _authoring_mode_picker == null:
+		return
+	_suppress_authoring_mode_writeback = true
+	for i in _authoring_mode_picker.item_count:
+		if _authoring_mode_picker.get_item_id(i) == int(node.event_authoring_mode):
+			_authoring_mode_picker.select(i)
+			break
+	_suppress_authoring_mode_writeback = false
+
+
+func _on_authoring_mode_picked(idx: int) -> void:
+	if _suppress_authoring_mode_writeback or _selected_node == null or _project == null:
+		return
+	var mode_id: int = _authoring_mode_picker.get_item_id(idx)
+	var err: String = _project.set_event_authoring_mode(_selected_node.id, mode_id)
+	if not err.is_empty():
+		push_warning("Coda: " + err)
 
 
 func _show_empty() -> void:
@@ -186,57 +201,3 @@ func _show_event() -> void:
 		_empty_state.visible = false
 	if _scroll != null:
 		_scroll.visible = true
-
-
-func _refresh_transport_enabled() -> void:
-	if _transport_bar == null:
-		return
-	if _selected_node == null:
-		_transport_bar.set_play_enabled(false, "Select an event first")
-		return
-	if _runtime == null:
-		_transport_bar.set_play_enabled(false, "Runtime not available")
-		return
-	# Check if the event has either a graph that produces sound or legacy audio paths.
-	var has_content: bool = _selected_node.event_audio_paths.size() > 0
-	if not has_content and _selected_node.event_graph != null:
-		# A graph with at least one SOUND node with an audio path.
-		for n in _selected_node.event_graph.nodes:
-			if int(n.kind) == 5 and not String(n.properties.get("audio_path", "")).strip_edges().is_empty():
-				has_content = true
-				break
-	if not has_content:
-		_transport_bar.set_play_enabled(false, "Add a Sound node and pick an audio file in the Graph")
-		return
-	_transport_bar.set_play_enabled(true)
-
-
-func _on_play_requested() -> void:
-	if _selected_node == null or _runtime == null:
-		return
-	_stop_active_voice()
-	var params: Dictionary = {"loop": _transport_bar.is_loop_enabled()}
-	_active_handle = _runtime.play_event_node(_selected_node, params)
-	if _active_handle == null:
-		_transport_bar.set_playing(false)
-		NexusCodaLog.warn("inspector_preview", 'Could not start preview for "%s"' % _selected_node.name)
-		return
-	_transport_bar.set_playing(true)
-	NexusCodaLog.info("inspector_preview", 'Preview started: "%s"' % _selected_node.name)
-
-
-func _on_stop_requested() -> void:
-	_stop_active_voice()
-
-
-func _on_loop_toggled(loop: bool) -> void:
-	if _active_handle != null:
-		_active_handle.loop = loop
-
-
-func _stop_active_voice() -> void:
-	if _active_handle != null:
-		_active_handle.stop()
-		_active_handle = null
-	if _transport_bar != null:
-		_transport_bar.set_playing(false)

@@ -34,12 +34,20 @@ const MixerPanelScript := preload(
 const LogPanelScript := preload(
 	"res://addons/nexus_coda/editor/panels/log/coda_log_panel.gd"
 )
+const PlayerPanelScript := preload(
+	"res://addons/nexus_coda/editor/panels/player/coda_player_panel.gd"
+)
+const TimelinePanelScript := preload(
+	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_panel.gd"
+)
 
 const PANEL_BROWSER := &"browser"
 const PANEL_GRAPH := &"graph"
 const PANEL_INSPECTOR := &"inspector"
 const PANEL_MIXER := &"mixer"
 const PANEL_LOG := &"log"
+const PANEL_PLAYER := &"player"
+const PANEL_TIMELINE := &"timeline"
 
 const MID_NEW := 1
 const MID_OPEN := 2
@@ -56,6 +64,8 @@ const VID_TOGGLE_GRAPH := 111
 const VID_TOGGLE_INSPECTOR := 112
 const VID_TOGGLE_MIXER := 113
 const VID_TOGGLE_LOG := 114
+const VID_TOGGLE_PLAYER := 115
+const VID_TOGGLE_TIMELINE := 116
 
 const BID_NEW_BANK := 200
 const BID_VALIDATE_BANKS := 201
@@ -98,6 +108,8 @@ var _graph_panel: CodaEventGraphPanel
 var _inspector_panel: CodaInspectorPanel
 var _mixer_panel: CodaMixerPanel
 var _log_panel: CodaLogPanel
+var _player_panel: CodaPlayerPanel
+var _timeline_panel: CodaTimelinePanel
 
 var _current_path: String = ""
 var _dirty: bool = false
@@ -183,6 +195,8 @@ func _register_panels() -> void:
 	_inspector_panel = InspectorPanelScript.new()
 	_mixer_panel = MixerPanelScript.new()
 	_log_panel = LogPanelScript.new()
+	_player_panel = PlayerPanelScript.new()
+	_timeline_panel = TimelinePanelScript.new()
 
 	dm.register_panel(CodaDockPanelInfoScript.make(
 		PANEL_BROWSER, "Browser", CodaDockHostScript.ZONE_LEFT, _browser_panel
@@ -191,7 +205,13 @@ func _register_panels() -> void:
 		PANEL_GRAPH, "Graph", CodaDockHostScript.ZONE_CENTER, _graph_panel
 	))
 	dm.register_panel(CodaDockPanelInfoScript.make(
+		PANEL_TIMELINE, "Timeline", CodaDockHostScript.ZONE_CENTER, _timeline_panel
+	))
+	dm.register_panel(CodaDockPanelInfoScript.make(
 		PANEL_INSPECTOR, "Inspector", CodaDockHostScript.ZONE_RIGHT, _inspector_panel
+	))
+	dm.register_panel(CodaDockPanelInfoScript.make(
+		PANEL_PLAYER, "Player", CodaDockHostScript.ZONE_BOTTOM_LEFT, _player_panel
 	))
 	dm.register_panel(CodaDockPanelInfoScript.make(
 		PANEL_MIXER, "Mixer", CodaDockHostScript.ZONE_BOTTOM, _mixer_panel
@@ -215,14 +235,47 @@ func _wire_browser_to_others() -> void:
 	if _browser_panel.has_signal(&"event_selection_changed"):
 		var inspector_slot := Callable(_inspector_panel, &"on_browser_event_selected")
 		var graph_slot := Callable(_graph_panel, &"on_browser_event_selected")
+		var player_slot := Callable(_player_panel, &"on_browser_event_selected")
+		var timeline_slot := Callable(_timeline_panel, &"on_browser_event_selected")
 		if not _browser_panel.event_selection_changed.is_connected(inspector_slot):
 			_browser_panel.event_selection_changed.connect(inspector_slot)
 		if not _browser_panel.event_selection_changed.is_connected(graph_slot):
 			_browser_panel.event_selection_changed.connect(graph_slot)
+		if not _browser_panel.event_selection_changed.is_connected(player_slot):
+			_browser_panel.event_selection_changed.connect(player_slot)
+		if not _browser_panel.event_selection_changed.is_connected(timeline_slot):
+			_browser_panel.event_selection_changed.connect(timeline_slot)
+	if _browser_panel.has_signal(&"external_selection_requested"):
+		var route_slot := Callable(self, &"_on_browser_external_selection_requested")
+		if not _browser_panel.external_selection_requested.is_connected(route_slot):
+			_browser_panel.external_selection_requested.connect(route_slot)
 	if _inspector_panel != null:
 		_inspector_panel.attach_browser_panel(_browser_panel)
+	if _player_panel != null:
+		_player_panel.attach_browser_panel(_browser_panel)
 	if _graph_panel != null and _browser_panel.has_method(&"get_project"):
 		_graph_panel.attach_project(_browser_panel.get_project())
+
+
+## Routes selection events from non-events tabs (Buses → Mixer, Banks → Inspector, etc.)
+## to the right dock panel. For Game Syncs, the source event is also pre-selected so the
+## Inspector lands on the correct sections.
+func _on_browser_external_selection_requested(
+	target_panel_id: StringName, kind: StringName, payload: Variant
+) -> void:
+	if _dock_host == null or _dock_host.dock_manager == null:
+		return
+	var dm: CodaDockManager = _dock_host.dock_manager
+	if kind == &"game_sync" and payload is Dictionary:
+		var event_id: String = str((payload as Dictionary).get("event_id", ""))
+		if not event_id.is_empty() and _browser_panel != null \
+				and _browser_panel.has_method(&"select_event_by_id"):
+			_browser_panel.select_event_by_id(event_id)
+	dm.show_panel(target_panel_id)
+	NexusCodaLog.debug(
+		"browser_routing",
+		"Routed %s selection to %s panel" % [String(kind), String(target_panel_id)],
+	)
 
 
 func _wire_runtime_to_panels() -> void:
@@ -231,10 +284,12 @@ func _wire_runtime_to_panels() -> void:
 	var rt: CodaRuntime = _plugin.get_editor_runtime() as CodaRuntime
 	if rt == null:
 		return
-	if _inspector_panel != null:
-		_inspector_panel.attach_runtime(rt)
 	if _graph_panel != null:
 		_graph_panel.attach_runtime(rt)
+	if _player_panel != null:
+		_player_panel.attach_runtime(rt)
+	if _timeline_panel != null and _timeline_panel.has_method(&"attach_runtime"):
+		_timeline_panel.attach_runtime(rt)
 	if _mixer_panel != null:
 		_mixer_panel.attach_runtime(rt)
 		_mixer_panel.attach_bus_layout_export(
@@ -254,6 +309,10 @@ func _initial_bind() -> void:
 			_inspector_panel.attach_project(st as CodaState)
 		if _mixer_panel != null and st is CodaState:
 			_mixer_panel.attach_project(st as CodaState)
+		if _player_panel != null and st is CodaState:
+			_player_panel.attach_project(st as CodaState)
+		if _timeline_panel != null and st is CodaState:
+			_timeline_panel.attach_project(st as CodaState)
 	if _browser_panel != null and _browser_panel.has_method(&"pulse_events_selection_to_editor"):
 		_browser_panel.pulse_events_selection_to_editor()
 	_update_title()
@@ -324,7 +383,9 @@ func _rebuild_view_menu_items() -> void:
 	_view_menu.clear()
 	_view_menu.add_check_item("Show Browser", VID_TOGGLE_BROWSER)
 	_view_menu.add_check_item("Show Graph", VID_TOGGLE_GRAPH)
+	_view_menu.add_check_item("Show Timeline", VID_TOGGLE_TIMELINE)
 	_view_menu.add_check_item("Show Inspector", VID_TOGGLE_INSPECTOR)
+	_view_menu.add_check_item("Show Player", VID_TOGGLE_PLAYER)
 	_view_menu.add_check_item("Show Mixer", VID_TOGGLE_MIXER)
 	_view_menu.add_check_item("Show Log", VID_TOGGLE_LOG)
 	_view_menu.add_separator()
@@ -341,7 +402,9 @@ func _refresh_view_menu_check_marks() -> void:
 	var dm: CodaDockManager = _dock_host.dock_manager
 	_set_check(VID_TOGGLE_BROWSER, dm.is_panel_visible(PANEL_BROWSER))
 	_set_check(VID_TOGGLE_GRAPH, dm.is_panel_visible(PANEL_GRAPH))
+	_set_check(VID_TOGGLE_TIMELINE, dm.is_panel_visible(PANEL_TIMELINE))
 	_set_check(VID_TOGGLE_INSPECTOR, dm.is_panel_visible(PANEL_INSPECTOR))
+	_set_check(VID_TOGGLE_PLAYER, dm.is_panel_visible(PANEL_PLAYER))
 	_set_check(VID_TOGGLE_MIXER, dm.is_panel_visible(PANEL_MIXER))
 	_set_check(VID_TOGGLE_LOG, dm.is_panel_visible(PANEL_LOG))
 
@@ -622,7 +685,9 @@ func _collect_palette_entries() -> Array[Dictionary]:
 		var panels: Array = [
 			[PANEL_BROWSER, "Toggle Browser Panel"],
 			[PANEL_GRAPH, "Toggle Graph Panel"],
+			[PANEL_TIMELINE, "Toggle Timeline Panel"],
 			[PANEL_INSPECTOR, "Toggle Inspector Panel"],
+			[PANEL_PLAYER, "Toggle Player Panel"],
 			[PANEL_MIXER, "Toggle Mixer Panel"],
 			[PANEL_LOG, "Toggle Log Panel"],
 		]
@@ -640,6 +705,15 @@ func _collect_palette_entries() -> Array[Dictionary]:
 			"callable": Callable(self, "_clear_custom_layout")})
 		out.append({"title": "Reset Layout", "subtitle": "", "category": "View",
 			"callable": Callable(self, "_reset_to_factory_layout")})
+
+	# Player transport.
+	if _player_panel != null:
+		out.append({"title": "Player: Play Selection", "subtitle": "", "category": "Player",
+			"callable": Callable(_player_panel, "play_current_selection")})
+		out.append({"title": "Player: Stop", "subtitle": "", "category": "Player",
+			"callable": Callable(_player_panel, "stop_current_voice")})
+		out.append({"title": "Player: Pin / Unpin Selection", "subtitle": "", "category": "Player",
+			"callable": Callable(_player_panel, "toggle_pin")})
 
 	# Build/banks.
 	out.append({"title": "Create New Bank", "subtitle": "", "category": "Build",
@@ -707,8 +781,12 @@ func _on_view_id_pressed(id: int) -> void:
 			dm.toggle_panel(PANEL_BROWSER)
 		VID_TOGGLE_GRAPH:
 			dm.toggle_panel(PANEL_GRAPH)
+		VID_TOGGLE_TIMELINE:
+			dm.toggle_panel(PANEL_TIMELINE)
 		VID_TOGGLE_INSPECTOR:
 			dm.toggle_panel(PANEL_INSPECTOR)
+		VID_TOGGLE_PLAYER:
+			dm.toggle_panel(PANEL_PLAYER)
 		VID_TOGGLE_MIXER:
 			dm.toggle_panel(PANEL_MIXER)
 		VID_TOGGLE_LOG:
@@ -995,6 +1073,12 @@ func _apply_state_to_panels(st: CodaState) -> void:
 	if _inspector_panel != null:
 		_inspector_panel.attach_project(st)
 		_inspector_panel.on_browser_event_selected(null)
+	if _player_panel != null:
+		_player_panel.attach_project(st)
+		_player_panel.on_browser_event_selected(null)
+	if _timeline_panel != null:
+		_timeline_panel.attach_project(st)
+		_timeline_panel.on_browser_event_selected(null)
 	if _mixer_panel != null:
 		_mixer_panel.attach_project(st)
 	if _browser_panel != null and _browser_panel.has_method(&"pulse_events_selection_to_editor"):
@@ -1340,6 +1424,13 @@ func _teardown_before_close() -> void:
 	if _inspector_panel != null and is_instance_valid(_inspector_panel):
 		_inspector_panel.queue_free()
 	_inspector_panel = null
+	if _player_panel != null and is_instance_valid(_player_panel):
+		_player_panel.stop_current_voice()
+		_player_panel.queue_free()
+	_player_panel = null
+	if _timeline_panel != null and is_instance_valid(_timeline_panel):
+		_timeline_panel.queue_free()
+	_timeline_panel = null
 	if _mixer_panel != null and is_instance_valid(_mixer_panel):
 		_mixer_panel.queue_free()
 	_mixer_panel = null

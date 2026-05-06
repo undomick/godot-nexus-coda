@@ -168,6 +168,40 @@ func notify_event_graph_changed(event_id: String) -> String:
 	return err
 
 
+## Switches the event between graph and timeline authoring modes.
+## On the first switch to TIMELINE, a default timeline is created (one empty track).
+## Returns "" on success or a human-readable error string.
+func set_event_authoring_mode(event_id: String, mode: int) -> String:
+	var node: CodaBrowserNode = events_root.find_by_id(event_id)
+	if node == null or node.kind != CodaBrowserNode.Kind.EVENT:
+		return "Not an event in the events tree."
+	match mode:
+		CodaBrowserNode.AuthoringMode.GRAPH:
+			node.event_authoring_mode = CodaBrowserNode.AuthoringMode.GRAPH
+		CodaBrowserNode.AuthoringMode.TIMELINE:
+			node.event_authoring_mode = CodaBrowserNode.AuthoringMode.TIMELINE
+			if node.event_timeline == null:
+				node.event_timeline = CodaEventTimeline.make_default()
+		_:
+			return "Unknown authoring mode."
+	structure_changed.emit()
+	return ""
+
+
+## Notifies the project that the event timeline for `event_id` has been mutated externally.
+## Returns empty string on success, otherwise an English error message (matches the graph
+## counterpart so consumers can present errors uniformly).
+func notify_event_timeline_changed(event_id: String) -> String:
+	var node: CodaBrowserNode = events_root.find_by_id(event_id)
+	if node == null or node.kind != CodaBrowserNode.Kind.EVENT:
+		return "Not an event in the events tree."
+	if node.event_timeline == null:
+		return "Event has no timeline."
+	var err: String = node.event_timeline.validate()
+	structure_changed.emit()
+	return err
+
+
 ## Replaces the modulation list for an event.
 func set_event_modulations(event_id: String, modulations: Array[CodaModulation]) -> String:
 	var node: CodaBrowserNode = events_root.find_by_id(event_id)
@@ -586,6 +620,71 @@ func remove_bus(bus_id: String) -> bool:
 		structure_changed.emit()
 		return true
 	return false
+
+
+## Adds a new sibling bus immediately after `after_bus_id`.
+## Returns the new bus, or null on failure.
+func add_bus_after(after_bus_id: String, bus_name: String = "Bus") -> CodaBus:
+	if bus_root == null:
+		return null
+	var after_b: CodaBus = bus_root.find_by_id(after_bus_id)
+	if after_b == null:
+		return null
+	# Master has no parent; adding "after Master" is interpreted as appending a child.
+	var p: CodaBus = parent_bus_of(after_bus_id)
+	if p == null:
+		return add_child_bus(bus_root.id, bus_name)
+	var idx: int = p.children.find(after_b)
+	if idx < 0:
+		return null
+	var b: CodaBus = CodaBus.new(bus_name)
+	p.children.insert(idx + 1, b)
+	structure_changed.emit()
+	return b
+
+
+## Deep-clones a bus subtree, generating fresh ids for the clone and all descendants.
+func _clone_bus_new_ids(src: CodaBus) -> CodaBus:
+	var b: CodaBus = CodaBus.new(src.bus_name)
+	b.volume_db = src.volume_db
+	b.mute = src.mute
+	b.solo = src.solo
+	b.bypass = src.bypass
+	b.send_target_id = src.send_target_id
+	for c in src.children:
+		b.children.append(_clone_bus_new_ids(c))
+	return b
+
+
+## Duplicates the bus (and its subtree) and inserts the copy right after the original among siblings.
+## Returns the new duplicated bus, or null on failure.
+func duplicate_bus(bus_id: String) -> CodaBus:
+	if bus_root == null or bus_id == bus_root.id:
+		return null
+	var src: CodaBus = bus_root.find_by_id(bus_id)
+	if src == null:
+		return null
+	var p: CodaBus = parent_bus_of(bus_id)
+	if p == null:
+		return null
+	var idx: int = p.children.find(src)
+	if idx < 0:
+		return null
+	var dup: CodaBus = _clone_bus_new_ids(src)
+	p.children.insert(idx + 1, dup)
+	structure_changed.emit()
+	return dup
+
+
+## Resets a bus' fader to unity (0 dB). Master is allowed.
+func reset_bus_volume(bus_id: String) -> void:
+	if bus_root == null:
+		return
+	var b: CodaBus = bus_root.find_by_id(bus_id)
+	if b == null:
+		return
+	b.volume_db = 0.0
+	project_dirty.emit()
 
 
 func rename_bus(bus_id: String, new_name: String) -> bool:

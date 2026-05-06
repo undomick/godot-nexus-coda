@@ -24,6 +24,9 @@ const CodaVoicePoolScript := preload("res://addons/nexus_coda/runtime/coda_voice
 const CodaEventHandleScript := preload("res://addons/nexus_coda/runtime/coda_event_handle.gd")
 const CodaEventResolverScript := preload("res://addons/nexus_coda/runtime/coda_event_resolver.gd")
 const CodaGraphSchedulerScript := preload("res://addons/nexus_coda/runtime/coda_graph_scheduler.gd")
+const CodaTimelineSchedulerScript := preload(
+	"res://addons/nexus_coda/runtime/coda_timeline_scheduler.gd"
+)
 const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
 const CodaAudioBusMirrorScript := preload("res://addons/nexus_coda/runtime/coda_audio_bus_mirror.gd")
 const CodaBankExportScript := preload("res://addons/nexus_coda/editor/io/coda_bank_export.gd")
@@ -41,6 +44,13 @@ var _next_handle_id: int = 1
 var _bus_id_to_godot_name: Dictionary = {}
 ## Loaded banks: bank_id (String) -> { "bank_name": String, "events_by_path": { path: CodaBrowserNode } }
 var _loaded_banks: Dictionary = {}
+## Active timeline-mode handles: handle -> dispatcher state. Each entry tracks the timeline
+## cursor, currently-playing per-clip voices and which clips have already been fired in this
+## (loop) iteration so the same clip is not retriggered every frame.
+var _timeline_dispatchers: Dictionary = {}
+## player_instance_id -> CodaEventHandle (timeline-mode only). Lets [code]_on_voice_finished[/code]
+## resolve a finished timeline voice without going through [code]_active_handles[/code].
+var _timeline_voice_owner: Dictionary = {}
 
 
 func _ready() -> void:
@@ -54,6 +64,8 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if not _timeline_dispatchers.is_empty():
+		_tick_timeline_dispatchers(delta)
 	if _active_handles.is_empty():
 		return
 	for h in _active_handles.values():
@@ -163,6 +175,12 @@ func stop_all() -> void:
 		if hh != null:
 			hh._alive = false
 	_active_handles.clear()
+	for h in _timeline_dispatchers.keys():
+		var hh2 := h as CodaEventHandle
+		if hh2 != null:
+			hh2._alive = false
+	_timeline_dispatchers.clear()
+	_timeline_voice_owner.clear()
 
 
 func is_alive(handle: CodaEventHandle) -> bool:
@@ -362,6 +380,8 @@ func loaded_bank_ids() -> PackedStringArray:
 
 
 func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> CodaEventHandle:
+	if event.event_authoring_mode == CodaBrowserNode.AuthoringMode.TIMELINE:
+		return _start_timeline_event(event, path, params)
 	# Build the parameter snapshot used to plan the graph (Switch/Blend look this up).
 	var live_params: Dictionary = _build_param_values(event, params)
 	# Stamp routing on params so _start_player_for_entry uses the right bus per voice.
@@ -499,6 +519,9 @@ func _start_player_for_entry(entry: Dictionary, params: Dictionary) -> AudioStre
 
 func _on_voice_finished(player: AudioStreamPlayer) -> void:
 	var key: int = player.get_instance_id()
+	if _timeline_voice_owner.has(key):
+		_on_timeline_voice_finished(player, key)
+		return
 	if not _active_handles.has(key):
 		return
 	var h: CodaEventHandle = _active_handles[key] as CodaEventHandle
@@ -533,3 +556,276 @@ func _on_voice_finished(player: AudioStreamPlayer) -> void:
 
 func _warn(msg: String) -> void:
 	push_warning("Coda: %s" % msg)
+
+
+# ---- Timeline-mode dispatching ----
+
+func _start_timeline_event(
+	event: CodaBrowserNode, path: String, params: Dictionary
+) -> CodaEventHandle:
+	var timeline: CodaEventTimeline = event.event_timeline
+	if timeline == null:
+		_warn("event '%s' is in timeline mode but has no timeline data" % event.name)
+		return null
+	var live_params: Dictionary = _build_param_values(event, params)
+	params = params.duplicate()
+	params["_coda_voice_bus"] = resolve_bus_name_for_event(event)
+
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.id = _next_handle_id
+	_next_handle_id += 1
+	handle.event_path = path
+	handle.event_node = event
+	handle.params = params.duplicate()
+	handle.param_values = live_params
+	handle.param_values_smoothed = live_params.duplicate()
+	handle.loop = bool(params.get("loop", false))
+	handle._bus_name = bus_name
+	handle.is_timeline = true
+	handle.timeline_length_seconds = timeline.length_seconds
+	handle.timeline_cursor_seconds = 0.0
+	# Optional override: player panel may pass [start, end] to scrub a sub-range.
+	var loop_region: Variant = params.get("_coda_loop_region", null)
+	var loop_override_start: float = -1.0
+	var loop_override_end: float = -1.0
+	if loop_region is Array and (loop_region as Array).size() == 2:
+		loop_override_start = float((loop_region as Array)[0])
+		loop_override_end = float((loop_region as Array)[1])
+
+	_timeline_dispatchers[handle] = {
+		"timeline": timeline,
+		"voices": {},  # clip_id -> AudioStreamPlayer
+		"fired_clip_ids": {},  # clip_id -> true (cleared on loop wrap or seek)
+		"live_params": live_params,
+		"loop_override_start": loop_override_start,
+		"loop_override_end": loop_override_end,
+	}
+	voice_started.emit(handle)
+	return handle
+
+
+func _tick_timeline_dispatchers(delta: float) -> void:
+	# Iterate over a copy because we may erase entries on finish.
+	var handles: Array = _timeline_dispatchers.keys()
+	for h in handles:
+		var handle: CodaEventHandle = h as CodaEventHandle
+		if handle == null:
+			_timeline_dispatchers.erase(h)
+			continue
+		if not handle._alive:
+			_finalize_timeline_handle(handle)
+			continue
+		var d: Dictionary = _timeline_dispatchers[handle]
+		var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
+		if timeline == null:
+			handle._alive = false
+			_finalize_timeline_handle(handle)
+			continue
+
+		_advance_smoothing(handle, delta)
+
+		if handle.timeline_pending_seek_seconds >= 0.0:
+			_apply_timeline_seek(handle, d, handle.timeline_pending_seek_seconds)
+			handle.timeline_pending_seek_seconds = -1.0
+
+		if handle._paused:
+			continue
+
+		var prev_cursor: float = handle.timeline_cursor_seconds
+		var next_cursor: float = prev_cursor + delta
+
+		var loop_start: float = float(d.get("loop_override_start", -1.0))
+		var loop_end: float = float(d.get("loop_override_end", -1.0))
+		if loop_start < 0.0 or loop_end <= loop_start:
+			if timeline.loop_enabled and timeline.loop_end_seconds > timeline.loop_start_seconds:
+				loop_start = timeline.loop_start_seconds
+				loop_end = timeline.loop_end_seconds
+			else:
+				loop_start = -1.0
+				loop_end = -1.0
+
+		var wrapped: bool = false
+		if loop_end > 0.0 and next_cursor >= loop_end:
+			var overshoot: float = next_cursor - loop_end
+			next_cursor = loop_start + overshoot
+			wrapped = true
+		elif next_cursor >= timeline.length_seconds:
+			if handle.loop:
+				next_cursor = next_cursor - timeline.length_seconds
+				wrapped = true
+			else:
+				_fire_clips_in_range(
+					handle, d, timeline, prev_cursor, timeline.length_seconds
+				)
+				handle.timeline_cursor_seconds = timeline.length_seconds
+				handle._alive = false
+				_finalize_timeline_handle(handle)
+				continue
+
+		if wrapped:
+			# Fire any remaining clips up to the wrap point, then reset and continue from the
+			# loop start so designers don't see clips silently skipped at the wrap.
+			var wrap_target: float = (
+				loop_end if loop_end > 0.0 else timeline.length_seconds
+			)
+			_fire_clips_in_range(handle, d, timeline, prev_cursor, wrap_target)
+			d["fired_clip_ids"] = {}
+			# Stop currently-playing voices so the next iteration retriggers them on cue.
+			_stop_timeline_voices(d)
+			prev_cursor = (
+				loop_start if loop_start >= 0.0 else 0.0
+			)
+
+		handle.timeline_cursor_seconds = next_cursor
+		_fire_clips_in_range(handle, d, timeline, prev_cursor, next_cursor)
+
+
+func _fire_clips_in_range(
+	handle: CodaEventHandle,
+	d: Dictionary,
+	timeline: CodaEventTimeline,
+	from_seconds: float,
+	to_seconds: float,
+) -> void:
+	if to_seconds <= from_seconds:
+		return
+	var has_solo: bool = false
+	for t in timeline.tracks:
+		if t.solo:
+			has_solo = true
+			break
+	var fired: Dictionary = d.get("fired_clip_ids", {})
+	for track in timeline.tracks:
+		if track.mute:
+			continue
+		if has_solo and not track.solo:
+			continue
+		for clip in track.clips:
+			if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
+				continue
+			if fired.has(clip.id):
+				continue
+			# Fire when [from, to) crosses the clip start.
+			if clip.start_seconds < from_seconds or clip.start_seconds >= to_seconds:
+				continue
+			var entry: Dictionary = {
+				"audio_path": clip.audio_path,
+				"volume_db": clip.volume_db + track.volume_db,
+				"pitch_scale": clip.pitch_scale,
+				"sound_id": clip.id,
+				"track_id": track.id,
+				"stream_offset_seconds": clip.offset_seconds,
+				"duration_seconds": clip.duration_seconds,
+			}
+			_spawn_timeline_voice(handle, d, entry)
+			fired[clip.id] = true
+	d["fired_clip_ids"] = fired
+
+
+func _spawn_timeline_voice(
+	handle: CodaEventHandle, d: Dictionary, entry: Dictionary
+) -> void:
+	var stream_path: String = String(entry.get("audio_path", "")).strip_edges()
+	if stream_path.is_empty():
+		return
+	if not ResourceLoader.exists(stream_path):
+		_warn("timeline clip audio missing: '%s'" % stream_path)
+		return
+	var stream: AudioStream = load(stream_path) as AudioStream
+	if stream == null:
+		return
+	var player: AudioStreamPlayer = _pool.acquire()
+	if player == null:
+		_warn("voice pool exhausted while playing timeline clip '%s'" % stream_path)
+		return
+	var route_bus: String = String(handle.params.get("_coda_voice_bus", bus_name))
+	if AudioServer.get_bus_index(route_bus) < 0:
+		route_bus = "Master"
+	player.bus = route_bus
+	player.stream = stream
+	var override_db: float = float(handle.params.get("volume_db", 0.0))
+	player.volume_db = float(entry.get("volume_db", 0.0)) + override_db
+	player.pitch_scale = float(entry.get("pitch_scale", 1.0)) * float(
+		handle.params.get("pitch_scale", 1.0)
+	)
+	player.play(maxf(0.0, float(entry.get("stream_offset_seconds", 0.0))))
+	if handle._paused:
+		player.stream_paused = true
+	var voices: Dictionary = d.get("voices", {})
+	voices[entry.get("sound_id", "")] = player
+	d["voices"] = voices
+	_timeline_voice_owner[player.get_instance_id()] = handle
+	# Track the most recent voice on the handle so legacy graph-based code paths (modulation
+	# bookkeeping, status checks) keep referencing a live player object.
+	handle._bind_player(player)
+	handle.current_sound_id = String(entry.get("sound_id", ""))
+	handle.base_volume_db = float(entry.get("volume_db", 0.0))
+	handle.base_pitch_scale = float(entry.get("pitch_scale", 1.0))
+
+
+func _on_timeline_voice_finished(player: AudioStreamPlayer, key: int) -> void:
+	var h: CodaEventHandle = _timeline_voice_owner.get(key, null) as CodaEventHandle
+	_timeline_voice_owner.erase(key)
+	if h == null or not _timeline_dispatchers.has(h):
+		return
+	var d: Dictionary = _timeline_dispatchers[h]
+	var voices: Dictionary = d.get("voices", {})
+	for k in voices.keys():
+		if voices[k] == player:
+			voices.erase(k)
+			break
+	d["voices"] = voices
+
+
+func _apply_timeline_seek(
+	handle: CodaEventHandle, d: Dictionary, target_seconds: float
+) -> void:
+	var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
+	if timeline == null:
+		return
+	var clamped: float = clampf(target_seconds, 0.0, timeline.length_seconds)
+	handle.timeline_cursor_seconds = clamped
+	_stop_timeline_voices(d)
+	d["fired_clip_ids"] = {}
+
+
+func _stop_timeline_voices(d: Dictionary) -> void:
+	var voices: Dictionary = d.get("voices", {})
+	for k in voices.keys():
+		var p: AudioStreamPlayer = voices[k] as AudioStreamPlayer
+		if p == null or not is_instance_valid(p):
+			continue
+		_timeline_voice_owner.erase(p.get_instance_id())
+		if p.playing:
+			p.stop()
+	d["voices"] = {}
+
+
+func _finalize_timeline_handle(handle: CodaEventHandle) -> void:
+	if not _timeline_dispatchers.has(handle):
+		return
+	var d: Dictionary = _timeline_dispatchers[handle]
+	_stop_timeline_voices(d)
+	_timeline_dispatchers.erase(handle)
+	handle._on_player_finished()
+	voice_finished.emit(handle)
+
+
+# ---- Player panel ↔ Timeline panel sync ----
+
+## Returns the active timeline handle for the given event id, or null. Used by the timeline
+## panel to keep its visual cursor in sync with the player panel without leaking dispatcher
+## internals.
+func get_active_timeline_handle_for_event(event_id: String) -> CodaEventHandle:
+	if event_id.is_empty():
+		return null
+	for h in _timeline_dispatchers.keys():
+		var handle: CodaEventHandle = h as CodaEventHandle
+		if handle == null or not handle._alive:
+			continue
+		var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
+		if event == null:
+			continue
+		if event.id == event_id:
+			return handle
+	return null
