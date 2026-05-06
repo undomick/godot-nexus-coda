@@ -38,6 +38,10 @@ func add_panel_control(control: Control) -> void:
 		return
 	if control.get_parent() != null:
 		control.get_parent().remove_child(control)
+	# Ensure the tab title matches the registered display title (not the control's node name).
+	var title: String = str(control.get_meta(CodaDockPanelInfo.META_PANEL_TITLE, "")).strip_edges()
+	if not title.is_empty():
+		control.name = title
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	control.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(control)

@@ -16,7 +16,7 @@ const ZONE_CENTER := &"center"
 const ZONE_RIGHT := &"right"
 const ZONE_BOTTOM := &"bottom"
 
-const SPLIT_LEFT_RATIO := 0.18
+const SPLIT_LEFT_RATIO := 0.14
 const SPLIT_RIGHT_RATIO := 0.78
 const SPLIT_BOTTOM_RATIO := 0.72
 
@@ -29,6 +29,11 @@ var _zone_left: CodaDockZone
 var _zone_center: CodaDockZone
 var _zone_right: CodaDockZone
 var _zone_bottom: CodaDockZone
+
+var _splits_initialized: bool = false
+var _user_adjusted_top: bool = false
+var _user_adjusted_middle: bool = false
+var _user_adjusted_outer: bool = false
 
 
 func _ready() -> void:
@@ -72,6 +77,9 @@ func _ready() -> void:
 	dock_manager.register_zone(ZONE_BOTTOM, _zone_bottom)
 
 	resized.connect(_apply_proportional_splits)
+	_top_h_split.drag_ended.connect(func() -> void: _user_adjusted_top = true)
+	_middle_h_split.drag_ended.connect(func() -> void: _user_adjusted_middle = true)
+	_outer_v_split.drag_ended.connect(func() -> void: _user_adjusted_outer = true)
 	call_deferred(&"_apply_proportional_splits")
 	call_deferred(&"_emit_ready")
 
@@ -92,16 +100,26 @@ func _emit_ready() -> void:
 func _apply_proportional_splits() -> void:
 	var w: float = size.x
 	var h: float = size.y
-	if w >= 64.0:
-		_top_h_split.split_offset = int(round(w * SPLIT_LEFT_RATIO))
-		_middle_h_split.split_offset = int(round((w - w * SPLIT_LEFT_RATIO) * 0.78))
-	if h >= 64.0:
-		_outer_v_split.split_offset = int(round(h * SPLIT_BOTTOM_RATIO))
+	if w >= 64.0 and (not _splits_initialized or not _user_adjusted_top):
+		var desired_left_w: float = w * SPLIT_LEFT_RATIO
+		# SplitContainer offset is relative to the center (0 = centered).
+		_top_h_split.split_offset = int(round(desired_left_w - w * 0.5))
+	if w >= 64.0 and (not _splits_initialized or not _user_adjusted_middle):
+		var left_w: float = w * SPLIT_LEFT_RATIO
+		var right_w: float = maxf(64.0, w - left_w)
+		var desired_center_w: float = right_w * SPLIT_RIGHT_RATIO
+		_middle_h_split.split_offset = int(round(desired_center_w - right_w * 0.5))
+	if h >= 64.0 and (not _splits_initialized or not _user_adjusted_outer):
+		var desired_top_h: float = h * SPLIT_BOTTOM_RATIO
+		_outer_v_split.split_offset = int(round(desired_top_h - h * 0.5))
+	_splits_initialized = true
 
 
 func _on_zone_emptied(_zone_id: StringName) -> void:
-	_apply_proportional_splits()
+	if not _splits_initialized:
+		_apply_proportional_splits()
 
 
 func _on_zone_populated(_zone_id: StringName) -> void:
-	_apply_proportional_splits()
+	if not _splits_initialized:
+		_apply_proportional_splits()

@@ -335,7 +335,11 @@ func _on_popup_request(at_position: Vector2) -> void:
 	menu.add_item("Add Sound", NodeData.Kind.SOUND)
 	menu.id_pressed.connect(_on_popup_picked.bind(at_position))
 	add_child(menu)
-	menu.popup_on_parent(Rect2(at_position, Vector2.ZERO))
+	# GraphEdit's `popup_request` provides a local position. PopupMenu expects screen coordinates.
+	var screen_pos: Vector2 = at_position
+	if _graph_edit != null:
+		screen_pos = _graph_edit.get_screen_position() + at_position
+	menu.popup(Rect2i(screen_pos, Vector2i.ZERO))
 
 
 func _on_popup_picked(kind_id: int, at_position: Vector2) -> void:
@@ -345,7 +349,8 @@ func _on_popup_picked(kind_id: int, at_position: Vector2) -> void:
 func _viewport_to_graph(at_position: Vector2) -> Vector2:
 	if _graph_edit == null:
 		return at_position
-	var local: Vector2 = _graph_edit.get_local_mouse_position()
+	# `at_position` is already in GraphEdit local space for `popup_request`.
+	var local: Vector2 = at_position
 	return (local + _graph_edit.scroll_offset) / _graph_edit.zoom
 
 

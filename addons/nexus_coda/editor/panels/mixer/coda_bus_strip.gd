@@ -251,10 +251,34 @@ func _ready() -> void:
 func _get_drag_data(at_position: Vector2) -> Variant:
 	if _bus == null or _is_master_bus:
 		return null
+	if not _is_drag_start_allowed(get_global_mouse_position()):
+		return null
 	var preview := BusDragPreview.new(_bus.bus_name)
 	preview.custom_minimum_size = size
 	set_drag_preview(preview)
 	return {"type": DND_TYPE, "bus_id": _bus.id}
+
+
+func _is_drag_start_allowed(global_pos: Vector2) -> bool:
+	# Only allow strip drag from empty background / border.
+	# If the pointer is over any interactive child control, do not start DnD.
+	var interactive: Array[Control] = [
+		_name_edit,
+		_db_edit,
+		_send_option,
+		_fader,
+		_meter_l,
+		_meter_r,
+		_mute_btn,
+		_solo_btn,
+		_bypass_btn,
+	]
+	for c in interactive:
+		if c == null:
+			continue
+		if c.is_visible_in_tree() and c.get_global_rect().has_point(global_pos):
+			return false
+	return true
 
 
 func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
