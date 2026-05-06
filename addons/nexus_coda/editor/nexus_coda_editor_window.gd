@@ -237,6 +237,10 @@ func _wire_runtime_to_panels() -> void:
 		_graph_panel.attach_runtime(rt)
 	if _mixer_panel != null:
 		_mixer_panel.attach_runtime(rt)
+		_mixer_panel.attach_bus_layout_export(
+			Callable(self, &"pick_audio_bus_layout_export_path_async"),
+			Callable(self, &"complete_audio_bus_layout_export")
+		)
 
 
 func _initial_bind() -> void:
@@ -464,6 +468,37 @@ func _pick_bank_save_path(suggest_name: String) -> String:
 	var path: String = await _await_editor_file_path(dlg)
 	dlg.queue_free()
 	return path
+
+
+## Save dialog for [AudioBusLayout] — user picks filename and folder (not tied to [code]default_bus_layout.tres[/code]).
+func pick_audio_bus_layout_export_path_async() -> String:
+	if _plugin == null:
+		return ""
+	var base: Control = _plugin.get_editor_interface().get_base_control()
+	var dlg := EditorFileDialog.new()
+	dlg.use_native_dialog = false
+	dlg.access = EditorFileDialog.ACCESS_RESOURCES
+	dlg.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
+	dlg.title = "Export Audio Bus Layout"
+	dlg.clear_filters()
+	dlg.add_filter("*.tres ; Godot AudioBusLayout")
+	dlg.current_dir = "res://"
+	dlg.current_file = "bus_layout.tres"
+	base.add_child(dlg)
+	var path: String = await _await_editor_file_path(dlg)
+	dlg.queue_free()
+	return path
+
+
+func complete_audio_bus_layout_export(saved_path: String, err: Error) -> void:
+	if err != OK:
+		_editor_notify("Could not export bus layout (%s)." % error_string(err), true)
+		return
+	if saved_path.is_empty():
+		_editor_notify("Bus layout export finished without a path.", true)
+		return
+	_editor_notify('Exported bus layout to "%s"' % saved_path, false)
+	_refresh_editor_filesystem_after_save(saved_path)
 
 
 func _rebuild_help_menu_items() -> void:
@@ -1080,12 +1115,14 @@ func _refresh_editor_filesystem_after_save(path: String) -> void:
 	var fs: EditorFileSystem = _plugin.get_editor_interface().get_resource_filesystem()
 	if fs == null:
 		return
-	# Newly created res:// files are not known to EditorFileSystem until update_file/scan;
-	# reimport_files alone fails with "Can't find file during file reimport".
+	# Newly created res:// files are not known to EditorFileSystem until update_file/scan.
+	# Native .tres/.res written via ResourceSaver are not imported assets — reimport_files then
+	# errors with "importer for type '' not found" (see bus layout export, etc.).
 	if path.begins_with("res://"):
 		if fs.has_method(&"update_file"):
 			fs.update_file(path)
-		if fs.has_method(&"reimport_files"):
+		var ext: String = path.get_extension().to_lower()
+		if ext != "tres" and ext != "res" and fs.has_method(&"reimport_files"):
 			fs.reimport_files(PackedStringArray([path]))
 	elif fs.has_method(&"scan"):
 		fs.call_deferred(&"scan")

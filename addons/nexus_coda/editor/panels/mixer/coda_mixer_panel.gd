@@ -23,9 +23,10 @@ var _scroll: ScrollContainer
 var _strip_row: HBoxContainer
 var _snapshot_picker: OptionButton
 var _add_bus_button: Button
+var _pick_bus_layout_path: Callable = Callable()
+var _complete_bus_layout_export: Callable = Callable()
 var _strips_by_bus_id: Dictionary = {}
 var _meter_accumulator: float = 0.0
-var _mixer_rebuild_pending: bool = false
 
 
 func _ready() -> void:
@@ -76,6 +77,15 @@ func _ready() -> void:
 	del_btn.pressed.connect(_on_delete_snapshot_pressed)
 	_toolbar.add_child(del_btn)
 
+	var sep_export := VSeparator.new()
+	_toolbar.add_child(sep_export)
+
+	var export_bus_btn := Button.new()
+	export_bus_btn.text = "Export Bus Layout…"
+	export_bus_btn.tooltip_text = "Save this project's bus tree as a Godot AudioBusLayout .tres (only Coda buses — pick path and filename)."
+	export_bus_btn.pressed.connect(_on_export_bus_layout_pressed)
+	_toolbar.add_child(export_bus_btn)
+
 	_empty_state = CodaEmptyStateScript.new()
 	_empty_state.title_text = "Mixer ready"
 	_empty_state.body_text = "Open or create a project to see its bus tree."
@@ -103,7 +113,6 @@ func attach_project(project: CodaState) -> void:
 	if _project != null and is_instance_valid(_project):
 		if _project.structure_changed.is_connected(_on_mixer_structure_changed):
 			_project.structure_changed.disconnect(_on_mixer_structure_changed)
-	_mixer_rebuild_pending = false
 	_project = project
 	if _project != null:
 		if not _project.structure_changed.is_connected(_on_mixer_structure_changed):
@@ -116,16 +125,19 @@ func attach_runtime(runtime: CodaRuntime) -> void:
 	_runtime = runtime
 
 
+func attach_bus_layout_export(pick_path: Callable, on_complete: Callable) -> void:
+	_pick_bus_layout_path = pick_path
+	_complete_bus_layout_export = on_complete
+
+
 func _on_mixer_structure_changed() -> void:
 	# Defer so callers (controls, snapshots, etc.) are never mid–child-list mutation when we rebuild.
-	if _mixer_rebuild_pending:
-		return
-	_mixer_rebuild_pending = true
+	# Do NOT coalesce drops: multiple emits before the deferred run must all converge into one rebuild
+	# scheduled per emit, otherwise Recall can be ignored while a deferred rebuild is still queued.
 	call_deferred("_deferred_mixer_rebuild")
 
 
 func _deferred_mixer_rebuild() -> void:
-	_mixer_rebuild_pending = false
 	if not is_instance_valid(self) or _project == null:
 		return
 	# A bus was added/removed/renamed elsewhere — rebuild from scratch. Rebuild also refreshes
@@ -330,7 +342,34 @@ func _on_recall_pressed() -> void:
 	if not _project.apply_snapshot(s.id):
 		NexusCodaLog.warn("mixer", "Could not apply snapshot %s" % s.snapshot_name)
 		return
+	# apply_snapshot emits structure_changed (deferred rebuild), but always push to AudioServer here
+	# so Godot's live bus layout updates even if coalescing or ordering would skip a rebuild.
+	var name_map: Dictionary = CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root)
+	_sync_strip_ui_from_project(name_map)
 	NexusCodaLog.info("mixer", 'Applied snapshot "%s"' % s.snapshot_name)
+
+
+func _sync_strip_ui_from_project(name_map: Dictionary) -> void:
+	if _project == null or _project.bus_root == null:
+		return
+	var flat: Array[CodaBus] = _project.bus_root.collect_flat([])
+	for b in flat:
+		var strip: CodaBusStrip = _strips_by_bus_id.get(b.id, null) as CodaBusStrip
+		if strip == null:
+			continue
+		var is_master: bool = b.id == _project.bus_root.id
+		var send_targets: Array[CodaBus] = _previous_flat_send_targets(b, flat)
+		var default_send: String = ""
+		var pbus: CodaBus = _project.parent_bus_of(b.id)
+		if pbus != null:
+			default_send = pbus.id
+		strip.bind(
+			b,
+			String(name_map.get(b.id, b.bus_name)),
+			is_master,
+			send_targets,
+			default_send
+		)
 
 
 func _on_capture_pressed() -> void:
@@ -354,3 +393,26 @@ func _on_delete_snapshot_pressed() -> void:
 	var s: CodaSnapshot = _project.snapshots[snap_idx]
 	_project.remove_snapshot(s.id)
 	NexusCodaLog.info("mixer", 'Removed snapshot "%s"' % s.snapshot_name)
+
+
+func _on_export_bus_layout_pressed() -> void:
+	if _pick_bus_layout_path.is_null():
+		NexusCodaLog.warn("mixer", "Bus layout export is not connected.")
+		return
+	if _project == null or _project.bus_root == null:
+		NexusCodaLog.warn("mixer", "Open a project with buses before exporting the bus layout.")
+		return
+	CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root)
+	var picked: Variant = await _pick_bus_layout_path.call()
+	var raw_path: String = str(picked).strip_edges()
+	if raw_path.is_empty():
+		return
+	var result: Dictionary = CodaAudioBusMirrorScript.save_current_audio_bus_layout(raw_path, _project.bus_root)
+	var err: Error = result.get("error", FAILED) as Error
+	var saved_path: String = str(result.get("path", ""))
+	if not _complete_bus_layout_export.is_null():
+		_complete_bus_layout_export.call(saved_path, err)
+	elif err != OK:
+		NexusCodaLog.warn("mixer", "Could not export bus layout (%s)." % error_string(err))
+	else:
+		NexusCodaLog.info("mixer", 'Exported bus layout to "%s"' % saved_path)
