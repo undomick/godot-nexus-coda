@@ -7,17 +7,24 @@ class_name CodaAudioBusMirror
 ## parents children to their Coda parent's mirrored bus, and remembers a mapping bus_id → godot_index.
 ##
 ## Buses are matched by **name**. Renames in Coda must remove the old Godot bus or the old name stays behind.
-## We therefore **drop** non-master AudioServer buses whose names are not in the current Coda tree before sync.
+##
+## Optional pruning: when [param prune_unclaimed_buses] is [code]true[/code], non-master AudioServer buses
+## whose names are not in the current Coda tree are removed before sync (editor mixer / export cleanup).
+## The runtime keeps this [code]false[/code] by default so shipped games keep their project-wide bus layout.
 
 const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.gd")
 
-## Returns dictionary { coda_bus_id (String) -> godot_bus_name (String) }
-static func sync_to_audio_server(bus_root: CodaBus) -> Dictionary:
+## Returns dictionary { coda_bus_id (String) -> godot_bus_name (String) }.
+## Pass [code]prune_unclaimed_buses = true[/code] from editor-only callers that own the whole bus list.
+static func sync_to_audio_server(
+	bus_root: CodaBus, prune_unclaimed_buses: bool = false
+) -> Dictionary:
 	var map: Dictionary = {}
 	if bus_root == null:
 		return map
 	var claimed: Dictionary = _claimed_godot_names(bus_root)
-	_prune_unclaimed_buses(claimed)
+	if prune_unclaimed_buses:
+		_prune_unclaimed_buses(claimed)
 	# Master always maps to Godot's index 0 ("Master"), regardless of the Coda bus name.
 	map[bus_root.id] = "Master"
 	_apply_master_settings(bus_root)
@@ -185,7 +192,7 @@ static func bus_layout_from_coda_tree(bus_root: CodaBus) -> AudioBusLayout:
 
 ## Saves the Coda mixer bus tree as [AudioBusLayout]. [param bus_root] is required. [param path] may be
 ## [code]res://[/code], [code]user://[/code], or an absolute path; extension is normalized to [code].tres[/code]
-## when missing or not a resource extension. Call [method sync_to_audio_server] before export so routing matches
+## when missing or not a resource extension. Call [method sync_to_audio_server] with pruning enabled before export so routing matches
 ## the live mixer; saved **names and levels** still come from [param bus_root].
 static func save_current_audio_bus_layout(path: String, bus_root: CodaBus) -> Dictionary:
 	var p: String = _normalize_bus_layout_save_path(path)
