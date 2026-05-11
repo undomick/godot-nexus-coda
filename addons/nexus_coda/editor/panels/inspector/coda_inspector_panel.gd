@@ -4,11 +4,9 @@ extends VBoxContainer
 
 ## Stacked-section inspector for the currently selected browser node.
 ## Layout:
-##   - Header (event name)
-##   - Parameters section
-##   - Modulation section
-##   - Banks section
-##   - Output placeholder (bus routing lives in the Mixer)
+##   - Header (event or asset name)
+##   - Event stack: authoring, parameters, modulation, banks, output
+##   - Asset stack: folder / asset summary when the Assets tab selects a node
 ##
 ## Transport (Play / Stop / Loop / Pause / time / meter) lives in the dedicated
 ## Player panel. Inspector no longer owns playback state.
@@ -25,6 +23,9 @@ const CodaModulationSectionScript := preload(
 const CodaBanksSectionScript := preload(
 	"res://addons/nexus_coda/editor/panels/inspector/coda_banks_section.gd"
 )
+const CodaAssetInspectorSectionScript := preload(
+	"res://addons/nexus_coda/editor/panels/inspector/coda_asset_inspector_section.gd"
+)
 
 var _browser_panel: Control = null
 var _project: CodaState = null
@@ -32,12 +33,14 @@ var _empty_state: CodaEmptyState
 var _scroll: ScrollContainer
 var _content: VBoxContainer
 var _header: CodaSectionHeader
+var _event_stack: VBoxContainer
 var _authoring_mode_row: HBoxContainer
 var _authoring_mode_picker: OptionButton
 var _parameters_section: CodaParametersSection
 var _modulation_section: CodaModulationSection
 var _banks_section: CodaBanksSection
 var _output_placeholder: Label
+var _asset_section: CodaAssetInspectorSection
 var _selected_node: CodaBrowserNode = null
 var _suppress_authoring_mode_writeback: bool = false
 
@@ -50,7 +53,7 @@ func _ready() -> void:
 
 	_empty_state = CodaEmptyStateScript.new()
 	_empty_state.title_text = "No selection"
-	_empty_state.body_text = "Pick an event in the Browser to see its properties."
+	_empty_state.body_text = "Pick an event or an asset in the Browser to see its properties."
 	_empty_state.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_empty_state)
 
@@ -78,9 +81,14 @@ func _ready() -> void:
 	_header.heading = "Event"
 	_content.add_child(_header)
 
+	_event_stack = VBoxContainer.new()
+	_event_stack.add_theme_constant_override(&"separation", Tokens.SPACING_MD)
+	_event_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.add_child(_event_stack)
+
 	_authoring_mode_row = HBoxContainer.new()
 	_authoring_mode_row.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
-	_content.add_child(_authoring_mode_row)
+	_event_stack.add_child(_authoring_mode_row)
 	var authoring_mode_label := Label.new()
 	authoring_mode_label.text = "Authoring Mode"
 	authoring_mode_label.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
@@ -97,23 +105,23 @@ func _ready() -> void:
 	_authoring_mode_row.add_child(_authoring_mode_picker)
 
 	_parameters_section = CodaParametersSectionScript.new()
-	_content.add_child(_parameters_section)
+	_event_stack.add_child(_parameters_section)
 
-	_content.add_child(HSeparator.new())
+	_event_stack.add_child(HSeparator.new())
 
 	_modulation_section = CodaModulationSectionScript.new()
-	_content.add_child(_modulation_section)
+	_event_stack.add_child(_modulation_section)
 
-	_content.add_child(HSeparator.new())
+	_event_stack.add_child(HSeparator.new())
 
 	_banks_section = CodaBanksSectionScript.new()
-	_content.add_child(_banks_section)
+	_event_stack.add_child(_banks_section)
 
-	_content.add_child(HSeparator.new())
+	_event_stack.add_child(HSeparator.new())
 
 	var out_header := CodaSectionHeaderScript.new()
 	out_header.heading = "Output"
-	_content.add_child(out_header)
+	_event_stack.add_child(out_header)
 
 	_output_placeholder = Label.new()
 	_output_placeholder.text = "Bus routing is configurable in the Mixer panel."
@@ -124,9 +132,14 @@ func _ready() -> void:
 		"Use the Mixer panel to define buses, then assign each event to one — events without a "
 		+ "bus play on Master."
 	)
-	_content.add_child(_output_placeholder)
+	_event_stack.add_child(_output_placeholder)
 
-	tooltip_text = "Inspector — properties of the event selected in the Browser."
+	_asset_section = CodaAssetInspectorSectionScript.new()
+	_asset_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_asset_section.visible = false
+	_content.add_child(_asset_section)
+
+	tooltip_text = "Inspector — properties of the selection in the Browser."
 
 
 func attach_browser_panel(browser_panel: Control) -> void:
@@ -169,6 +182,16 @@ func on_browser_event_selected(node: Variant) -> void:
 		_banks_section.set_event(bn)
 
 
+func on_browser_asset_selected(node: Variant) -> void:
+	var bn := node as CodaBrowserNode
+	if bn == null:
+		_show_empty()
+		return
+	_selected_node = bn
+	_header.heading = bn.name
+	_show_asset(bn)
+
+
 func _sync_authoring_mode_picker(node: CodaBrowserNode) -> void:
 	if _authoring_mode_picker == null:
 		return
@@ -190,10 +213,15 @@ func _on_authoring_mode_picked(idx: int) -> void:
 
 
 func _show_empty() -> void:
+	_selected_node = null
 	if _empty_state != null:
 		_empty_state.visible = true
 	if _scroll != null:
 		_scroll.visible = false
+	if _event_stack != null:
+		_event_stack.visible = false
+	if _asset_section != null:
+		_asset_section.visible = false
 
 
 func _show_event() -> void:
@@ -201,3 +229,25 @@ func _show_event() -> void:
 		_empty_state.visible = false
 	if _scroll != null:
 		_scroll.visible = true
+	if _event_stack != null:
+		_event_stack.visible = true
+	if _asset_section != null:
+		_asset_section.visible = false
+
+
+func _show_asset(node: CodaBrowserNode) -> void:
+	if _empty_state != null:
+		_empty_state.visible = false
+	if _scroll != null:
+		_scroll.visible = true
+	if _event_stack != null:
+		_event_stack.visible = false
+	if _parameters_section != null:
+		_parameters_section.set_event(null)
+	if _modulation_section != null:
+		_modulation_section.set_event(null)
+	if _banks_section != null:
+		_banks_section.set_event(null)
+	if _asset_section != null:
+		_asset_section.visible = true
+		_asset_section.set_node(node)

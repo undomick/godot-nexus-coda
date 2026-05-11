@@ -271,6 +271,10 @@ func _wire_browser_to_others() -> void:
 			_browser_panel.event_selection_changed.connect(player_slot)
 		if not _browser_panel.event_selection_changed.is_connected(timeline_slot):
 			_browser_panel.event_selection_changed.connect(timeline_slot)
+	if _browser_panel.has_signal(&"asset_selection_changed"):
+		var asset_inspector_slot := Callable(_inspector_panel, &"on_browser_asset_selected")
+		if not _browser_panel.asset_selection_changed.is_connected(asset_inspector_slot):
+			_browser_panel.asset_selection_changed.connect(asset_inspector_slot)
 	if _browser_panel.has_signal(&"external_selection_requested"):
 		var route_slot := Callable(self, &"_on_browser_external_selection_requested")
 		if not _browser_panel.external_selection_requested.is_connected(route_slot):

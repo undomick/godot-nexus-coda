@@ -92,6 +92,12 @@ func validate() -> String:
 				return 'Clip "%s" starts before 0.' % c.id
 			if c.duration_seconds < 0.0:
 				return 'Clip "%s" has negative duration.' % c.id
+			if c.start_seconds + c.duration_seconds > length_seconds + 0.0001:
+				return 'Clip "%s" extends past the timeline length.' % c.id
+			if not c.audio_path.is_empty() and ResourceLoader.exists(c.audio_path):
+				var max_src: float = c.max_source_playable_seconds()
+				if max_src < 1.0e9 and c.duration_seconds > max_src + 0.0001:
+					return 'Clip "%s" plays longer than the source audio allows.' % c.id
 			if not c.audio_path.is_empty() and not ResourceLoader.exists(c.audio_path):
 				return 'Clip "%s" audio path does not exist: %s' % [c.id, c.audio_path]
 	for m in markers:

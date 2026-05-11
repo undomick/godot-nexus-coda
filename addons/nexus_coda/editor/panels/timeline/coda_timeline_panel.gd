@@ -38,6 +38,8 @@ var _view: CodaTimelineView
 var _snap_picker: OptionButton
 var _bpm_spin: SpinBox
 var _loop_toggle: CheckBox
+var _length_spin: SpinBox
+var _fit_length_btn: Button
 var _add_marker_btn: Button
 var _add_clip_btn: Button
 var _switch_mode_btn: Button
@@ -45,6 +47,8 @@ var _switch_mode_btn: Button
 var _validation_label: Label
 
 var _suppress_writeback: bool = false
+var _selected_track_index: int = 0
+var _track_select_group: ButtonGroup
 
 
 func _ready() -> void:
@@ -107,6 +111,7 @@ func on_browser_event_selected(node: Variant) -> void:
 		_selected_event = null
 	else:
 		_selected_event = bn
+		_selected_track_index = 0
 	# Active handle becomes stale when the visible event changes; the next process tick re-resolves.
 	_live_handle = null
 	if _view != null:
@@ -123,7 +128,9 @@ func _build_toolbar() -> void:
 
 	_add_clip_btn = Button.new()
 	_add_clip_btn.text = "+ Clip"
-	_add_clip_btn.tooltip_text = "Add an empty clip to the first track at the current playhead"
+	_add_clip_btn.tooltip_text = (
+		"Add an empty clip on the selected track (highlighted lane / track header) at the playhead"
+	)
 	_add_clip_btn.pressed.connect(_on_add_clip_pressed)
 	_toolbar.add_child(_add_clip_btn)
 
@@ -168,6 +175,28 @@ func _build_toolbar() -> void:
 	_loop_toggle.toggled.connect(_on_loop_toggled)
 	_toolbar.add_child(_loop_toggle)
 
+	_toolbar.add_child(VSeparator.new())
+
+	var len_lbl := Label.new()
+	len_lbl.text = "Length (s):"
+	len_lbl.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
+	len_lbl.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
+	_toolbar.add_child(len_lbl)
+
+	_length_spin = SpinBox.new()
+	_length_spin.min_value = 0.5
+	_length_spin.max_value = 3600.0
+	_length_spin.step = 0.5
+	_length_spin.tooltip_text = "Timeline length in seconds (session end). Clips cannot extend past this."
+	_length_spin.value_changed.connect(_on_timeline_length_spin_changed)
+	_toolbar.add_child(_length_spin)
+
+	_fit_length_btn = Button.new()
+	_fit_length_btn.text = "Fit length"
+	_fit_length_btn.tooltip_text = "Set length to the end of the last clip/marker (plus a small margin)"
+	_fit_length_btn.pressed.connect(_on_fit_timeline_length_pressed)
+	_toolbar.add_child(_fit_length_btn)
+
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_toolbar.add_child(spacer)
@@ -193,6 +222,7 @@ func _build_empty_state() -> void:
 
 
 func _build_split_root() -> void:
+	_track_select_group = ButtonGroup.new()
 	_split_root = HBoxContainer.new()
 	_split_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_split_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -225,11 +255,14 @@ func _build_split_root() -> void:
 	_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_view.clip_moved.connect(_on_view_clip_moved)
 	_view.clip_resized.connect(_on_view_clip_resized)
+	_view.clip_delete_requested.connect(_on_view_clip_delete_requested)
 	_view.browser_asset_dropped.connect(_on_view_browser_asset_dropped)
 	_view.marker_changed.connect(_on_view_marker_changed)
 	_view.loop_region_changed.connect(_on_view_loop_region_changed)
 	_view.playhead_seek_requested.connect(_on_view_playhead_seek_requested)
 	_view.marker_double_clicked.connect(_on_view_marker_double_clicked)
+	_view.track_row_selected.connect(_on_view_track_row_selected)
+	_view.clip_audio_assign_requested.connect(_on_view_clip_audio_assign_requested)
 	_split_root.add_child(_view)
 
 
@@ -276,7 +309,10 @@ func _show_timeline() -> void:
 		_empty_state.visible = false
 	if _split_root != null:
 		_split_root.visible = true
-	_view.set_timeline(_selected_event.event_timeline)
+	var t0: CodaEventTimeline = _selected_event.event_timeline
+	_selected_track_index = clampi(_selected_track_index, 0, max(0, t0.tracks.size() - 1))
+	_view.set_timeline(t0)
+	_view.set_track_row_highlight(_selected_track_index)
 	_rebuild_track_headers()
 	_sync_toolbar_to_timeline()
 	_update_validation()
@@ -288,12 +324,32 @@ func _rebuild_track_headers() -> void:
 	if _selected_event == null or _selected_event.event_timeline == null:
 		return
 	for i in _selected_event.event_timeline.tracks.size():
-		_track_headers_host.add_child(_make_track_header(_selected_event.event_timeline.tracks[i]))
+		_track_headers_host.add_child(
+			_make_track_header(_selected_event.event_timeline.tracks[i], i)
+		)
 
 
-func _make_track_header(track: CodaTimelineTrack) -> Control:
+func _make_track_header(track: CodaTimelineTrack, track_index: int) -> Control:
+	var root := HBoxContainer.new()
+	root.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
+	root.custom_minimum_size = Vector2(0, TRACK_HEIGHT)
+
+	var sel_btn := Button.new()
+	sel_btn.toggle_mode = true
+	sel_btn.button_group = _track_select_group
+	sel_btn.button_pressed = track_index == _selected_track_index
+	sel_btn.text = str(track_index + 1)
+	sel_btn.custom_minimum_size = Vector2(30, 0)
+	sel_btn.tooltip_text = "Select this track for new clips"
+	sel_btn.toggled.connect(
+		func(on: bool) -> void:
+			if on:
+				_set_selected_track_index(track_index)
+	)
+	root.add_child(sel_btn)
+
 	var row := PanelContainer.new()
-	row.custom_minimum_size = Vector2(0, TRACK_HEIGHT)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_theme_stylebox_override(
 		&"panel", Tokens.make_panel_stylebox(Tokens.SURFACE_SUNKEN, Tokens.SURFACE_BORDER, 0, 0)
 	)
@@ -390,7 +446,8 @@ func _make_track_header(track: CodaTimelineTrack) -> Control:
 	bus_label.tooltip_text = "Per-track bus routing comes in a follow-up; track inherits the event's bus"
 	volume_row.add_child(bus_label)
 
-	return row
+	root.add_child(row)
+	return root
 
 
 func _bus_picker_label_for(bus_id: String) -> String:
@@ -409,6 +466,8 @@ func _sync_toolbar_to_timeline() -> void:
 	_suppress_writeback = true
 	_loop_toggle.button_pressed = t.loop_enabled
 	_bpm_spin.value = t.tempo_bpm
+	if _length_spin != null:
+		_length_spin.value = t.length_seconds
 	for i in _snap_picker.item_count:
 		if _snap_picker.get_item_id(i) == int(_view.get_snap_mode()):
 			_snap_picker.select(i)
@@ -434,6 +493,10 @@ func _notify_timeline_changed() -> void:
 		return
 	_project.notify_event_timeline_changed(_selected_event.id)
 	_update_validation()
+	if _length_spin != null and _selected_event.event_timeline != null:
+		_suppress_writeback = true
+		_length_spin.value = _selected_event.event_timeline.length_seconds
+		_suppress_writeback = false
 	_view.queue_redraw()
 
 
@@ -464,6 +527,102 @@ func _on_loop_toggled(on: bool) -> void:
 	_notify_timeline_changed()
 
 
+func _on_timeline_length_spin_changed(value: float) -> void:
+	if _suppress_writeback or _selected_event == null or _selected_event.event_timeline == null:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	t.length_seconds = maxf(0.5, value)
+	_clamp_clips_to_timeline_length(t)
+	if t.loop_enabled:
+		t.loop_start_seconds = clampf(t.loop_start_seconds, 0.0, t.length_seconds)
+		t.loop_end_seconds = clampf(t.loop_end_seconds, t.loop_start_seconds + 0.01, t.length_seconds)
+	_notify_timeline_changed()
+
+
+func _on_fit_timeline_length_pressed() -> void:
+	if _selected_event == null or _selected_event.event_timeline == null:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	var need: float = _timeline_content_end_seconds(t)
+	var margin: float = 0.25
+	t.length_seconds = maxf(0.5, need + margin)
+	_clamp_clips_to_timeline_length(t)
+	if t.loop_enabled:
+		t.loop_end_seconds = minf(t.loop_end_seconds, t.length_seconds)
+	_notify_timeline_changed()
+
+
+func _timeline_content_end_seconds(t: CodaEventTimeline) -> float:
+	var need: float = 0.0
+	for tr in t.tracks:
+		for c in tr.clips:
+			need = maxf(need, c.start_seconds + c.duration_seconds)
+	for m in t.markers:
+		need = maxf(need, m.time_seconds)
+	if t.loop_enabled:
+		need = maxf(need, t.loop_end_seconds)
+	return need
+
+
+func _extend_timeline_if_content_exceeds() -> void:
+	if _selected_event == null or _selected_event.event_timeline == null:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	var need: float = _timeline_content_end_seconds(t)
+	var margin: float = 0.25
+	if need > t.length_seconds + 0.0001:
+		t.length_seconds = need + margin
+
+
+func _clamp_clips_to_timeline_length(t: CodaEventTimeline) -> void:
+	for tr in t.tracks:
+		for c in tr.clips:
+			if c.start_seconds >= t.length_seconds:
+				c.start_seconds = maxf(0.0, t.length_seconds - 0.05)
+			var room: float = maxf(0.05, t.length_seconds - c.start_seconds)
+			var max_src: float = c.max_source_playable_seconds()
+			var max_d: float = minf(room, max_src)
+			c.duration_seconds = minf(c.duration_seconds, max_d)
+
+
+func _set_selected_track_index(idx: int) -> void:
+	if _selected_event == null or _selected_event.event_timeline == null:
+		return
+	var n: int = _selected_event.event_timeline.tracks.size()
+	if n <= 0:
+		return
+	idx = clampi(idx, 0, n - 1)
+	if _selected_track_index == idx:
+		return
+	_selected_track_index = idx
+	if _view != null:
+		_view.set_track_row_highlight(idx)
+	_rebuild_track_headers()
+
+
+func _on_view_track_row_selected(track_index: int) -> void:
+	_set_selected_track_index(track_index)
+
+
+func _on_view_clip_audio_assign_requested(clip_id: String, res_path: String) -> void:
+	if clip_id.is_empty() or res_path.is_empty() or _selected_event == null:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	if t == null:
+		return
+	var info: Dictionary = t.find_clip(clip_id)
+	if info.is_empty():
+		return
+	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
+	if clip == null:
+		return
+	clip.audio_path = res_path
+	clip.offset_seconds = 0.0
+	clip.duration_seconds = clip.max_source_playable_seconds()
+	_extend_timeline_if_content_exceeds()
+	_notify_timeline_changed()
+
+
 func _on_switch_mode_pressed() -> void:
 	if _project == null or _selected_event == null:
 		return
@@ -486,10 +645,13 @@ func _on_add_clip_pressed() -> void:
 	var t: CodaEventTimeline = _selected_event.event_timeline
 	if t.tracks.is_empty():
 		return
+	var tr_i: int = clampi(_selected_track_index, 0, t.tracks.size() - 1)
 	var clip := CodaTimelineClip.new()
 	clip.start_seconds = clampf(_view.get_playhead(), 0.0, t.length_seconds)
-	clip.duration_seconds = min(1.0, max(0.5, t.length_seconds - clip.start_seconds))
-	t.tracks[0].clips.append(clip)
+	var remain: float = max(0.01, t.length_seconds - clip.start_seconds)
+	clip.duration_seconds = clampf(min(1.0, max(0.5, remain)), 0.05, remain)
+	t.tracks[tr_i].clips.append(clip)
+	_extend_timeline_if_content_exceeds()
 	_notify_timeline_changed()
 
 
@@ -518,18 +680,27 @@ func _on_remove_track_pressed(track_id: String) -> void:
 	if _selected_event == null or _selected_event.event_timeline == null:
 		return
 	if _selected_event.event_timeline.remove_track(track_id):
+		var t: CodaEventTimeline = _selected_event.event_timeline
+		if t.tracks.is_empty():
+			_selected_track_index = 0
+		else:
+			_selected_track_index = clampi(_selected_track_index, 0, t.tracks.size() - 1)
+		if _view != null:
+			_view.set_track_row_highlight(_selected_track_index)
 		_notify_timeline_changed()
 
 
 # ---------- View signals ----------
 
-func _on_view_clip_moved(_clip_id: String, _new_start: float) -> void:
+func _on_view_clip_moved(_clip_id: String, _new_start: float, _new_track_index: int = -1) -> void:
+	_extend_timeline_if_content_exceeds()
 	_notify_timeline_changed()
 
 
 func _on_view_clip_resized(
 	_clip_id: String, _new_start: float, _new_duration: float
 ) -> void:
+	_extend_timeline_if_content_exceeds()
 	_notify_timeline_changed()
 
 
@@ -542,21 +713,30 @@ func _on_view_browser_asset_dropped(track_index: int, start_seconds: float, res_
 	var clip := CodaTimelineClip.new()
 	clip.audio_path = res_path
 	clip.start_seconds = clampf(start_seconds, 0.0, t.length_seconds)
-	var remain: float = max(0.01, t.length_seconds - clip.start_seconds)
-	clip.duration_seconds = _audio_clip_duration_seconds(res_path, remain)
 	clip.offset_seconds = 0.0
+	clip.duration_seconds = clip.max_source_playable_seconds()
 	t.tracks[track_index].clips.append(clip)
+	_extend_timeline_if_content_exceeds()
 	_notify_timeline_changed()
 
 
-func _audio_clip_duration_seconds(res_path: String, max_seconds: float) -> float:
-	var r: Resource = ResourceLoader.load(res_path)
-	if r is AudioStream:
-		var a: AudioStream = r as AudioStream
-		var len: float = a.get_length()
-		if len > 0.0:
-			return clampf(len, 0.05, max_seconds)
-	return clampf(1.0, 0.05, max_seconds)
+func _on_view_clip_delete_requested(clip_id: String) -> void:
+	if clip_id.is_empty() or _selected_event == null or _selected_event.event_timeline == null:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	var info: Dictionary = t.find_clip(clip_id)
+	if info.is_empty():
+		return
+	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
+	var track: CodaTimelineTrack = info.get("track") as CodaTimelineTrack
+	if clip == null or track == null:
+		return
+	var idx: int = track.clips.find(clip)
+	if idx >= 0:
+		track.clips.remove_at(idx)
+	if _view != null:
+		_view.clear_selection()
+	_notify_timeline_changed()
 
 
 func _on_view_marker_changed(_marker_id: String, _new_time: float) -> void:

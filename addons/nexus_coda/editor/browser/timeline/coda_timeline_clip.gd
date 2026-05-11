@@ -30,6 +30,21 @@ func end_seconds() -> float:
 	return start_seconds + duration_seconds
 
 
+## Upper bound for `duration_seconds` from the asset (after `offset_seconds`), or very large
+## when there is no audio / length is unknown.
+func max_source_playable_seconds() -> float:
+	if audio_path.is_empty():
+		return 1.0e12
+	if not ResourceLoader.exists(audio_path):
+		return 1.0e12
+	var res: Resource = ResourceLoader.load(audio_path)
+	if res is AudioStream:
+		var stream_len: float = (res as AudioStream).get_length()
+		if stream_len > 0.0:
+			return maxf(0.05, stream_len - offset_seconds)
+	return 1.0e12
+
+
 func clone_keep_id() -> CodaTimelineClip:
 	var c := CodaTimelineClip.new()
 	c.id = id

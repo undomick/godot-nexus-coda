@@ -12,6 +12,9 @@ extends Control
 ## next to the widget.
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
+const CodaTimelineWaveformCacheScript := preload(
+	"res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_waveform_cache.gd"
+)
 
 const RULER_HEIGHT := 22
 const TRACK_HEIGHT := 48
@@ -39,9 +42,12 @@ enum DragKind {
 }
 
 signal browser_asset_dropped(track_index: int, start_seconds: float, res_audio_path: String)
+signal clip_audio_assign_requested(clip_id: String, res_audio_path: String)
+signal track_row_selected(track_index: int)
 signal clip_selected(clip_id: String)
-signal clip_moved(clip_id: String, new_start: float)
+signal clip_moved(clip_id: String, new_start: float, new_track_index: int)
 signal clip_resized(clip_id: String, new_start: float, new_duration: float)
+signal clip_delete_requested(clip_id: String)
 signal marker_changed(marker_id: String, new_time: float)
 signal marker_double_clicked(marker_id: String)
 signal loop_region_changed(start_seconds: float, end_seconds: float)
@@ -66,6 +72,11 @@ var _drag_initial_loop_end: float = 0.0
 var _drag_pan_initial_scroll: float = 0.0
 var _drag_initial_screen_pos: Vector2 = Vector2.ZERO
 var _selected_clip_id: String = ""
+var _highlight_track_index: int = 0
+
+var _clip_menu: PopupMenu
+const _CTX_REMOVE_CLIP := 1
+var _menu_clip_id: String = ""
 
 
 func _init() -> void:
@@ -80,12 +91,21 @@ func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 		return false
 	if _timeline_drop_audio_res_path(data).is_empty():
 		return false
+	var hit: Dictionary = _hit_test(at_position)
+	if String(hit.get("kind", "")) == "clip":
+		return true
 	return _track_index_for_drop_y(at_position.y) >= 0
 
 
 func _drop_data(at_position: Vector2, data: Variant) -> void:
 	var path: String = _timeline_drop_audio_res_path(data)
 	if path.is_empty():
+		return
+	var hit: Dictionary = _hit_test(at_position)
+	if String(hit.get("kind", "")) == "clip":
+		var cid: String = String(hit.get("clip_id", ""))
+		if not cid.is_empty():
+			clip_audio_assign_requested.emit(cid, path)
 		return
 	var track_index: int = _track_index_for_drop_y(at_position.y)
 	if track_index < 0:
@@ -147,6 +167,13 @@ func set_timeline(t: CodaEventTimeline) -> void:
 	_clamp_scroll()
 	queue_redraw()
 	update_minimum_size()
+
+
+func set_track_row_highlight(track_index: int) -> void:
+	if _timeline == null:
+		return
+	_highlight_track_index = clampi(track_index, 0, max(0, _timeline.tracks.size() - 1))
+	queue_redraw()
 
 
 func get_timeline() -> CodaEventTimeline:
@@ -239,6 +266,9 @@ func _draw_track_lanes() -> void:
 		var rect: Rect2 = _track_lane_rect(i)
 		var bg: Color = Tokens.SURFACE_RAISED if i % 2 == 0 else Tokens.SURFACE_SUNKEN
 		draw_rect(rect, bg, true)
+		if i == _highlight_track_index and n > 0:
+			draw_rect(rect, Color(Tokens.ACCENT.r, Tokens.ACCENT.g, Tokens.ACCENT.b, 0.12), true)
+			draw_rect(rect, Tokens.ACCENT_DIM, false, 1.0)
 	# Bottom edge of lanes section.
 	var lane_bottom: float = float(RULER_HEIGHT + n * TRACK_HEIGHT)
 	draw_line(
@@ -272,7 +302,7 @@ func _draw_one_clip(clip: CodaTimelineClip, lane: Rect2) -> void:
 		border = Tokens.TEXT_PRIMARY
 	draw_rect(rect, Color(fill.r, fill.g, fill.b, 0.55), true)
 	draw_rect(rect, border, false, 1.0)
-	# Clip label.
+	_draw_clip_waveform(clip, rect)
 	var font: Font = get_theme_default_font()
 	if font != null and rect.size.x > 24:
 		var label: String = clip.audio_path.get_file() if not clip.audio_path.is_empty() else "Clip"
@@ -479,8 +509,14 @@ func _hit_test(local_pos: Vector2) -> Dictionary:
 			edge = "left"
 		elif dist_r <= EDGE_RESIZE_THRESHOLD:
 			edge = "right"
-		return {"kind": "clip", "clip_id": clip.id, "track_id": track.id, "edge": edge}
-	return {"kind": "lane", "track_id": track.id, "time": t}
+		return {
+			"kind": "clip",
+			"clip_id": clip.id,
+			"track_id": track.id,
+			"track_index": track_index,
+			"edge": edge,
+		}
+	return {"kind": "lane", "track_id": track.id, "track_index": track_index, "time": t}
 
 
 func _track_index_at_y(y: float) -> int:
@@ -538,6 +574,20 @@ func _handle_mouse_button(mb: InputEventMouseButton) -> void:
 			_end_drag()
 		accept_event()
 		return
+	if mb.button_index == MOUSE_BUTTON_RIGHT:
+		if mb.pressed:
+			var hit_r: Dictionary = _hit_test(mb.position)
+			if String(hit_r.get("kind", "")) == "clip":
+				_ensure_clip_menu()
+				_menu_clip_id = String(hit_r.get("clip_id", ""))
+				if not _menu_clip_id.is_empty():
+					_selected_clip_id = _menu_clip_id
+					clip_selected.emit(_menu_clip_id)
+					var gp: Vector2i = Vector2i(int(get_global_mouse_position().x), int(get_global_mouse_position().y))
+					_clip_menu.popup(Rect2i(gp, Vector2i(1, 1)))
+					queue_redraw()
+		accept_event()
+		return
 	if mb.button_index != MOUSE_BUTTON_LEFT:
 		return
 	if mb.pressed:
@@ -567,16 +617,40 @@ func _handle_mouse_motion(mm: InputEventMouseMotion) -> void:
 				_drag_initial_clip_start + (t - _drag_start_seconds)
 			)
 			var snapped_start: float = _apply_snap(raw_start)
-			_apply_clip_move(_drag_clip_id, snapped_start)
-			clip_moved.emit(_drag_clip_id, snapped_start)
+			var target_idx: int = clampi(_track_index_at_y(mm.position.y), 0, max(0, track_count() - 1))
+			_move_clip_to_track(_drag_clip_id, target_idx, snapped_start)
+			var info_mv: Dictionary = _timeline.find_clip(_drag_clip_id)
+			if not info_mv.is_empty():
+				var cl_mv: CodaTimelineClip = info_mv.get("clip") as CodaTimelineClip
+				var tr_mv: CodaTimelineTrack = info_mv.get("track") as CodaTimelineTrack
+				if cl_mv != null and tr_mv != null:
+					var ti_mv: int = _track_index_by_id(tr_mv.id)
+					clip_moved.emit(_drag_clip_id, cl_mv.start_seconds, ti_mv)
 		DragKind.CLIP_RESIZE_LEFT:
+			var info_l: Dictionary = _timeline.find_clip(_drag_clip_id)
+			var clip_l: CodaTimelineClip = info_l.get("clip") as CodaTimelineClip
+			var max_play_l: float = (
+				clip_l.max_source_playable_seconds() if clip_l != null else 1.0e12
+			)
 			var anchor_end: float = _drag_initial_clip_start + _drag_initial_clip_duration
-			var new_start: float = clampf(_apply_snap(t), 0.0, anchor_end - 0.01)
+			var min_start: float = max(0.0, anchor_end - max_play_l)
+			var new_start: float = clampf(_apply_snap(t), min_start, anchor_end - 0.01)
 			_apply_clip_resize(_drag_clip_id, new_start, anchor_end - new_start)
 			clip_resized.emit(_drag_clip_id, new_start, anchor_end - new_start)
 		DragKind.CLIP_RESIZE_RIGHT:
-			var new_end: float = max(
-				_drag_initial_clip_start + 0.01, _apply_snap(t)
+			var info_r: Dictionary = _timeline.find_clip(_drag_clip_id)
+			var clip_r: CodaTimelineClip = info_r.get("clip") as CodaTimelineClip
+			var max_play_r: float = (
+				clip_r.max_source_playable_seconds() if clip_r != null else 1.0e12
+			)
+			var max_end: float = minf(
+				_timeline.length_seconds,
+				_drag_initial_clip_start + max_play_r
+			)
+			var new_end: float = clampf(
+				max(_drag_initial_clip_start + 0.01, _apply_snap(t)),
+				_drag_initial_clip_start + 0.01,
+				max_end
 			)
 			var new_dur: float = new_end - _drag_initial_clip_start
 			_apply_clip_resize(_drag_clip_id, _drag_initial_clip_start, new_dur)
@@ -649,6 +723,9 @@ func _begin_drag(hit: Dictionary, mb: InputEventMouseButton) -> void:
 				_drag_kind = DragKind.CLIP_MOVE
 		return
 	if k == "lane":
+		var lane_idx: int = int(hit.get("track_index", -1))
+		if lane_idx >= 0:
+			track_row_selected.emit(lane_idx)
 		_selected_clip_id = ""
 		selection_cleared.emit()
 		queue_redraw()
@@ -661,6 +738,86 @@ func _end_drag() -> void:
 	_drag_clip_id = ""
 	_drag_track_id = ""
 	_drag_marker_id = ""
+
+
+func _ensure_clip_menu() -> void:
+	if _clip_menu != null:
+		return
+	_clip_menu = PopupMenu.new()
+	_clip_menu.name = "TimelineClipMenu"
+	_clip_menu.add_item("Remove from timeline", _CTX_REMOVE_CLIP)
+	_clip_menu.id_pressed.connect(_on_clip_menu_id_pressed)
+	add_child(_clip_menu)
+
+
+func _on_clip_menu_id_pressed(id: int) -> void:
+	if id == _CTX_REMOVE_CLIP and not _menu_clip_id.is_empty():
+		clip_delete_requested.emit(_menu_clip_id)
+	_menu_clip_id = ""
+
+
+func _track_index_by_id(track_id: String) -> int:
+	if _timeline == null or track_id.is_empty():
+		return -1
+	for i in _timeline.tracks.size():
+		if _timeline.tracks[i].id == track_id:
+			return i
+	return -1
+
+
+func _move_clip_to_track(clip_id: String, target_track_index: int, new_start: float) -> void:
+	if _timeline == null or _timeline.tracks.is_empty():
+		return
+	var info: Dictionary = _timeline.find_clip(clip_id)
+	if info.is_empty():
+		return
+	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
+	var from_track: CodaTimelineTrack = info.get("track") as CodaTimelineTrack
+	if clip == null or from_track == null:
+		return
+	target_track_index = clampi(target_track_index, 0, _timeline.tracks.size() - 1)
+	var max_start: float = max(0.0, _timeline.length_seconds - clip.duration_seconds)
+	var clamped_start: float = clampf(new_start, 0.0, max_start)
+	var to_track: CodaTimelineTrack = _timeline.tracks[target_track_index]
+	if from_track == to_track:
+		clip.start_seconds = clamped_start
+	else:
+		from_track.clips.erase(clip)
+		to_track.clips.append(clip)
+		clip.start_seconds = clamped_start
+	queue_redraw()
+
+
+func _draw_clip_waveform(clip: CodaTimelineClip, rect: Rect2) -> void:
+	if clip.audio_path.is_empty():
+		return
+	var h_wave: float = maxf(4.0, rect.size.y * 0.32)
+	var top: float = rect.position.y + rect.size.y - h_wave - 2.0
+	var wave_rect := Rect2(Vector2(rect.position.x + 2.0, top), Vector2(rect.size.x - 4.0, h_wave))
+	if wave_rect.size.x < 10.0:
+		return
+	var bucket_count: int = clampi(int(wave_rect.size.x / 3.0), 8, 128)
+	var peaks: PackedFloat32Array = CodaTimelineWaveformCacheScript.peaks_for_clip_segment(
+		clip.audio_path, clip.offset_seconds, clip.duration_seconds, bucket_count
+	)
+	if peaks.is_empty():
+		return
+	var n: int = peaks.size()
+	if n <= 0:
+		return
+	var step_x: float = wave_rect.size.x / float(max(1, n - 1))
+	var mid_y: float = wave_rect.position.y + wave_rect.size.y * 0.5
+	var col := Color(Tokens.TEXT_PRIMARY.r, Tokens.TEXT_PRIMARY.g, Tokens.TEXT_PRIMARY.b, 0.4)
+	for i in n:
+		var pk: float = peaks[i]
+		var bar_h: float = maxf(1.0, wave_rect.size.y * pk)
+		var x0: float = wave_rect.position.x + float(i) * step_x
+		var bar_w: float = maxf(1.0, step_x * 0.72)
+		draw_rect(
+			Rect2(Vector2(x0 - bar_w * 0.5, mid_y - bar_h * 0.5), Vector2(bar_w, bar_h)),
+			col,
+			true
+		)
 
 
 func _apply_clip_move(clip_id: String, new_start: float) -> void:
@@ -683,7 +840,10 @@ func _apply_clip_resize(clip_id: String, new_start: float, new_duration: float) 
 		return
 	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
 	clip.start_seconds = max(0.0, new_start)
-	clip.duration_seconds = max(0.0, new_duration)
+	var max_by_source: float = clip.max_source_playable_seconds()
+	var max_by_tl: float = max(0.0, _timeline.length_seconds - clip.start_seconds)
+	var max_d: float = minf(max_by_source, max_by_tl)
+	clip.duration_seconds = clampf(new_duration, 0.0, max_d)
 	queue_redraw()
 
 
