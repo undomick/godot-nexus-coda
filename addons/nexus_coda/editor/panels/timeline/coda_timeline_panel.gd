@@ -579,7 +579,9 @@ func _clamp_clips_to_timeline_length(t: CodaEventTimeline) -> void:
 		for c in tr.clips:
 			if c.start_seconds >= t.length_seconds:
 				c.start_seconds = maxf(0.0, t.length_seconds - 0.05)
-			var room: float = maxf(0.05, t.length_seconds - c.start_seconds)
+			# Use true remaining time — never assume a 0.05s floor here or clips can still
+			# extend past `length_seconds` when the gap to the end is under 0.05s.
+			var room: float = maxf(0.0, t.length_seconds - c.start_seconds)
 			var max_src: float = c.max_source_playable_seconds()
 			var max_d: float = minf(room, max_src)
 			c.duration_seconds = minf(c.duration_seconds, max_d)
