@@ -38,6 +38,7 @@ enum DragKind {
 	PLAYHEAD_SEEK = 8,
 }
 
+signal browser_asset_dropped(track_index: int, start_seconds: float, res_audio_path: String)
 signal clip_selected(clip_id: String)
 signal clip_moved(clip_id: String, new_start: float)
 signal clip_resized(clip_id: String, new_start: float, new_duration: float)
@@ -72,6 +73,71 @@ func _init() -> void:
 	focus_mode = Control.FOCUS_ALL
 	custom_minimum_size = Vector2(200, RULER_HEIGHT + TRACK_HEIGHT)
 	clip_contents = true
+
+
+func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
+	if _timeline == null or track_count() <= 0:
+		return false
+	if _timeline_drop_audio_res_path(data).is_empty():
+		return false
+	return _track_index_for_drop_y(at_position.y) >= 0
+
+
+func _drop_data(at_position: Vector2, data: Variant) -> void:
+	var path: String = _timeline_drop_audio_res_path(data)
+	if path.is_empty():
+		return
+	var track_index: int = _track_index_for_drop_y(at_position.y)
+	if track_index < 0:
+		return
+	var t_start: float = _apply_snap(_x_to_seconds(at_position.x))
+	browser_asset_dropped.emit(track_index, t_start, path)
+
+
+func _timeline_drop_audio_res_path(data: Variant) -> String:
+	if not (data is Dictionary):
+		return ""
+	var d: Dictionary = data as Dictionary
+	var direct: String = str(d.get("coda_asset_source_path", "")).strip_edges()
+	if direct.begins_with("res://"):
+		return direct
+	var t: String = str(d.get("type", ""))
+	if not t.is_empty() and t != "files" and t != "files_and_dirs":
+		return ""
+	var raw: Variant = d.get("files", null)
+	var paths: PackedStringArray = PackedStringArray()
+	if raw is PackedStringArray:
+		for p in raw as PackedStringArray:
+			paths.append(str(p).strip_edges())
+	elif raw is Array:
+		for p in raw as Array:
+			paths.append(str(p).strip_edges())
+	if paths.size() != 1:
+		return ""
+	var one: String = paths[0]
+	if not one.begins_with("res://"):
+		return ""
+	if not _timeline_drop_audio_extension_allowed(String(one.get_extension())):
+		return ""
+	return one
+
+
+func _timeline_drop_audio_extension_allowed(ext: String) -> bool:
+	match String(ext).to_lower():
+		"wav", "ogg", "oga", "mp3", "flac":
+			return true
+		_:
+			return false
+
+
+func _track_index_for_drop_y(y: float) -> int:
+	var n: int = track_count()
+	if n <= 0:
+		return -1
+	if y < RULER_HEIGHT:
+		return 0
+	var idx: int = int((y - RULER_HEIGHT) / TRACK_HEIGHT)
+	return clampi(idx, 0, n - 1)
 
 
 # ---------- Public API ----------

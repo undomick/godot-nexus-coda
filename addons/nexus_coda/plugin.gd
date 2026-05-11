@@ -5,6 +5,9 @@ const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd"
 const EDITOR_WINDOW_SCENE := preload("res://addons/nexus_coda/editor/nexus_coda_editor_window.tscn")
 const EDITOR_WINDOW_SCRIPT := preload("res://addons/nexus_coda/editor/nexus_coda_editor_window.gd")
 const NCODA_IMPORT_PLUGIN := preload("res://addons/nexus_coda/editor/import/nexus_coda_ncoda_import_plugin.gd")
+const CodaFilesystemContextMenuScript := preload(
+	"res://addons/nexus_coda/editor/coda_filesystem_context_menu_plugin.gd"
+)
 const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
 
 const TOOLS_SUBMENU_NAME := "Nexus Coda"
@@ -17,6 +20,7 @@ const AUTOLOAD_PATH := "res://addons/nexus_coda/runtime/coda_runtime.gd"
 
 var _tools_menu: PopupMenu
 var _ncoda_import_plugin: EditorImportPlugin
+var _filesystem_context_menu_plugin: EditorContextMenuPlugin
 ## All open Nexus Coda editor windows (multiple instances supported).
 var _editor_windows: Array[Window] = []
 ## Editor-side runtime used for preview from inside the Nexus Coda window.
@@ -28,6 +32,9 @@ func _enter_tree() -> void:
 	add_autoload_singleton(AUTOLOAD_NAME, AUTOLOAD_PATH)
 	_ncoda_import_plugin = NCODA_IMPORT_PLUGIN.new() as EditorImportPlugin
 	add_import_plugin(_ncoda_import_plugin)
+	_filesystem_context_menu_plugin = CodaFilesystemContextMenuScript.new() as EditorContextMenuPlugin
+	_filesystem_context_menu_plugin.attach_plugin(self)
+	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM, _filesystem_context_menu_plugin)
 	_install_editor_runtime()
 	_tools_menu = PopupMenu.new()
 	_tools_menu.name = "NexusCodaToolsMenu"
@@ -40,6 +47,9 @@ func _enter_tree() -> void:
 
 
 func _exit_tree() -> void:
+	if _filesystem_context_menu_plugin != null:
+		remove_context_menu_plugin(_filesystem_context_menu_plugin)
+		_filesystem_context_menu_plugin = null
 	if _ncoda_import_plugin != null:
 		remove_import_plugin(_ncoda_import_plugin)
 		_ncoda_import_plugin = null
@@ -58,6 +68,28 @@ func _exit_tree() -> void:
 
 func get_editor_runtime() -> CodaRuntime:
 	return _editor_runtime
+
+
+## Called from the FileSystem dock context menu ("Send to Coda Assets").
+func send_fs_selection_to_coda_assets(paths: PackedStringArray) -> void:
+	if paths.is_empty():
+		return
+	_open_or_focus_editor_window()
+	call_deferred(&"_deferred_send_fs_selection_to_coda_assets", paths)
+
+
+func _deferred_send_fs_selection_to_coda_assets(paths: PackedStringArray) -> void:
+	# Give the window one more frame so `_register_panels` can create `_browser_panel`.
+	call_deferred(&"_deferred_send_fs_selection_to_coda_assets_after_panel", paths)
+
+
+func _deferred_send_fs_selection_to_coda_assets_after_panel(paths: PackedStringArray) -> void:
+	_prune_invalid_windows()
+	if _editor_windows.is_empty():
+		return
+	var w: Window = _editor_windows[_editor_windows.size() - 1]
+	if w.has_method(&"import_fs_paths_into_assets"):
+		w.call(&"import_fs_paths_into_assets", paths)
 
 
 func _install_editor_runtime() -> void:

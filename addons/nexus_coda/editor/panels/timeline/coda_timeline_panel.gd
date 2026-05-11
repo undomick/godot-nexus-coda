@@ -225,6 +225,7 @@ func _build_split_root() -> void:
 	_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_view.clip_moved.connect(_on_view_clip_moved)
 	_view.clip_resized.connect(_on_view_clip_resized)
+	_view.browser_asset_dropped.connect(_on_view_browser_asset_dropped)
 	_view.marker_changed.connect(_on_view_marker_changed)
 	_view.loop_region_changed.connect(_on_view_loop_region_changed)
 	_view.playhead_seek_requested.connect(_on_view_playhead_seek_requested)
@@ -530,6 +531,32 @@ func _on_view_clip_resized(
 	_clip_id: String, _new_start: float, _new_duration: float
 ) -> void:
 	_notify_timeline_changed()
+
+
+func _on_view_browser_asset_dropped(track_index: int, start_seconds: float, res_path: String) -> void:
+	if _selected_event == null or _selected_event.event_timeline == null:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	if track_index < 0 or track_index >= t.tracks.size():
+		return
+	var clip := CodaTimelineClip.new()
+	clip.audio_path = res_path
+	clip.start_seconds = clampf(start_seconds, 0.0, t.length_seconds)
+	var remain: float = max(0.01, t.length_seconds - clip.start_seconds)
+	clip.duration_seconds = _audio_clip_duration_seconds(res_path, remain)
+	clip.offset_seconds = 0.0
+	t.tracks[track_index].clips.append(clip)
+	_notify_timeline_changed()
+
+
+func _audio_clip_duration_seconds(res_path: String, max_seconds: float) -> float:
+	var r: Resource = ResourceLoader.load(res_path)
+	if r is AudioStream:
+		var a: AudioStream = r as AudioStream
+		var len: float = a.get_length()
+		if len > 0.0:
+			return clampf(len, 0.05, max_seconds)
+	return clampf(1.0, 0.05, max_seconds)
 
 
 func _on_view_marker_changed(_marker_id: String, _new_time: float) -> void:

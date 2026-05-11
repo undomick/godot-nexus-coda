@@ -1,6 +1,8 @@
 class_name CodaState
 extends RefCounted
 
+const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
+
 signal structure_changed
 ## Bus volume/mute/bypass and other non-structural edits; marks unsaved state without forcing full UI rebuilds.
 signal project_dirty
@@ -111,6 +113,155 @@ func add_asset_placeholder(parent_id: String, asset_name: String = "New Asset") 
 	parent.insert_child_sorted(asset)
 	structure_changed.emit()
 	return asset
+
+
+## Resolves which assets-tree folder should receive an external drop (same rules as [method move_assets_drop]).
+## Returns [param assets_root.id] when [param target_id] is empty. Returns "" if the drop position is invalid.
+func resolve_assets_drop_parent_id(target_id: String, section: int) -> String:
+	if target_id.is_empty():
+		return assets_root.id
+	var target_node_a: CodaBrowserNode = assets_root.find_by_id(target_id)
+	if target_node_a == null:
+		return ""
+	# Tree section 2 = "as first child" (folder row, lower drop band); same target as into-folder.
+	if (section == 0 or section == 2) and target_node_a.is_folder():
+		return target_node_a.id
+	if section == 0 and not target_node_a.is_folder():
+		var pa: CodaBrowserNode = assets_parent_of(target_id)
+		if pa == null:
+			return ""
+		return pa.id
+	if section == -1:
+		var pa2: CodaBrowserNode = assets_parent_of(target_id)
+		if pa2 == null:
+			return ""
+		return pa2.id
+	if section == 1:
+		var pa3: CodaBrowserNode = assets_parent_of(target_id)
+		if pa3 == null:
+			return ""
+		return pa3.id
+	# Engine uses -100 (Tree::COLUMN_NOT_FOUND in C++); not exposed on Tree in GDScript.
+	if section == -100:
+		if target_node_a.is_folder():
+			return target_node_a.id
+		var pfb: CodaBrowserNode = assets_parent_of(target_id)
+		if pfb != null:
+			return pfb.id
+		return assets_root.id
+	return ""
+
+
+## Imports [code]res://[/code] files and/or folders from the Godot FileSystem dock into the assets tree.
+## Folders are mirrored one level (basename folder under [param target_folder_id]) with recursive audio files.
+## Emits [signal structure_changed] once if anything was added. Skips non-[code]res://[/code] paths and duplicate
+## [member CodaBrowserNode.asset_source_path] under the same parent folder.
+func import_assets_from_res_paths(target_folder_id: String, files: Variant) -> void:
+	var parent: CodaBrowserNode = assets_root.find_by_id(target_folder_id)
+	if parent == null or not parent.is_folder():
+		return
+	var paths: Array[String] = []
+	if files is PackedStringArray:
+		for x in files as PackedStringArray:
+			paths.append(str(x).strip_edges())
+	elif files is Array:
+		for x in files as Array:
+			paths.append(str(x).strip_edges())
+	else:
+		return
+	var changed: bool = false
+	for raw in paths:
+		if raw.is_empty() or not raw.begins_with("res://"):
+			continue
+		if _import_one_res_path_under_assets_parent(parent, raw):
+			changed = true
+	if changed:
+		structure_changed.emit()
+
+
+func _import_one_res_path_under_assets_parent(coda_parent: CodaBrowserNode, res_path: String) -> bool:
+	var p: String = res_path.strip_edges()
+	if not p.begins_with("res://"):
+		return false
+	if _res_path_is_importable_directory(p):
+		_import_res_folder_mirrored_under(coda_parent, p)
+		return true
+	if FileAccess.file_exists(p) and _is_importable_audio_res_path(p):
+		return _add_res_audio_asset_if_new(coda_parent, p)
+	return false
+
+
+func _res_path_is_importable_directory(p: String) -> bool:
+	var normalized: String = p.strip_edges().trim_suffix("/")
+	var da: DirAccess = DirAccess.open(normalized)
+	return da != null
+
+
+func _is_importable_audio_res_path(res_file: String) -> bool:
+	return _audio_extension_allowed(String(res_file.get_extension()))
+
+
+func _audio_extension_allowed(ext: String) -> bool:
+	match String(ext).to_lower():
+		"wav", "ogg", "oga", "mp3", "flac":
+			return true
+		_:
+			return false
+
+
+func _assets_parent_has_child_with_source(p_folder: CodaBrowserNode, source_path: String) -> bool:
+	for c in p_folder.children:
+		if c.kind == CodaBrowserNode.Kind.ASSET and c.asset_source_path == source_path:
+			return true
+	return false
+
+
+func _add_res_audio_asset_if_new(p_folder: CodaBrowserNode, res_file: String) -> bool:
+	if _assets_parent_has_child_with_source(p_folder, res_file):
+		NexusCodaLog.debug("browser", "skip duplicate asset import: %s" % res_file)
+		return false
+	if not _is_importable_audio_res_path(res_file):
+		return false
+	var display_name: String = res_file.get_file().get_basename()
+	var asset := CodaBrowserNode.new(display_name, CodaBrowserNode.Kind.ASSET)
+	asset.asset_source_path = res_file
+	p_folder.insert_child_sorted(asset)
+	return true
+
+
+func _get_or_create_child_folder(p_parent: CodaBrowserNode, folder_name: String) -> CodaBrowserNode:
+	for c in p_parent.children:
+		if c.is_folder() and c.name == folder_name:
+			return c
+	var folder := CodaBrowserNode.new(folder_name, CodaBrowserNode.Kind.FOLDER)
+	p_parent.insert_child_sorted(folder)
+	return folder
+
+
+func _import_res_folder_mirrored_under(coda_target: CodaBrowserNode, res_dir: String) -> void:
+	var normalized: String = res_dir.strip_edges().trim_suffix("/")
+	var base: String = normalized.get_file()
+	if base.is_empty():
+		return
+	var mirror_root: CodaBrowserNode = _get_or_create_child_folder(coda_target, base)
+	_import_res_directory_contents_into(normalized, mirror_root)
+
+
+func _import_res_directory_contents_into(source_res_dir: String, coda_parent: CodaBrowserNode) -> void:
+	var da: DirAccess = DirAccess.open(source_res_dir.strip_edges().trim_suffix("/"))
+	if da == null:
+		return
+	for dir_name in da.get_directories():
+		if dir_name == "." or dir_name == ".." or dir_name.begins_with("."):
+			continue
+		var sub_path: String = source_res_dir.strip_edges().trim_suffix("/").path_join(dir_name)
+		var sub_folder: CodaBrowserNode = _get_or_create_child_folder(coda_parent, dir_name)
+		_import_res_directory_contents_into(sub_path, sub_folder)
+	for file_name in da.get_files():
+		if file_name.begins_with("."):
+			continue
+		var fp: String = source_res_dir.strip_edges().trim_suffix("/").path_join(file_name)
+		_add_res_audio_asset_if_new(coda_parent, fp)
 
 
 ## Returns empty string on success, otherwise an English error message for the UI.
@@ -325,7 +476,7 @@ func move_events_drop(moving_id: String, target_id: String, section: int) -> boo
 		return false
 	var dest_parent_id: String = ""
 	var mode: String = ""
-	if section == 0 and target_node.is_folder():
+	if (section == 0 or section == 2) and target_node.is_folder():
 		dest_parent_id = target_node.id
 		mode = "into_folder"
 	elif section == 0 and not target_node.is_folder():
@@ -401,7 +552,7 @@ func move_assets_drop(moving_id: String, target_id: String, section: int) -> boo
 		return false
 	var dest_parent_id_a: String = ""
 	var mode_a: String = ""
-	if section == 0 and target_node_a.is_folder():
+	if (section == 0 or section == 2) and target_node_a.is_folder():
 		dest_parent_id_a = target_node_a.id
 		mode_a = "into_folder"
 	elif section == 0 and not target_node_a.is_folder():

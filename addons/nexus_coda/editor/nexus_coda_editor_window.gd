@@ -128,6 +128,32 @@ const FALLBACK_SAVE_RES_PATH := "res://nexus_coda_projects/untitled.ncoda"
 var _file_dialog_pick_result: String = ""
 var _file_dialog_pick_complete: bool = false
 var _teardown_done: bool = false
+var _fs_asset_import_boot_attempts: int = 0
+
+
+## Imports the given `res://` paths into the Coda assets tree (same rules as in-editor DnD),
+## shows the Browser panel, and switches to the Assets tab. Does not change files on disk.
+func import_fs_paths_into_assets(paths: PackedStringArray) -> void:
+	if paths.is_empty():
+		return
+	if _browser_panel == null:
+		if _fs_asset_import_boot_attempts < 16:
+			_fs_asset_import_boot_attempts += 1
+			call_deferred(&"import_fs_paths_into_assets", paths)
+		else:
+			_fs_asset_import_boot_attempts = 0
+			NexusCodaLog.warn("editor_window", "Send to Coda Assets: browser panel not ready.")
+		return
+	_fs_asset_import_boot_attempts = 0
+	if _dock_host != null and _dock_host.dock_manager != null:
+		_dock_host.dock_manager.show_panel(PANEL_BROWSER)
+	if _browser_panel.has_method(&"focus_assets_tab"):
+		_browser_panel.call(&"focus_assets_tab")
+	if _browser_panel.has_method(&"get_project"):
+		var st: Variant = _browser_panel.get_project()
+		if st is CodaState:
+			var state: CodaState = st as CodaState
+			state.import_assets_from_res_paths(state.assets_root.id, paths)
 
 
 func setup_editor_plugin(plugin: EditorPlugin) -> void:

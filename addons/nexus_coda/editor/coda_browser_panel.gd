@@ -83,6 +83,14 @@ func select_event_by_id(event_id: String) -> bool:
 	return _events_tab.select_by_id(event_id)
 
 
+func focus_assets_tab() -> void:
+	if _tabs == null or _assets_tab == null:
+		return
+	var idx: int = _tabs.get_tab_idx_from_control(_assets_tab)
+	if idx >= 0:
+		_tabs.current_tab = idx
+
+
 # ---------- Tab registration ----------
 
 func _register_default_tabs() -> void:
