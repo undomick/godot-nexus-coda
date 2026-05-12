@@ -53,6 +53,11 @@ signal marker_double_clicked(marker_id: String)
 signal loop_region_changed(start_seconds: float, end_seconds: float)
 signal playhead_seek_requested(time_seconds: float)
 signal selection_cleared
+## Emitted once when a drag begins that should participate in host-side undo batching.
+signal timeline_interaction_started
+signal clip_duplicate_requested(clip_id: String)
+signal clip_split_at_playhead_requested(clip_id: String)
+signal audition_requested
 
 var _timeline: CodaEventTimeline = null
 var _seconds_per_pixel: float = DEFAULT_SECONDS_PER_PIXEL
@@ -76,6 +81,8 @@ var _highlight_track_index: int = 0
 
 var _clip_menu: PopupMenu
 const _CTX_REMOVE_CLIP := 1
+const _CTX_DUPLICATE_CLIP := 2
+const _CTX_SPLIT_PLAYHEAD := 3
 var _menu_clip_id: String = ""
 
 
@@ -207,6 +214,20 @@ func set_snap_mode(mode: SnapMode) -> void:
 
 func get_snap_mode() -> SnapMode:
 	return _snap_mode
+
+
+func get_selected_clip_id() -> String:
+	return _selected_clip_id
+
+
+func zoom_timeline_to_fit(width_px: float, margin_px: float = 40.0) -> void:
+	if _timeline == null or _timeline.length_seconds <= 0.001:
+		return
+	var usable: float = width_px - margin_px
+	if usable < 32.0:
+		return
+	set_zoom(_timeline.length_seconds / usable)
+	set_scroll_seconds(0.0)
 
 
 func set_scroll_seconds(scroll: float) -> void:
@@ -449,15 +470,47 @@ func _color_for_marker(m: CodaTimelineMarker) -> Color:
 # ---------- Snap & clamp ----------
 
 func _apply_snap(t: float) -> float:
-	t = max(0.0, t)
+	var raw: float = max(0.0, t)
 	if _timeline != null:
-		t = clampf(t, 0.0, _timeline.length_seconds)
+		raw = clampf(raw, 0.0, _timeline.length_seconds)
+	var thresh_sec: float = _seconds_per_pixel * 8.0
+	var best: float = raw
+	var best_d: float = thresh_sec + 1.0
+	for cand in _snap_candidate_times(raw):
+		var cd: float = abs(cand - raw)
+		if cd < best_d:
+			best_d = cd
+			best = cand
+	if best_d <= thresh_sec:
+		raw = best
 	if _snap_mode == SnapMode.NONE:
-		return t
+		return raw
 	var step: float = _snap_step_seconds()
 	if step <= 0.0:
-		return t
-	return round(t / step) * step
+		return raw
+	return round(raw / step) * step
+
+
+func _snap_candidate_times(for_time: float) -> Array[float]:
+	var out: Array[float] = []
+	if _timeline == null:
+		return out
+	out.append(0.0)
+	out.append(_timeline.length_seconds)
+	if _timeline.loop_enabled:
+		out.append(_timeline.loop_start_seconds)
+		out.append(_timeline.loop_end_seconds)
+	for m in _timeline.markers:
+		out.append(m.time_seconds)
+	for tr in _timeline.tracks:
+		for cl in tr.clips:
+			out.append(cl.start_seconds)
+			out.append(cl.start_seconds + cl.duration_seconds)
+	if _snap_mode != SnapMode.NONE:
+		var step: float = _snap_step_seconds()
+		if step > 0.0:
+			out.append(round(for_time / step) * step)
+	return out
 
 
 func _snap_step_seconds() -> float:
@@ -547,6 +600,18 @@ func _hit_marker_near(x: float) -> CodaTimelineMarker:
 
 # ---------- Input ----------
 
+func _unhandled_key_input(event: InputEvent) -> void:
+	if _timeline == null or not is_visible_in_tree():
+		return
+	if not has_focus():
+		return
+	if event is InputEventKey:
+		var k: InputEventKey = event as InputEventKey
+		if k.pressed and not k.echo and k.keycode == KEY_SPACE:
+			audition_requested.emit()
+			get_viewport().set_input_as_handled()
+
+
 func _gui_input(event: InputEvent) -> void:
 	if _timeline == null:
 		return
@@ -557,6 +622,20 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _handle_mouse_button(mb: InputEventMouseButton) -> void:
+	if (
+		mb.pressed
+		and (
+			mb.button_index == MOUSE_BUTTON_WHEEL_UP
+			or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN
+		)
+	):
+		if mb.shift_pressed:
+			var dir: float = 1.0 if mb.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1.0
+			var step_sec: float = _seconds_per_pixel * 48.0
+			_scroll_seconds = max(0.0, _scroll_seconds + dir * step_sec)
+			queue_redraw()
+			accept_event()
+			return
 	if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
 		_zoom_around(mb.position, 0.85)
 		accept_event()
@@ -689,16 +768,19 @@ func _begin_drag(hit: Dictionary, mb: InputEventMouseButton) -> void:
 			return
 		_drag_kind = DragKind.MARKER_MOVE
 		_drag_marker_id = marker_id
+		timeline_interaction_started.emit()
 		return
 	if k == "loop_start":
 		_drag_kind = DragKind.LOOP_START
 		_drag_initial_loop_start = _timeline.loop_start_seconds
 		_drag_initial_loop_end = _timeline.loop_end_seconds
+		timeline_interaction_started.emit()
 		return
 	if k == "loop_end":
 		_drag_kind = DragKind.LOOP_END
 		_drag_initial_loop_start = _timeline.loop_start_seconds
 		_drag_initial_loop_end = _timeline.loop_end_seconds
+		timeline_interaction_started.emit()
 		return
 	if k == "clip":
 		var clip_id: String = String(hit.get("clip_id", ""))
@@ -721,6 +803,7 @@ func _begin_drag(hit: Dictionary, mb: InputEventMouseButton) -> void:
 				_drag_kind = DragKind.CLIP_RESIZE_RIGHT
 			_:
 				_drag_kind = DragKind.CLIP_MOVE
+		timeline_interaction_started.emit()
 		return
 	if k == "lane":
 		var lane_idx: int = int(hit.get("track_index", -1))
@@ -746,13 +829,41 @@ func _ensure_clip_menu() -> void:
 	_clip_menu = PopupMenu.new()
 	_clip_menu.name = "TimelineClipMenu"
 	_clip_menu.add_item("Remove from timeline", _CTX_REMOVE_CLIP)
+	_clip_menu.add_item("Duplicate", _CTX_DUPLICATE_CLIP)
+	_clip_menu.add_item("Split at playhead", _CTX_SPLIT_PLAYHEAD)
+	_clip_menu.about_to_popup.connect(_on_clip_menu_about_to_popup)
 	_clip_menu.id_pressed.connect(_on_clip_menu_id_pressed)
 	add_child(_clip_menu)
 
 
+func _on_clip_menu_about_to_popup() -> void:
+	if _clip_menu == null or _timeline == null:
+		return
+	var can_split: bool = false
+	if not _menu_clip_id.is_empty():
+		var inf: Dictionary = _timeline.find_clip(_menu_clip_id)
+		if not inf.is_empty():
+			var cl: CodaTimelineClip = inf.get("clip") as CodaTimelineClip
+			if cl != null:
+				var ph: float = _playhead_seconds
+				var lo: float = cl.start_seconds + 0.02
+				var hi: float = cl.start_seconds + cl.duration_seconds - 0.02
+				can_split = ph > lo and ph < hi
+	var idx_split: int = _clip_menu.get_item_index(_CTX_SPLIT_PLAYHEAD)
+	if idx_split >= 0:
+		_clip_menu.set_item_disabled(idx_split, not can_split)
+
+
 func _on_clip_menu_id_pressed(id: int) -> void:
-	if id == _CTX_REMOVE_CLIP and not _menu_clip_id.is_empty():
-		clip_delete_requested.emit(_menu_clip_id)
+	if _menu_clip_id.is_empty():
+		return
+	match id:
+		_CTX_REMOVE_CLIP:
+			clip_delete_requested.emit(_menu_clip_id)
+		_CTX_DUPLICATE_CLIP:
+			clip_duplicate_requested.emit(_menu_clip_id)
+		_CTX_SPLIT_PLAYHEAD:
+			clip_split_at_playhead_requested.emit(_menu_clip_id)
 	_menu_clip_id = ""
 
 

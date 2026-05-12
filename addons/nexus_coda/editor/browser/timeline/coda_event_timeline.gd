@@ -15,8 +15,12 @@ const CodaTimelineTrackScript := preload(
 const CodaTimelineMarkerScript := preload(
 	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_marker.gd"
 )
+const CodaTimelineClipScript := preload(
+	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
+)
 
 const DEFAULT_LENGTH_SECONDS := 8.0
+const MIN_SPLIT_SEGMENT_SECONDS := 0.02
 
 var length_seconds: float = DEFAULT_LENGTH_SECONDS
 var tempo_bpm: float = 0.0
@@ -74,6 +78,87 @@ func remove_marker(marker_id: String) -> bool:
 			markers.remove_at(i)
 			return true
 	return false
+
+
+func _sort_track_clips(track: CodaTimelineTrack) -> void:
+	track.clips.sort_custom(
+		func(a: CodaTimelineClip, b: CodaTimelineClip) -> bool: return a.start_seconds < b.start_seconds
+	)
+
+
+## Split one clip at [split_seconds] on the timeline axis. Returns "" on success.
+func split_clip_at_time(clip_id: String, split_seconds: float) -> String:
+	var info: Dictionary = find_clip(clip_id)
+	if info.is_empty():
+		return "Clip not found."
+	var c: CodaTimelineClip = info.get("clip") as CodaTimelineClip
+	var tr: CodaTimelineTrack = info.get("track") as CodaTimelineTrack
+	if c == null or tr == null:
+		return "Clip not found."
+	var s0: float = c.start_seconds
+	var end_t: float = c.start_seconds + c.duration_seconds
+	if split_seconds <= s0 + MIN_SPLIT_SEGMENT_SECONDS:
+		return "Split time is too close to the clip start."
+	if split_seconds >= end_t - MIN_SPLIT_SEGMENT_SECONDS:
+		return "Split time is too close to the clip end."
+	var left_duration: float = split_seconds - s0
+	var right_duration: float = end_t - split_seconds
+	var saved_dur: float = c.duration_seconds
+	var saved_fo: float = c.fade_out_seconds
+	var right: CodaTimelineClip = CodaTimelineClipScript.new()
+	right.audio_path = c.audio_path
+	right.start_seconds = split_seconds
+	right.duration_seconds = right_duration
+	right.offset_seconds = c.offset_seconds + left_duration
+	right.volume_db = c.volume_db
+	right.pitch_scale = c.pitch_scale
+	right.fade_in_seconds = 0.0
+	right.fade_out_seconds = c.fade_out_seconds
+	c.duration_seconds = left_duration
+	c.fade_out_seconds = 0.0
+	tr.clips.append(right)
+	_sort_track_clips(tr)
+	var err: String = validate()
+	if not err.is_empty():
+		c.duration_seconds = saved_dur
+		c.fade_out_seconds = saved_fo
+		tr.clips.erase(right)
+		_sort_track_clips(tr)
+		return err
+	return ""
+
+
+## Place a copy after this clip (same lane). Returns "" on success.
+func duplicate_clip(clip_id: String, gap_seconds: float = 0.05) -> String:
+	var info: Dictionary = find_clip(clip_id)
+	if info.is_empty():
+		return "Clip not found."
+	var c: CodaTimelineClip = info.get("clip") as CodaTimelineClip
+	var tr: CodaTimelineTrack = info.get("track") as CodaTimelineTrack
+	if c == null or tr == null:
+		return "Clip not found."
+	var d: Dictionary = c.to_dictionary()
+	d.erase("id")
+	var dup: CodaTimelineClip = CodaTimelineClipScript.from_dictionary(d)
+	var new_start: float = c.start_seconds + c.duration_seconds + max(0.0, gap_seconds)
+	if new_start >= length_seconds - 0.01:
+		return "No space after the clip to duplicate."
+	var room: float = length_seconds - new_start
+	var max_src: float = dup.max_source_playable_seconds()
+	var max_d: float = minf(c.duration_seconds, minf(room, max_src))
+	if max_d < MIN_SPLIT_SEGMENT_SECONDS:
+		return "Not enough timeline space to place the duplicate."
+	dup.start_seconds = new_start
+	dup.duration_seconds = max_d
+	dup.offset_seconds = c.offset_seconds
+	tr.clips.append(dup)
+	_sort_track_clips(tr)
+	var err2: String = validate()
+	if not err2.is_empty():
+		tr.clips.erase(dup)
+		_sort_track_clips(tr)
+		return err2
+	return ""
 
 
 ## Validates timeline state and returns "" if OK, or a human-readable error string.

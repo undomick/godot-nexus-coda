@@ -19,6 +19,7 @@ const CodaTimelineViewScript := preload(
 const HEADERS_WIDTH := 240
 const TRACK_HEIGHT := CodaTimelineViewScript.TRACK_HEIGHT
 const RULER_HEIGHT := CodaTimelineViewScript.RULER_HEIGHT
+const MAX_TIMELINE_UNDO := 40
 
 var _project: CodaState = null
 var _runtime: CodaRuntime = null
@@ -49,6 +50,12 @@ var _validation_label: Label
 var _suppress_writeback: bool = false
 var _selected_track_index: int = 0
 var _track_select_group: ButtonGroup
+var _undo_stack: Array[CodaEventTimeline] = []
+var _redo_stack: Array[CodaEventTimeline] = []
+
+var _split_clip_btn: Button
+var _zoom_fit_btn: Button
+var _hints_label: Label
 
 
 func _ready() -> void:
@@ -58,6 +65,7 @@ func _ready() -> void:
 	add_theme_constant_override(&"separation", 0)
 
 	_build_toolbar()
+	_build_hints_row()
 	_build_empty_state()
 	_build_split_root()
 	_build_validation_label()
@@ -114,6 +122,8 @@ func on_browser_event_selected(node: Variant) -> void:
 		_selected_track_index = 0
 	# Active handle becomes stale when the visible event changes; the next process tick re-resolves.
 	_live_handle = null
+	_undo_stack.clear()
+	_redo_stack.clear()
 	if _view != null:
 		_view.set_playhead(0.0)
 	_refresh_view_state()
@@ -133,6 +143,14 @@ func _build_toolbar() -> void:
 	)
 	_add_clip_btn.pressed.connect(_on_add_clip_pressed)
 	_toolbar.add_child(_add_clip_btn)
+
+	_split_clip_btn = Button.new()
+	_split_clip_btn.text = "Split"
+	_split_clip_btn.tooltip_text = (
+		"Split the selected clip at the playhead (clip must be selected; playhead inside clip)"
+	)
+	_split_clip_btn.pressed.connect(_on_split_clip_toolbar_pressed)
+	_toolbar.add_child(_split_clip_btn)
 
 	_add_marker_btn = Button.new()
 	_add_marker_btn.text = "+ Marker"
@@ -197,6 +215,12 @@ func _build_toolbar() -> void:
 	_fit_length_btn.pressed.connect(_on_fit_timeline_length_pressed)
 	_toolbar.add_child(_fit_length_btn)
 
+	_zoom_fit_btn = Button.new()
+	_zoom_fit_btn.text = "Zoom to fit"
+	_zoom_fit_btn.tooltip_text = "Zoom the timeline view so the full session length fits horizontally"
+	_zoom_fit_btn.pressed.connect(_on_zoom_fit_pressed)
+	_toolbar.add_child(_zoom_fit_btn)
+
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_toolbar.add_child(spacer)
@@ -206,6 +230,17 @@ func _build_toolbar() -> void:
 	_switch_mode_btn.tooltip_text = "Use the Event-Graph authoring model instead of the timeline"
 	_switch_mode_btn.pressed.connect(_on_switch_mode_pressed)
 	_toolbar.add_child(_switch_mode_btn)
+
+
+func _build_hints_row() -> void:
+	_hints_label = Label.new()
+	_hints_label.text = (
+		"Wheel: zoom · Shift+wheel: scroll · MMB drag: pan · Space (focus here): play preview"
+	)
+	_hints_label.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
+	_hints_label.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE - 1)
+	_hints_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	add_child(_hints_label)
 
 
 func _build_empty_state() -> void:
@@ -263,6 +298,10 @@ func _build_split_root() -> void:
 	_view.marker_double_clicked.connect(_on_view_marker_double_clicked)
 	_view.track_row_selected.connect(_on_view_track_row_selected)
 	_view.clip_audio_assign_requested.connect(_on_view_clip_audio_assign_requested)
+	_view.timeline_interaction_started.connect(_on_view_timeline_interaction_started)
+	_view.clip_duplicate_requested.connect(_on_view_clip_duplicate_requested)
+	_view.clip_split_at_playhead_requested.connect(_on_view_clip_split_at_playhead_requested)
+	_view.audition_requested.connect(_on_view_audition_requested)
 	_split_root.add_child(_view)
 
 
@@ -542,6 +581,7 @@ func _on_timeline_length_spin_changed(value: float) -> void:
 func _on_fit_timeline_length_pressed() -> void:
 	if _selected_event == null or _selected_event.event_timeline == null:
 		return
+	_push_timeline_undo()
 	var t: CodaEventTimeline = _selected_event.event_timeline
 	var need: float = _timeline_content_end_seconds(t)
 	var margin: float = 0.25
@@ -615,6 +655,7 @@ func _on_view_clip_audio_assign_requested(clip_id: String, res_path: String) -> 
 	var info: Dictionary = t.find_clip(clip_id)
 	if info.is_empty():
 		return
+	_push_timeline_undo()
 	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
 	if clip == null:
 		return
@@ -647,6 +688,7 @@ func _on_add_clip_pressed() -> void:
 	var t: CodaEventTimeline = _selected_event.event_timeline
 	if t.tracks.is_empty():
 		return
+	_push_timeline_undo()
 	var tr_i: int = clampi(_selected_track_index, 0, t.tracks.size() - 1)
 	var clip := CodaTimelineClip.new()
 	clip.start_seconds = clampf(_view.get_playhead(), 0.0, t.length_seconds)
@@ -660,6 +702,7 @@ func _on_add_clip_pressed() -> void:
 func _on_add_marker_pressed() -> void:
 	if _selected_event == null or _selected_event.event_timeline == null:
 		return
+	_push_timeline_undo()
 	var t: CodaEventTimeline = _selected_event.event_timeline
 	var m := CodaTimelineMarker.new()
 	m.time_seconds = clampf(_view.get_playhead(), 0.0, t.length_seconds)
@@ -671,6 +714,7 @@ func _on_add_marker_pressed() -> void:
 func _on_add_track_pressed() -> void:
 	if _selected_event == null or _selected_event.event_timeline == null:
 		return
+	_push_timeline_undo()
 	var t: CodaEventTimeline = _selected_event.event_timeline
 	var tr := CodaTimelineTrack.new()
 	tr.track_name = "Track %d" % (t.tracks.size() + 1)
@@ -681,15 +725,18 @@ func _on_add_track_pressed() -> void:
 func _on_remove_track_pressed(track_id: String) -> void:
 	if _selected_event == null or _selected_event.event_timeline == null:
 		return
-	if _selected_event.event_timeline.remove_track(track_id):
-		var t: CodaEventTimeline = _selected_event.event_timeline
-		if t.tracks.is_empty():
-			_selected_track_index = 0
-		else:
-			_selected_track_index = clampi(_selected_track_index, 0, t.tracks.size() - 1)
-		if _view != null:
-			_view.set_track_row_highlight(_selected_track_index)
-		_notify_timeline_changed()
+	_push_timeline_undo()
+	if not _selected_event.event_timeline.remove_track(track_id):
+		_undo_timeline()
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	if t.tracks.is_empty():
+		_selected_track_index = 0
+	else:
+		_selected_track_index = clampi(_selected_track_index, 0, t.tracks.size() - 1)
+	if _view != null:
+		_view.set_track_row_highlight(_selected_track_index)
+	_notify_timeline_changed()
 
 
 # ---------- View signals ----------
@@ -712,6 +759,7 @@ func _on_view_browser_asset_dropped(track_index: int, start_seconds: float, res_
 	var t: CodaEventTimeline = _selected_event.event_timeline
 	if track_index < 0 or track_index >= t.tracks.size():
 		return
+	_push_timeline_undo()
 	var clip := CodaTimelineClip.new()
 	clip.audio_path = res_path
 	clip.start_seconds = clampf(start_seconds, 0.0, t.length_seconds)
@@ -725,6 +773,7 @@ func _on_view_browser_asset_dropped(track_index: int, start_seconds: float, res_
 func _on_view_clip_delete_requested(clip_id: String) -> void:
 	if clip_id.is_empty() or _selected_event == null or _selected_event.event_timeline == null:
 		return
+	_push_timeline_undo()
 	var t: CodaEventTimeline = _selected_event.event_timeline
 	var info: Dictionary = t.find_clip(clip_id)
 	if info.is_empty():
@@ -776,3 +825,133 @@ func _on_view_marker_double_clicked(marker_id: String) -> void:
 	)
 	add_child(dlg)
 	dlg.popup_centered()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if _split_root == null or not _split_root.visible:
+		return
+	var fo: Control = get_viewport().gui_get_focus_owner() as Control
+	if fo == null or not is_ancestor_of(fo):
+		return
+	if fo is LineEdit or fo is TextEdit:
+		return
+	if event is InputEventKey:
+		var k: InputEventKey = event as InputEventKey
+		if not k.pressed or k.echo:
+			return
+		if k.ctrl_pressed and not k.alt_pressed and k.keycode == KEY_Z and not k.shift_pressed:
+			_undo_timeline()
+			get_viewport().set_input_as_handled()
+			return
+		if k.ctrl_pressed and not k.alt_pressed and (k.keycode == KEY_Y or (k.keycode == KEY_Z and k.shift_pressed)):
+			_redo_timeline()
+			get_viewport().set_input_as_handled()
+
+
+func _push_timeline_undo() -> void:
+	if _selected_event == null or _selected_event.event_timeline == null:
+		return
+	var snap: CodaEventTimeline = _selected_event.event_timeline.clone_keep_ids()
+	_undo_stack.append(snap)
+	_redo_stack.clear()
+	while _undo_stack.size() > MAX_TIMELINE_UNDO:
+		_undo_stack.pop_front()
+
+
+func _restore_timeline_from(source: CodaEventTimeline) -> void:
+	if _selected_event == null or source == null:
+		return
+	_selected_event.event_timeline = source.clone_keep_ids()
+	_show_timeline()
+	_notify_timeline_changed()
+
+
+func _undo_timeline() -> void:
+	if _undo_stack.is_empty() or _selected_event == null:
+		return
+	var cur: CodaEventTimeline = _selected_event.event_timeline.clone_keep_ids()
+	var past: CodaEventTimeline = _undo_stack.pop_back()
+	_redo_stack.append(cur)
+	_restore_timeline_from(past)
+
+
+func _redo_timeline() -> void:
+	if _redo_stack.is_empty() or _selected_event == null:
+		return
+	var cur: CodaEventTimeline = _selected_event.event_timeline.clone_keep_ids()
+	var fut: CodaEventTimeline = _redo_stack.pop_back()
+	_undo_stack.append(cur)
+	_restore_timeline_from(fut)
+
+
+func _on_view_timeline_interaction_started() -> void:
+	_push_timeline_undo()
+
+
+func _on_zoom_fit_pressed() -> void:
+	if _view == null:
+		return
+	_view.zoom_timeline_to_fit(_view.size.x)
+
+
+func _on_split_clip_toolbar_pressed() -> void:
+	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
+		return
+	var cid: String = _view.get_selected_clip_id()
+	if cid.is_empty():
+		NexusCodaLog.warn("timeline", "Select a clip before splitting.")
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	var split_t: float = _view.get_playhead()
+	_push_timeline_undo()
+	var err: String = t.split_clip_at_time(cid, split_t)
+	if not err.is_empty():
+		_undo_timeline()
+		NexusCodaLog.warn("timeline", err)
+		return
+	_notify_timeline_changed()
+
+
+func _on_view_clip_duplicate_requested(clip_id: String) -> void:
+	if clip_id.is_empty() or _selected_event == null or _selected_event.event_timeline == null:
+		return
+	_push_timeline_undo()
+	var err: String = _selected_event.event_timeline.duplicate_clip(clip_id)
+	if not err.is_empty():
+		_undo_timeline()
+		NexusCodaLog.warn("timeline", err)
+		return
+	_extend_timeline_if_content_exceeds()
+	_notify_timeline_changed()
+
+
+func _on_view_clip_split_at_playhead_requested(clip_id: String) -> void:
+	if clip_id.is_empty() or _selected_event == null or _selected_event.event_timeline == null or _view == null:
+		return
+	_push_timeline_undo()
+	var err: String = _selected_event.event_timeline.split_clip_at_time(clip_id, _view.get_playhead())
+	if not err.is_empty():
+		_undo_timeline()
+		NexusCodaLog.warn("timeline", err)
+		return
+	_notify_timeline_changed()
+
+
+func _on_view_audition_requested() -> void:
+	if _selected_event == null or _runtime == null:
+		return
+	if _selected_event.event_authoring_mode != CodaBrowserNode.AuthoringMode.TIMELINE:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	if t == null:
+		return
+	if _live_handle != null and is_instance_valid(_live_handle):
+		_runtime.stop(_live_handle)
+		_live_handle = null
+	var params: Dictionary = {"loop": t.loop_enabled}
+	var h: CodaEventHandle = _runtime.play_event_node(_selected_event, params)
+	if h == null:
+		NexusCodaLog.warn("timeline_preview", 'Could not start preview for "%s"' % _selected_event.name)
+		return
+	_live_handle = h
+	NexusCodaLog.info("timeline_preview", 'Preview started: "%s"' % _selected_event.name)
