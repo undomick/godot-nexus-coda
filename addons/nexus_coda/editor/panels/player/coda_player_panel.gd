@@ -40,7 +40,6 @@ var _content: VBoxContainer
 var _header: CodaSectionHeader
 var _pin_button: Button
 var _transport_bar: CodaEventTransportBar
-var _pause_button: Button
 var _status_label: Label
 var _time_label: Label
 var _seek_slider: HSlider
@@ -103,17 +102,10 @@ func _ready() -> void:
 	_transport_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_transport_bar.play_requested.connect(_on_play_requested)
 	_transport_bar.stop_requested.connect(_on_stop_requested)
+	_transport_bar.pause_toggled.connect(_on_pause_toggled)
 	_transport_bar.loop_toggled.connect(_on_loop_toggled)
 	transport_row.add_child(_transport_bar)
 	_transport_bar.set_status_label_visible(false)
-
-	_pause_button = Button.new()
-	_pause_button.toggle_mode = true
-	_pause_button.text = "Pause"
-	_pause_button.tooltip_text = "Pause / resume the active voice"
-	_pause_button.disabled = true
-	_pause_button.toggled.connect(_on_pause_toggled)
-	transport_row.add_child(_pause_button)
 
 	var time_row := HBoxContainer.new()
 	time_row.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
@@ -354,8 +346,7 @@ func _on_play_requested() -> void:
 		)
 		return
 	_transport_bar.set_playing(true)
-	_pause_button.disabled = false
-	_pause_button.button_pressed = false
+	_transport_bar.arm_pause_for_playback()
 	_set_status(STATUS_PLAYING)
 	_seek_slider.editable = true
 	NexusCodaLog.info("player_preview", 'Preview started: "%s"' % _selected_event.name)
@@ -372,7 +363,7 @@ func _on_loop_toggled(loop: bool) -> void:
 
 func _on_pause_toggled(on: bool) -> void:
 	if _active_handle == null:
-		_pause_button.button_pressed = false
+		_transport_bar.set_pause_pressed_no_signal(false)
 		return
 	if on:
 		_active_handle.pause()
@@ -403,9 +394,6 @@ func _stop_active_voice() -> void:
 		_active_handle = null
 	if _transport_bar != null:
 		_transport_bar.set_playing(false)
-	if _pause_button != null:
-		_pause_button.button_pressed = false
-		_pause_button.disabled = true
 	if _seek_slider != null:
 		_seek_slider.editable = false
 		_seek_slider.set_value_no_signal(0.0)
@@ -419,9 +407,6 @@ func _process(_delta: float) -> void:
 		_active_handle = null
 		if _transport_bar != null:
 			_transport_bar.set_playing(false)
-		if _pause_button != null:
-			_pause_button.button_pressed = false
-			_pause_button.disabled = true
 		if _seek_slider != null:
 			_seek_slider.editable = false
 		_set_status(STATUS_IDLE)
