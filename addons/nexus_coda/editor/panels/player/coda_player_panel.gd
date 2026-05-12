@@ -33,6 +33,7 @@ var _selected_event: CodaBrowserNode = null
 var _is_pinned: bool = false
 var _active_handle: CodaEventHandle = null
 var _seek_slider_dragging: bool = false
+var _transport_armed_for_handle_id: int = -1
 
 var _empty_state: CodaEmptyState
 var _scroll: ScrollContainer
@@ -330,6 +331,24 @@ static func _event_has_playable_content(event: CodaBrowserNode) -> bool:
 	return false
 
 
+func _resolve_preview_handle() -> CodaEventHandle:
+	if _selected_event == null or _runtime == null:
+		return null
+	var tl: CodaEventHandle = _runtime.get_active_timeline_handle_for_event(_selected_event.id)
+	if tl != null:
+		return tl
+	return _active_handle
+
+
+func _arm_transport_for_handle(h: CodaEventHandle) -> void:
+	if h == null or _transport_bar == null:
+		return
+	if _transport_armed_for_handle_id == h.id:
+		return
+	_transport_bar.arm_pause_for_playback()
+	_transport_armed_for_handle_id = h.id
+
+
 # ---- Transport handlers ----
 
 func _on_play_requested() -> void:
@@ -337,18 +356,27 @@ func _on_play_requested() -> void:
 		return
 	_stop_active_voice()
 	var params: Dictionary = {"loop": _transport_bar.is_loop_enabled()}
-	_active_handle = _runtime.play_event_node(_selected_event, params)
-	if _active_handle == null:
+	if _selected_event.event_authoring_mode == CodaBrowserNode.AuthoringMode.TIMELINE:
+		var tline: CodaEventTimeline = _selected_event.event_timeline
+		if tline != null:
+			params["timeline_cursor_start"] = clampf(_seek_slider.value, 0.0, tline.length_seconds)
+	var h: CodaEventHandle = _runtime.play_event_node(_selected_event, params)
+	if h == null:
 		_transport_bar.set_playing(false)
 		_set_status(STATUS_IDLE)
 		NexusCodaLog.warn(
 			"player_preview", 'Could not start preview for "%s"' % _selected_event.name
 		)
 		return
+	if h.is_timeline:
+		_active_handle = null
+	else:
+		_active_handle = h
 	_transport_bar.set_playing(true)
-	_transport_bar.arm_pause_for_playback()
+	_arm_transport_for_handle(h)
 	_set_status(STATUS_PLAYING)
-	_seek_slider.editable = true
+	if _seek_slider != null:
+		_seek_slider.editable = true
 	NexusCodaLog.info("player_preview", 'Preview started: "%s"' % _selected_event.name)
 
 
@@ -357,19 +385,22 @@ func _on_stop_requested() -> void:
 
 
 func _on_loop_toggled(loop: bool) -> void:
-	if _active_handle != null:
-		_active_handle.loop = loop
+	var r: CodaEventHandle = _resolve_preview_handle()
+	if r != null:
+		r.loop = loop
 
 
 func _on_pause_toggled(on: bool) -> void:
-	if _active_handle == null:
-		_transport_bar.set_pause_pressed_no_signal(false)
+	var r: CodaEventHandle = _resolve_preview_handle()
+	if r == null:
+		if _transport_bar != null:
+			_transport_bar.set_pause_pressed_no_signal(false)
 		return
 	if on:
-		_active_handle.pause()
+		r.pause()
 		_set_status(STATUS_PAUSED)
 	else:
-		_active_handle.resume()
+		r.resume()
 		_set_status(STATUS_PLAYING)
 
 
@@ -379,8 +410,9 @@ func _on_seek_drag_started() -> void:
 
 func _on_seek_drag_ended(_value_changed: bool) -> void:
 	_seek_slider_dragging = false
-	if _active_handle != null:
-		_active_handle.seek(_seek_slider.value)
+	var r: CodaEventHandle = _resolve_preview_handle()
+	if r != null:
+		r.seek(_seek_slider.value)
 
 
 func _on_pin_toggled(on: bool) -> void:
@@ -392,6 +424,11 @@ func _stop_active_voice() -> void:
 	if _active_handle != null:
 		_active_handle.stop()
 		_active_handle = null
+	if _runtime != null and _selected_event != null:
+		var tlh: CodaEventHandle = _runtime.get_active_timeline_handle_for_event(_selected_event.id)
+		if tlh != null:
+			_runtime.stop(tlh)
+	_transport_armed_for_handle_id = -1
 	if _transport_bar != null:
 		_transport_bar.set_playing(false)
 	if _seek_slider != null:
@@ -403,13 +440,37 @@ func _stop_active_voice() -> void:
 # ---- Frame loop ----
 
 func _process(_delta: float) -> void:
-	if _active_handle != null and not _active_handle.is_playing():
-		_active_handle = null
+	var r: CodaEventHandle = _resolve_preview_handle()
+	if r == null:
+		if _active_handle != null:
+			_active_handle = null
+		_transport_armed_for_handle_id = -1
 		if _transport_bar != null:
 			_transport_bar.set_playing(false)
 		if _seek_slider != null:
 			_seek_slider.editable = false
 		_set_status(STATUS_IDLE)
+	elif not r.is_timeline and not r.is_playing():
+		_active_handle = null
+		_transport_armed_for_handle_id = -1
+		if _transport_bar != null:
+			_transport_bar.set_playing(false)
+		if _seek_slider != null:
+			_seek_slider.editable = false
+		_set_status(STATUS_IDLE)
+	else:
+		if not r.is_timeline:
+			_active_handle = r
+		if _transport_bar != null:
+			_transport_bar.set_playing(true)
+			_arm_transport_for_handle(r)
+			_transport_bar.set_pause_pressed_no_signal(r.is_paused())
+		if r.is_paused():
+			_set_status(STATUS_PAUSED)
+		else:
+			_set_status(STATUS_PLAYING)
+		if _seek_slider != null:
+			_seek_slider.editable = true
 	_update_time_display()
 	_update_meter()
 
@@ -417,9 +478,10 @@ func _process(_delta: float) -> void:
 func _update_time_display() -> void:
 	var pos: float = 0.0
 	var length: float = 0.0
-	if _active_handle != null:
-		pos = _active_handle.get_position()
-		length = _active_handle.get_length()
+	var r: CodaEventHandle = _resolve_preview_handle()
+	if r != null:
+		pos = r.get_position()
+		length = r.get_length()
 	if _time_label != null:
 		_time_label.text = _format_time_pair(pos, length)
 	if _seek_slider != null and not _seek_slider_dragging:
@@ -433,8 +495,9 @@ func _update_time_display() -> void:
 
 func _update_meter() -> void:
 	var bus_name: String = ""
-	if _active_handle != null:
-		bus_name = _active_handle.get_bus_name()
+	var r: CodaEventHandle = _resolve_preview_handle()
+	if r != null:
+		bus_name = r.get_bus_name()
 	if bus_name.is_empty() and _runtime != null and _selected_event != null:
 		bus_name = _runtime.resolve_bus_name_for_event(_selected_event)
 	if bus_name.is_empty():
@@ -597,20 +660,23 @@ func _make_param_slider_handler(
 	return func(v: float) -> void:
 		if value_label != null and is_instance_valid(value_label):
 			value_label.text = _fmt_param_value(param, v)
-		if _active_handle != null and _runtime != null:
-			_runtime.set_parameter(_active_handle, param_id, v)
+		var rh: CodaEventHandle = _resolve_preview_handle()
+		if rh != null and _runtime != null:
+			_runtime.set_parameter(rh, param_id, v)
 
 
 func _make_param_bool_handler(param_id: String) -> Callable:
 	return func(on: bool) -> void:
-		if _active_handle != null and _runtime != null:
-			_runtime.set_parameter(_active_handle, param_id, on)
+		var rh2: CodaEventHandle = _resolve_preview_handle()
+		if rh2 != null and _runtime != null:
+			_runtime.set_parameter(rh2, param_id, on)
 
 
 func _make_param_string_handler(param_id: String) -> Callable:
 	return func(text: String) -> void:
-		if _active_handle != null and _runtime != null:
-			_runtime.set_parameter(_active_handle, param_id, text)
+		var rh3: CodaEventHandle = _resolve_preview_handle()
+		if rh3 != null and _runtime != null:
+			_runtime.set_parameter(rh3, param_id, text)
 
 
 static func _fmt_param_value(param: CodaEventParameter, v: float) -> String:

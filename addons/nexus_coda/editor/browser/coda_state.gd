@@ -340,6 +340,8 @@ func set_event_authoring_mode(event_id: String, mode: int) -> String:
 
 
 ## Notifies the project that the event timeline for `event_id` has been mutated externally.
+## Emits [signal project_dirty] (not [signal structure_changed]) so editor UIs such as the
+## timeline track header sliders are not rebuilt synchronously during drag handlers.
 ## Returns empty string on success, otherwise an English error message (matches the graph
 ## counterpart so consumers can present errors uniformly).
 func notify_event_timeline_changed(event_id: String) -> String:
@@ -349,7 +351,7 @@ func notify_event_timeline_changed(event_id: String) -> String:
 	if node.event_timeline == null:
 		return "Event has no timeline."
 	var err: String = node.event_timeline.validate()
-	structure_changed.emit()
+	project_dirty.emit()
 	return err
 
 

@@ -179,6 +179,7 @@ func stop_all() -> void:
 		var hh2 := h as CodaEventHandle
 		if hh2 != null:
 			hh2._alive = false
+			hh2.timeline_runtime = null
 	_timeline_dispatchers.clear()
 	_timeline_voice_owner.clear()
 
@@ -583,7 +584,8 @@ func _start_timeline_event(
 	handle._bus_name = bus_name
 	handle.is_timeline = true
 	handle.timeline_length_seconds = timeline.length_seconds
-	handle.timeline_cursor_seconds = 0.0
+	var start_sec: float = float(params.get("timeline_cursor_start", 0.0))
+	handle.timeline_cursor_seconds = clampf(start_sec, 0.0, timeline.length_seconds)
 	# Optional override: player panel may pass [start, end] to scrub a sub-range.
 	var loop_region: Variant = params.get("_coda_loop_region", null)
 	var loop_override_start: float = -1.0
@@ -600,8 +602,45 @@ func _start_timeline_event(
 		"loop_override_start": loop_override_start,
 		"loop_override_end": loop_override_end,
 	}
+	handle.timeline_runtime = self
+	_prime_timeline_overlapping_voices(handle, _timeline_dispatchers[handle], timeline, handle.timeline_cursor_seconds)
 	voice_started.emit(handle)
 	return handle
+
+
+func _prime_timeline_overlapping_voices(
+	handle: CodaEventHandle, d: Dictionary, timeline: CodaEventTimeline, at_seconds: float
+) -> void:
+	var has_solo: bool = false
+	for tr in timeline.tracks:
+		if tr.solo:
+			has_solo = true
+			break
+	var fired: Dictionary = {}
+	for track in timeline.tracks:
+		if track.mute:
+			continue
+		if has_solo and not track.solo:
+			continue
+		for clip in track.clips:
+			if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
+				continue
+			var clip_end: float = clip.start_seconds + clip.duration_seconds
+			if at_seconds < clip.start_seconds or at_seconds >= clip_end:
+				continue
+			var into_clip: float = at_seconds - clip.start_seconds
+			var entry: Dictionary = {
+				"audio_path": clip.audio_path,
+				"volume_db": clip.volume_db + track.volume_db,
+				"pitch_scale": clip.pitch_scale,
+				"sound_id": clip.id,
+				"track_id": track.id,
+				"stream_offset_seconds": clip.offset_seconds + into_clip,
+				"duration_seconds": clip.duration_seconds - into_clip,
+			}
+			_spawn_timeline_voice(handle, d, entry)
+			fired[clip.id] = true
+	d["fired_clip_ids"] = fired
 
 
 func _tick_timeline_dispatchers(delta: float) -> void:
@@ -627,6 +666,8 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 		if handle.timeline_pending_seek_seconds >= 0.0:
 			_apply_timeline_seek(handle, d, handle.timeline_pending_seek_seconds)
 			handle.timeline_pending_seek_seconds = -1.0
+
+		_refresh_timeline_voice_output_levels(handle, d, timeline)
 
 		if handle._paused:
 			continue
@@ -671,13 +712,43 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 			_fire_clips_in_range(handle, d, timeline, prev_cursor, wrap_target)
 			d["fired_clip_ids"] = {}
 			# Stop currently-playing voices so the next iteration retriggers them on cue.
-			_stop_timeline_voices(d)
+			_stop_timeline_voices(d, handle)
 			prev_cursor = (
 				loop_start if loop_start >= 0.0 else 0.0
 			)
 
 		handle.timeline_cursor_seconds = next_cursor
 		_fire_clips_in_range(handle, d, timeline, prev_cursor, next_cursor)
+
+
+func _refresh_timeline_voice_output_levels(
+	handle: CodaEventHandle, d: Dictionary, timeline: CodaEventTimeline
+) -> void:
+	var voices: Dictionary = d.get("voices", {})
+	if voices.is_empty():
+		return
+	var has_solo: bool = false
+	for tr in timeline.tracks:
+		if tr.solo:
+			has_solo = true
+			break
+	var override_db: float = float(handle.params.get("volume_db", 0.0))
+	for sound_key in voices.keys():
+		var p: AudioStreamPlayer = voices[sound_key] as AudioStreamPlayer
+		if p == null or not is_instance_valid(p):
+			continue
+		var clip_id: String = str(sound_key)
+		var info: Dictionary = timeline.find_clip(clip_id)
+		if info.is_empty():
+			continue
+		var tr: CodaTimelineTrack = info.get("track", null) as CodaTimelineTrack
+		var cl: CodaTimelineClip = info.get("clip", null) as CodaTimelineClip
+		if tr == null or cl == null:
+			continue
+		if tr.mute or (has_solo and not tr.solo):
+			p.volume_db = -80.0
+		else:
+			p.volume_db = float(cl.volume_db + tr.volume_db) + override_db
 
 
 func _fire_clips_in_range(
@@ -785,11 +856,11 @@ func _apply_timeline_seek(
 		return
 	var clamped: float = clampf(target_seconds, 0.0, timeline.length_seconds)
 	handle.timeline_cursor_seconds = clamped
-	_stop_timeline_voices(d)
+	_stop_timeline_voices(d, handle)
 	d["fired_clip_ids"] = {}
 
 
-func _stop_timeline_voices(d: Dictionary) -> void:
+func _stop_timeline_voices(d: Dictionary, handle: CodaEventHandle = null) -> void:
 	var voices: Dictionary = d.get("voices", {})
 	for k in voices.keys():
 		var p: AudioStreamPlayer = voices[k] as AudioStreamPlayer
@@ -799,13 +870,16 @@ func _stop_timeline_voices(d: Dictionary) -> void:
 		if p.playing:
 			p.stop()
 	d["voices"] = {}
+	if handle != null:
+		handle.clear_player_binding()
 
 
 func _finalize_timeline_handle(handle: CodaEventHandle) -> void:
 	if not _timeline_dispatchers.has(handle):
 		return
 	var d: Dictionary = _timeline_dispatchers[handle]
-	_stop_timeline_voices(d)
+	_stop_timeline_voices(d, handle)
+	handle.timeline_runtime = null
 	_timeline_dispatchers.erase(handle)
 	handle._on_player_finished()
 	voice_finished.emit(handle)
@@ -829,3 +903,36 @@ func get_active_timeline_handle_for_event(event_id: String) -> CodaEventHandle:
 		if event.id == event_id:
 			return handle
 	return null
+
+
+## Editor preview: pause every timeline lane voice (handle.pause() routes here when [member CodaEventHandle.is_timeline]).
+func pause_timeline_preview(handle: CodaEventHandle) -> void:
+	if handle == null or not _timeline_dispatchers.has(handle):
+		return
+	handle._paused = true
+	var d: Dictionary = _timeline_dispatchers[handle]
+	for p in d.get("voices", {}).values():
+		var pl: AudioStreamPlayer = p as AudioStreamPlayer
+		if pl != null and is_instance_valid(pl) and pl.playing:
+			pl.stream_paused = true
+
+
+## Editor preview: resume all lane voices; if seek cleared every player, re-prime at the cursor.
+func resume_timeline_preview(handle: CodaEventHandle) -> void:
+	if handle == null or not _timeline_dispatchers.has(handle):
+		return
+	var d: Dictionary = _timeline_dispatchers[handle]
+	var voices: Dictionary = d.get("voices", {})
+	if voices.is_empty():
+		var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
+		if timeline == null:
+			handle._paused = false
+			return
+		handle._paused = false
+		_prime_timeline_overlapping_voices(handle, d, timeline, handle.timeline_cursor_seconds)
+		return
+	handle._paused = false
+	for p in voices.values():
+		var pl: AudioStreamPlayer = p as AudioStreamPlayer
+		if pl != null and is_instance_valid(pl):
+			pl.stream_paused = false

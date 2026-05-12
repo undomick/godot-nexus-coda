@@ -72,6 +72,19 @@ func remove_track(track_id: String) -> bool:
 	return false
 
 
+## Reorder tracks by drag-and-drop in the editor. [from_index] is removed first, then inserted at [to_index] (0-based).
+func reorder_tracks_move(from_index: int, to_index: int) -> void:
+	if tracks.is_empty():
+		return
+	from_index = clampi(from_index, 0, tracks.size() - 1)
+	to_index = clampi(to_index, 0, tracks.size() - 1)
+	if from_index == to_index:
+		return
+	var tr: CodaTimelineTrack = tracks[from_index]
+	tracks.remove_at(from_index)
+	tracks.insert(clampi(to_index, 0, tracks.size()), tr)
+
+
 func remove_marker(marker_id: String) -> bool:
 	for i in range(markers.size()):
 		if markers[i].id == marker_id:

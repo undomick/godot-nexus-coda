@@ -35,6 +35,8 @@ var timeline_length_seconds: float = 0.0
 ## When >= 0, the timeline dispatcher should jump the cursor to this time on the next tick
 ## and re-plan voices. Reset to -1 after the dispatcher consumes it.
 var timeline_pending_seek_seconds: float = -1.0
+## Set only for timeline-mode handles created by [CodaRuntime]; used to pause every lane voice.
+var timeline_runtime: CodaRuntime = null
 
 var _player: AudioStreamPlayer = null
 var _bus_name: String = "Master"
@@ -71,11 +73,17 @@ func stop(_fade_ms: int = 0) -> void:
 ## Timeline-mode voices are paused by the runtime dispatcher via the [code]_paused[/code] flag.
 func pause() -> void:
 	_paused = true
+	if is_timeline and timeline_runtime != null and is_instance_valid(timeline_runtime):
+		timeline_runtime.pause_timeline_preview(self)
+		return
 	if _player != null and is_instance_valid(_player):
 		_player.stream_paused = true
 
 
 func resume() -> void:
+	if is_timeline and timeline_runtime != null and is_instance_valid(timeline_runtime):
+		timeline_runtime.resume_timeline_preview(self)
+		return
 	_paused = false
 	if _player != null and is_instance_valid(_player):
 		_player.stream_paused = false
@@ -122,6 +130,10 @@ func get_bus_name() -> String:
 
 func _bind_player(player: AudioStreamPlayer) -> void:
 	_player = player
+
+
+func clear_player_binding() -> void:
+	_player = null
 
 
 func _on_player_finished() -> void:

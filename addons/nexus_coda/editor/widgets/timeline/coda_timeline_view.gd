@@ -8,8 +8,8 @@ extends Control
 ##
 ## Coordinates: time runs horizontally (seconds), tracks stack vertically. The ruler at
 ## the top of the widget shows seconds (and optional bars/beats when `tempo_bpm > 0`).
-## Track lane heights are constant so the host panel can render aligned track headers
-## next to the widget.
+## Track lane height is configurable ([member set_track_row_height]); the host panel keeps
+## its header rows in sync via [method get_track_row_height].
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 const CodaTimelineWaveformCacheScript := preload(
@@ -17,8 +17,10 @@ const CodaTimelineWaveformCacheScript := preload(
 )
 
 const RULER_HEIGHT := 22
-const TRACK_HEIGHT := 48
-const TRACK_HEADER_GAP := 1
+## Two-line track headers (name + M/S/controls) need more than a single compact lane row.
+const DEFAULT_TRACK_ROW_HEIGHT := 92
+const MIN_TRACK_ROW_HEIGHT := 88
+const MAX_TRACK_ROW_HEIGHT := 200
 const CLIP_INNER_PADDING := 2
 const MIN_CLIP_WIDTH_PX := 4
 const EDGE_RESIZE_THRESHOLD := 6
@@ -64,6 +66,7 @@ var _seconds_per_pixel: float = DEFAULT_SECONDS_PER_PIXEL
 var _scroll_seconds: float = 0.0
 var _playhead_seconds: float = 0.0
 var _snap_mode: SnapMode = SnapMode.NONE
+var _track_row_height: int = DEFAULT_TRACK_ROW_HEIGHT
 
 var _drag_kind: DragKind = DragKind.NONE
 var _drag_clip_id: String = ""
@@ -89,7 +92,7 @@ var _menu_clip_id: String = ""
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	focus_mode = Control.FOCUS_ALL
-	custom_minimum_size = Vector2(200, RULER_HEIGHT + TRACK_HEIGHT)
+	custom_minimum_size = Vector2(200, RULER_HEIGHT + _track_row_height)
 	clip_contents = true
 
 
@@ -163,7 +166,7 @@ func _track_index_for_drop_y(y: float) -> int:
 		return -1
 	if y < RULER_HEIGHT:
 		return 0
-	var idx: int = int((y - RULER_HEIGHT) / TRACK_HEIGHT)
+	var idx: int = int((y - RULER_HEIGHT) / _track_row_height)
 	return clampi(idx, 0, n - 1)
 
 
@@ -194,6 +197,20 @@ func set_playhead(time_seconds: float) -> void:
 
 func get_playhead() -> float:
 	return _playhead_seconds
+
+
+func get_track_row_height() -> int:
+	return _track_row_height
+
+
+func set_track_row_height(px: int) -> void:
+	var h: int = clampi(px, MIN_TRACK_ROW_HEIGHT, MAX_TRACK_ROW_HEIGHT)
+	if h == _track_row_height:
+		return
+	_track_row_height = h
+	custom_minimum_size = Vector2(200, RULER_HEIGHT + _track_row_height)
+	update_minimum_size()
+	queue_redraw()
 
 
 func set_zoom(seconds_per_pixel: float) -> void:
@@ -291,7 +308,7 @@ func _draw_track_lanes() -> void:
 			draw_rect(rect, Color(Tokens.ACCENT.r, Tokens.ACCENT.g, Tokens.ACCENT.b, 0.12), true)
 			draw_rect(rect, Tokens.ACCENT_DIM, false, 1.0)
 	# Bottom edge of lanes section.
-	var lane_bottom: float = float(RULER_HEIGHT + n * TRACK_HEIGHT)
+	var lane_bottom: float = float(RULER_HEIGHT + n * _track_row_height)
 	draw_line(
 		Vector2(0, lane_bottom), Vector2(size.x, lane_bottom), Tokens.SURFACE_BORDER, 1.0
 	)
@@ -410,8 +427,8 @@ func _draw_playhead() -> void:
 
 func _track_lane_rect(track_index: int) -> Rect2:
 	return Rect2(
-		Vector2(0, RULER_HEIGHT + track_index * TRACK_HEIGHT),
-		Vector2(size.x, TRACK_HEIGHT - TRACK_HEADER_GAP)
+		Vector2(0, RULER_HEIGHT + track_index * _track_row_height),
+		Vector2(size.x, _track_row_height)
 	)
 
 
@@ -578,7 +595,7 @@ func _track_index_at_y(y: float) -> int:
 	var n: int = track_count()
 	if n == 0:
 		return -1
-	var idx: int = int((y - RULER_HEIGHT) / TRACK_HEIGHT)
+	var idx: int = int((y - RULER_HEIGHT) / _track_row_height)
 	if idx < 0 or idx >= n:
 		return -1
 	return idx
@@ -982,4 +999,4 @@ func _zoom_around(pos: Vector2, factor: float) -> void:
 
 func _get_minimum_size() -> Vector2:
 	var n: int = max(1, track_count())
-	return Vector2(200, RULER_HEIGHT + n * TRACK_HEIGHT)
+	return Vector2(200, RULER_HEIGHT + n * _track_row_height)
