@@ -127,6 +127,9 @@ func split_clip_at_time(clip_id: String, split_seconds: float) -> String:
 	right.pitch_scale = c.pitch_scale
 	right.fade_in_seconds = 0.0
 	right.fade_out_seconds = c.fade_out_seconds
+	# Both segments must keep the same insert chain; new effect ids so undo/serialization stay consistent.
+	for e in c.effects:
+		right.effects.append(e.clone_new_id())
 	c.duration_seconds = left_duration
 	c.fade_out_seconds = 0.0
 	tr.clips.append(right)
