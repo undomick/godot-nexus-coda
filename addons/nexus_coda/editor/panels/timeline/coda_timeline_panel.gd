@@ -624,14 +624,17 @@ func _make_track_header(track: CodaTimelineTrack, track_index: int) -> Control:
 
 	var ctl_row := HBoxContainer.new()
 	ctl_row.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
-	ctl_row.size_flags_vertical = Control.SIZE_SHRINK_END
+	# Cross-axis: keep M/S and slider on one visual baseline (HSlider default is top-aligned in a tall row).
+	ctl_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	ctl_row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	ctl_row.z_index = 1
 	vb.add_child(ctl_row)
 
 	var mute_btn := Button.new()
 	mute_btn.toggle_mode = true
 	mute_btn.text = "M"
-	mute_btn.custom_minimum_size = Vector2(22, 0)
+	mute_btn.custom_minimum_size = Vector2(22, 22)
+	mute_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	mute_btn.tooltip_text = "Mute this track (visual only in MVP)"
 	mute_btn.button_pressed = track.mute
 	mute_btn.toggled.connect(
@@ -644,7 +647,8 @@ func _make_track_header(track: CodaTimelineTrack, track_index: int) -> Control:
 	var solo_btn := Button.new()
 	solo_btn.toggle_mode = true
 	solo_btn.text = "S"
-	solo_btn.custom_minimum_size = Vector2(22, 0)
+	solo_btn.custom_minimum_size = Vector2(22, 22)
+	solo_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	solo_btn.tooltip_text = "Solo this track (visual only in MVP)"
 	solo_btn.button_pressed = track.solo
 	solo_btn.toggled.connect(
@@ -656,7 +660,8 @@ func _make_track_header(track: CodaTimelineTrack, track_index: int) -> Control:
 
 	var del_btn := Button.new()
 	del_btn.text = "−"
-	del_btn.custom_minimum_size = Vector2(22, 0)
+	del_btn.custom_minimum_size = Vector2(22, 22)
+	del_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	del_btn.tooltip_text = "Remove this track"
 	del_btn.pressed.connect(_on_remove_track_pressed.bind(track.id))
 	ctl_row.add_child(del_btn)
@@ -665,6 +670,7 @@ func _make_track_header(track: CodaTimelineTrack, track_index: int) -> Control:
 	volume_label.text = "Vol"
 	volume_label.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
 	volume_label.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
+	volume_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	ctl_row.add_child(volume_label)
 
 	var volume_slider := HSlider.new()
@@ -672,10 +678,13 @@ func _make_track_header(track: CodaTimelineTrack, track_index: int) -> Control:
 	volume_slider.max_value = 6.0
 	volume_slider.step = 0.5
 	volume_slider.value = track.volume_db
-	volume_slider.custom_minimum_size = Vector2(88, 10)
-	volume_slider.custom_maximum_size = Vector2(120, 0)
+	# Tall enough for theme grabber + hit target; BoxContainer centers it with the buttons.
+	volume_slider.custom_minimum_size = Vector2(88, 22)
+	volume_slider.custom_maximum_size = Vector2(120, 28)
 	volume_slider.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	volume_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	volume_slider.focus_mode = Control.FOCUS_NONE
+	volume_slider.mouse_filter = Control.MOUSE_FILTER_STOP
 	volume_slider.value_changed.connect(
 		func(v: float) -> void:
 			track.volume_db = v
@@ -693,6 +702,7 @@ func _make_track_header(track: CodaTimelineTrack, track_index: int) -> Control:
 	bus_label.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
 	bus_label.clip_text = true
 	bus_label.custom_minimum_size = Vector2(14, 0)
+	bus_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	ctl_row.add_child(bus_label)
 
 	root.add_child(row)
