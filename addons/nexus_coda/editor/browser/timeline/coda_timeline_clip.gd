@@ -7,6 +7,8 @@ extends RefCounted
 ## clip's start position on the timeline; `duration_seconds` is how long it plays;
 ## `offset_seconds` skips into the source audio; volume / pitch / fades are local.
 
+const CodaTrackEffectScript := preload("res://addons/nexus_coda/editor/browser/effects/coda_track_effect.gd")
+
 var id: String
 var audio_path: String = ""
 var start_seconds: float = 0.0
@@ -16,6 +18,7 @@ var volume_db: float = 0.0
 var pitch_scale: float = 1.0
 var fade_in_seconds: float = 0.0
 var fade_out_seconds: float = 0.0
+var effects: Array[CodaTrackEffect] = []
 
 
 func _init() -> void:
@@ -56,6 +59,8 @@ func clone_keep_id() -> CodaTimelineClip:
 	c.pitch_scale = pitch_scale
 	c.fade_in_seconds = fade_in_seconds
 	c.fade_out_seconds = fade_out_seconds
+	for e in effects:
+		c.effects.append(e.clone_keep_id())
 	return c
 
 
@@ -70,6 +75,7 @@ func to_dictionary() -> Dictionary:
 		"pitch_scale": pitch_scale,
 		"fade_in": fade_in_seconds,
 		"fade_out": fade_out_seconds,
+		"effects": effects.map(func(e: CodaTrackEffect) -> Dictionary: return e.to_dictionary()),
 	}
 
 
@@ -86,4 +92,7 @@ static func from_dictionary(data: Dictionary) -> CodaTimelineClip:
 	c.pitch_scale = max(0.01, float(data.get("pitch_scale", 1.0)))
 	c.fade_in_seconds = max(0.0, float(data.get("fade_in", 0.0)))
 	c.fade_out_seconds = max(0.0, float(data.get("fade_out", 0.0)))
+	for e_raw in data.get("effects", []) as Array:
+		if e_raw is Dictionary:
+			c.effects.append(CodaTrackEffectScript.from_dictionary(e_raw))
 	return c

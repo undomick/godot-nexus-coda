@@ -15,11 +15,8 @@ const CodaEmptyStateScript := preload("res://addons/nexus_coda/editor/theme/coda
 const CodaTimelineViewScript := preload(
 	"res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_view.gd"
 )
-const CodaTimelineTrackDragHandleScript := preload(
-	"res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_track_drag_handle.gd"
-)
-const CodaTimelineTrackHeaderRootScript := preload(
-	"res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_track_header_root.gd"
+const CodaTrackHeaderStripScript := preload(
+	"res://addons/nexus_coda/editor/widgets/timeline/coda_track_header_strip.gd"
 )
 
 const RULER_HEIGHT := CodaTimelineViewScript.RULER_HEIGHT
@@ -27,6 +24,10 @@ const MAX_TIMELINE_UNDO := 40
 const TRACK_HEADER_SPLIT_MIN_PX := 120
 const TRACK_HEADER_SPLIT_MAX_PX := 280
 const TRACK_HEADER_SPLIT_MAX_FRACT := 0.34
+
+signal track_effects_focus_requested(track_id: String)
+signal track_selection_changed(event_id: String, track_id: String)
+signal clip_selection_changed(event_id: String, clip_id: String)
 
 var _project: CodaState = null
 var _runtime: CodaRuntime = null
@@ -106,6 +107,12 @@ func attach_runtime(runtime: CodaRuntime) -> void:
 	_runtime = runtime
 	if _runtime != null:
 		_runtime.voice_finished.connect(_on_runtime_voice_finished)
+
+
+func get_selected_clip_id() -> String:
+	if _view == null:
+		return ""
+	return _view.get_selected_clip_id()
 
 
 func _on_runtime_voice_finished(handle: CodaEventHandle) -> void:
@@ -341,6 +348,8 @@ func _build_split_root() -> void:
 	_view.clip_duplicate_requested.connect(_on_view_clip_duplicate_requested)
 	_view.clip_split_at_playhead_requested.connect(_on_view_clip_split_at_playhead_requested)
 	_view.audition_requested.connect(_on_view_audition_requested)
+	_view.clip_selected.connect(_on_view_clip_selected_for_effects_panel)
+	_view.selection_cleared.connect(_on_view_clip_selection_cleared_for_effects_panel)
 	_split_root.add_child(_view)
 	call_deferred("_clamp_split_offset")
 
@@ -494,21 +503,27 @@ func _show_timeline() -> void:
 	_sync_toolbar_to_timeline()
 	_sync_track_row_spin_to_view()
 	_update_validation()
+	_emit_track_selection_changed()
 
 
+## Signature covers only **structural** properties — adding/removing/reordering tracks, or
+## changing the selected row. Live edits (volume, mute/solo, color, name, output bus, effect
+## param values) are pushed into the existing strip via [method _sync_track_headers_from_data]
+## so the slider/widget under the user's cursor is never freed mid-drag.
 func _compute_track_headers_signature() -> String:
 	if _selected_event == null or _selected_event.event_timeline == null:
 		return ""
 	var t: CodaEventTimeline = _selected_event.event_timeline
 	var ids: PackedStringArray = PackedStringArray()
 	for tr in t.tracks:
-		ids.append("%s:%s:%d:%d" % [tr.id, tr.track_name, int(tr.mute), int(tr.solo)])
+		ids.append("%s:%d" % [tr.id, tr.effects.size()])
 	return "%d|%s|%d" % [t.tracks.size(), "|".join(ids), _selected_track_index]
 
 
 func _rebuild_track_headers(force: bool = false) -> void:
 	var sig: String = _compute_track_headers_signature()
 	if not force and sig == _last_track_headers_sig:
+		_sync_track_headers_from_data()
 		return
 	_last_track_headers_sig = sig
 	for c in _track_headers_host.get_children():
@@ -519,6 +534,20 @@ func _rebuild_track_headers(force: bool = false) -> void:
 		_track_headers_host.add_child(
 			_make_track_header(_selected_event.event_timeline.tracks[i], i)
 		)
+
+
+func _sync_track_headers_from_data() -> void:
+	if _selected_event == null or _selected_event.event_timeline == null:
+		return
+	var tracks: Array[CodaTimelineTrack] = _selected_event.event_timeline.tracks
+	var bus_entries: Array = _collect_bus_menu_entries()
+	var children: Array = _track_headers_host.get_children()
+	for i in mini(children.size(), tracks.size()):
+		var strip: Node = children[i]
+		if strip == null or not strip.has_method(&"sync_from_track"):
+			continue
+		strip.call(&"set_bus_submenu_entries", bus_entries)
+		strip.call(&"sync_from_track")
 
 
 func reorder_tracks_drag_drop(from_i: int, to_i: int) -> void:
@@ -542,171 +571,16 @@ func reorder_tracks_drag_drop(from_i: int, to_i: int) -> void:
 	_last_track_headers_sig = ""
 	_rebuild_track_headers()
 	_notify_timeline_changed()
+	_emit_track_selection_changed()
 
 
 func _make_track_header(track: CodaTimelineTrack, track_index: int) -> Control:
 	var rh: int = _view.get_track_row_height()
-	var root := CodaTimelineTrackHeaderRootScript.new()
-	root.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
-	root.clip_contents = true
-	root.custom_minimum_size = Vector2(0, rh)
-	root.custom_maximum_size = Vector2(4000, rh)
-	root.track_index = track_index
-	root.on_drop = Callable(self, "reorder_tracks_drag_drop")
-
-	var drag_grip := CodaTimelineTrackDragHandleScript.new()
-	drag_grip.track_index = track_index
-	drag_grip.timeline_panel = self
-	drag_grip.custom_minimum_size = Vector2(20, rh)
-	drag_grip.size_flags_vertical = Control.SIZE_FILL
-	root.add_child(drag_grip)
-
-	var sel_btn := Button.new()
-	sel_btn.toggle_mode = true
-	sel_btn.button_group = _track_select_group
-	sel_btn.button_pressed = track_index == _selected_track_index
-	sel_btn.text = str(track_index + 1)
-	sel_btn.custom_minimum_size = Vector2(22, rh)
-	sel_btn.tooltip_text = "Select track · Hold LMB and drag vertically to reorder"
-	sel_btn.button_down.connect(
-		func() -> void:
-			on_track_row_grip_pressed(track_index)
-	)
-	sel_btn.toggled.connect(
-		func(on: bool) -> void:
-			if on:
-				_set_selected_track_index(track_index)
-	)
-	root.add_child(sel_btn)
-
-	var row := PanelContainer.new()
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.size_flags_vertical = Control.SIZE_FILL
-	row.clip_contents = true
-	row.add_theme_stylebox_override(
-		&"panel", Tokens.make_panel_stylebox(Tokens.SURFACE_SUNKEN, Tokens.SURFACE_BORDER, 0, 0)
-	)
-
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override(&"margin_left", Tokens.SPACING_SM)
-	margin.add_theme_constant_override(&"margin_right", Tokens.SPACING_SM)
-	margin.add_theme_constant_override(&"margin_top", 2)
-	margin.add_theme_constant_override(&"margin_bottom", 2)
-	margin.mouse_filter = Control.MOUSE_FILTER_STOP
-	row.add_child(margin)
-
-	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override(&"separation", 2)
-	vb.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	margin.add_child(vb)
-
-	var name_edit := LineEdit.new()
-	name_edit.text = track.track_name
-	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name_edit.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	name_edit.custom_minimum_size = Vector2(0, 22)
-	name_edit.custom_maximum_size = Vector2(100000, 30)
-	name_edit.clip_contents = true
-	name_edit.placeholder_text = "Track name"
-	name_edit.text_submitted.connect(
-		func(tn: String) -> void:
-			track.track_name = tn
-			_notify_timeline_changed()
-	)
-	name_edit.focus_exited.connect(
-		func() -> void:
-			if track.track_name != name_edit.text:
-				track.track_name = name_edit.text
-				_notify_timeline_changed()
-	)
-	vb.add_child(name_edit)
-
-	var ctl_row := HBoxContainer.new()
-	ctl_row.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
-	# Cross-axis: keep M/S and slider on one visual baseline (HSlider default is top-aligned in a tall row).
-	ctl_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	ctl_row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	ctl_row.z_index = 1
-	vb.add_child(ctl_row)
-
-	var mute_btn := Button.new()
-	mute_btn.toggle_mode = true
-	mute_btn.text = "M"
-	mute_btn.custom_minimum_size = Vector2(22, 22)
-	mute_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	mute_btn.tooltip_text = "Mute this track (visual only in MVP)"
-	mute_btn.button_pressed = track.mute
-	mute_btn.toggled.connect(
-		func(on: bool) -> void:
-			track.mute = on
-			_notify_timeline_changed()
-	)
-	ctl_row.add_child(mute_btn)
-
-	var solo_btn := Button.new()
-	solo_btn.toggle_mode = true
-	solo_btn.text = "S"
-	solo_btn.custom_minimum_size = Vector2(22, 22)
-	solo_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	solo_btn.tooltip_text = "Solo this track (visual only in MVP)"
-	solo_btn.button_pressed = track.solo
-	solo_btn.toggled.connect(
-		func(on: bool) -> void:
-			track.solo = on
-			_notify_timeline_changed()
-	)
-	ctl_row.add_child(solo_btn)
-
-	var del_btn := Button.new()
-	del_btn.text = "−"
-	del_btn.custom_minimum_size = Vector2(22, 22)
-	del_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	del_btn.tooltip_text = "Remove this track"
-	del_btn.pressed.connect(_on_remove_track_pressed.bind(track.id))
-	ctl_row.add_child(del_btn)
-
-	var volume_label := Label.new()
-	volume_label.text = "Vol"
-	volume_label.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
-	volume_label.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
-	volume_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	ctl_row.add_child(volume_label)
-
-	var volume_slider := HSlider.new()
-	volume_slider.min_value = -60.0
-	volume_slider.max_value = 6.0
-	volume_slider.step = 0.5
-	volume_slider.value = track.volume_db
-	# Tall enough for theme grabber + hit target; BoxContainer centers it with the buttons.
-	volume_slider.custom_minimum_size = Vector2(88, 22)
-	volume_slider.custom_maximum_size = Vector2(120, 28)
-	volume_slider.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	volume_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	volume_slider.focus_mode = Control.FOCUS_NONE
-	volume_slider.mouse_filter = Control.MOUSE_FILTER_STOP
-	volume_slider.value_changed.connect(
-		func(v: float) -> void:
-			track.volume_db = v
-			_notify_timeline_changed()
-	)
-	ctl_row.add_child(volume_slider)
-
-	var bus_label := Label.new()
-	var bus_txt: String = _bus_picker_label_for(track.output_bus_id)
-	bus_label.text = "→"
-	bus_label.tooltip_text = (
-		"%s\nPer-track bus routing comes in a follow-up; track inherits the event's bus" % bus_txt
-	)
-	bus_label.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
-	bus_label.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
-	bus_label.clip_text = true
-	bus_label.custom_minimum_size = Vector2(14, 0)
-	bus_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	ctl_row.add_child(bus_label)
-
-	root.add_child(row)
-	return root
+	var strip := CodaTrackHeaderStripScript.new()
+	strip.build_ui(track, track_index, rh, self, _track_select_group, _selected_track_index)
+	strip.set_bus_submenu_entries(_collect_bus_menu_entries())
+	strip.track_action_requested.connect(_on_track_header_action)
+	return strip
 
 
 func _bus_picker_label_for(bus_id: String) -> String:
@@ -716,6 +590,131 @@ func _bus_picker_label_for(bus_id: String) -> String:
 	if b == null:
 		return "→ ?"
 	return "→ %s" % b.bus_name
+
+
+func _collect_bus_menu_entries() -> Array:
+	var out: Array = []
+	out.append({"id": "", "label": "Inherit event bus"})
+	if _project == null or _project.bus_root == null:
+		return out
+	for b in _project.bus_root.collect_flat():
+		var nm: String = String(b.bus_name).strip_edges()
+		if nm.is_empty():
+			nm = "Bus"
+		out.append({"id": b.id, "label": nm})
+	return out
+
+
+func _track_index_by_id(timeline: CodaEventTimeline, track_id: String) -> int:
+	for idx in range(timeline.tracks.size()):
+		if timeline.tracks[idx].id == track_id:
+			return idx
+	return -1
+
+
+func _on_track_header_action(track_id: String, action: StringName, extra: Variant) -> void:
+	if _selected_event == null or _selected_event.event_timeline == null:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	var tr: CodaTimelineTrack = t.find_track(track_id)
+	if tr == null:
+		return
+	match action:
+		&"delete":
+			_on_remove_track_pressed(track_id)
+		&"duplicate":
+			_duplicate_track_at_id(track_id)
+		&"move_up":
+			var iu: int = _track_index_by_id(t, track_id)
+			if iu > 0:
+				reorder_tracks_drag_drop(iu, iu - 1)
+		&"move_down":
+			var idn: int = _track_index_by_id(t, track_id)
+			if idn >= 0 and idn < t.tracks.size() - 1:
+				reorder_tracks_drag_drop(idn, idn + 1)
+		&"move_top":
+			var it: int = _track_index_by_id(t, track_id)
+			if it > 0:
+				reorder_tracks_drag_drop(it, 0)
+		&"move_bottom":
+			var ib: int = _track_index_by_id(t, track_id)
+			var last_i: int = t.tracks.size() - 1
+			if ib >= 0 and ib < last_i:
+				reorder_tracks_drag_drop(ib, last_i)
+		&"reset_volume":
+			_push_timeline_undo()
+			tr.volume_db = 0.0
+			_notify_timeline_changed()
+		&"set_output_bus":
+			_push_timeline_undo()
+			tr.output_bus_id = str(extra)
+			_notify_timeline_changed()
+		&"set_color":
+			_push_timeline_undo()
+			tr.color = extra as Color
+			if _view != null:
+				_view.queue_redraw()
+			_notify_timeline_changed()
+		&"show_track_effects":
+			_set_selected_track_index(int(extra))
+			track_effects_focus_requested.emit(track_id)
+		_:
+			pass
+
+
+func _duplicate_track_at_id(track_id: String) -> void:
+	if _selected_event == null or _selected_event.event_timeline == null:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	var src_i: int = _track_index_by_id(t, track_id)
+	if src_i < 0:
+		return
+	_push_timeline_undo()
+	var d: Dictionary = t.tracks[src_i].to_dictionary()
+	d.erase("id")
+	var clips_raw: Variant = d.get("clips", [])
+	var new_clips: Array = []
+	if clips_raw is Array:
+		for c in clips_raw as Array:
+			if c is Dictionary:
+				var cd: Dictionary = (c as Dictionary).duplicate()
+				cd.erase("id")
+				new_clips.append(cd)
+	d["clips"] = new_clips
+	var new_tr: CodaTimelineTrack = CodaTimelineTrack.from_dictionary(d)
+	new_tr.track_name = t.tracks[src_i].track_name + " copy"
+	t.tracks.insert(src_i + 1, new_tr)
+	_selected_track_index = src_i + 1
+	if _view != null:
+		_view.set_track_row_highlight(_selected_track_index)
+	_last_track_headers_sig = ""
+	_rebuild_track_headers()
+	_notify_timeline_changed()
+	_emit_track_selection_changed()
+
+
+func _emit_track_selection_changed() -> void:
+	if _selected_event == null:
+		return
+	var ev_id: String = _selected_event.id
+	if _selected_event.event_timeline == null or _selected_event.event_timeline.tracks.is_empty():
+		track_selection_changed.emit(ev_id, "")
+		return
+	var trs: Array[CodaTimelineTrack] = _selected_event.event_timeline.tracks
+	var idx: int = clampi(_selected_track_index, 0, trs.size() - 1)
+	track_selection_changed.emit(ev_id, trs[idx].id)
+
+
+func _on_view_clip_selected_for_effects_panel(clip_id: String) -> void:
+	if _selected_event == null:
+		return
+	clip_selection_changed.emit(_selected_event.id, clip_id)
+
+
+func _on_view_clip_selection_cleared_for_effects_panel() -> void:
+	if _selected_event == null:
+		return
+	clip_selection_changed.emit(_selected_event.id, "")
 
 
 func _sync_toolbar_to_timeline() -> void:
@@ -860,6 +859,7 @@ func _set_selected_track_index(idx: int) -> void:
 	if _view != null:
 		_view.set_track_row_highlight(idx)
 	_rebuild_track_headers()
+	_emit_track_selection_changed()
 
 
 func _on_view_track_row_selected(track_index: int) -> void:

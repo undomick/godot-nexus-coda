@@ -5,6 +5,8 @@ extends RefCounted
 ## A virtual bus owned by the Coda project. The runtime mirrors these into Godot's
 ## AudioServer buses (one Godot bus per CodaBus, parented appropriately) so voices route correctly.
 
+const CodaTrackEffectScript := preload("res://addons/nexus_coda/editor/browser/effects/coda_track_effect.gd")
+
 var id: String
 var bus_name: String = "Bus"
 var volume_db: float = 0.0
@@ -14,6 +16,7 @@ var bypass: bool = false
 ## If empty, routing uses the tree parent (same as Godot layout from nesting). Otherwise sends to this bus id (must be a strict ancestor toward Master).
 var send_target_id: String = ""
 var children: Array[CodaBus] = []
+var effects: Array[CodaTrackEffect] = []
 
 
 func _init(p_name: String = "Bus") -> void:
@@ -71,6 +74,8 @@ func clone_keep_id() -> CodaBus:
 	b.solo = solo
 	b.bypass = bypass
 	b.send_target_id = send_target_id
+	for e in effects:
+		b.effects.append(e.clone_keep_id())
 	for c in children:
 		b.children.append(c.clone_keep_id())
 	return b
@@ -85,6 +90,7 @@ func to_dictionary() -> Dictionary:
 		"solo": solo,
 		"bypass": bypass,
 		"send_target_id": send_target_id,
+		"effects": effects.map(func(e: CodaTrackEffect) -> Dictionary: return e.to_dictionary()),
 		"children": children.map(func(c: CodaBus) -> Dictionary: return c.to_dictionary()),
 	}
 
@@ -99,6 +105,9 @@ static func from_dictionary(data: Dictionary) -> CodaBus:
 	b.solo = bool(data.get("solo", false))
 	b.bypass = bool(data.get("bypass", false))
 	b.send_target_id = str(data.get("send_target_id", ""))
+	for e_raw in data.get("effects", []) as Array:
+		if e_raw is Dictionary:
+			b.effects.append(CodaTrackEffectScript.from_dictionary(e_raw))
 	for c_raw in data.get("children", []) as Array:
 		if c_raw is Dictionary:
 			b.children.append(CodaBus.from_dictionary(c_raw))

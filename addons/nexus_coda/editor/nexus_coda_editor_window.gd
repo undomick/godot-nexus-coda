@@ -40,6 +40,15 @@ const PlayerPanelScript := preload(
 const TimelinePanelScript := preload(
 	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_panel.gd"
 )
+const TrackEffectsPanelScript := preload(
+	"res://addons/nexus_coda/editor/panels/effects/coda_track_effects_panel.gd"
+)
+const ClipEffectsPanelScript := preload(
+	"res://addons/nexus_coda/editor/panels/effects/coda_clip_effects_panel.gd"
+)
+const BusEffectsPanelScript := preload(
+	"res://addons/nexus_coda/editor/panels/effects/coda_bus_effects_panel.gd"
+)
 
 const PANEL_BROWSER := &"browser"
 const PANEL_GRAPH := &"graph"
@@ -48,6 +57,9 @@ const PANEL_MIXER := &"mixer"
 const PANEL_LOG := &"log"
 const PANEL_PLAYER := &"player"
 const PANEL_TIMELINE := &"timeline"
+const PANEL_TRACK_EFFECTS := &"track_effects"
+const PANEL_CLIP_EFFECTS := &"clip_effects"
+const PANEL_BUS_EFFECTS := &"bus_effects"
 
 const MID_NEW := 1
 const MID_OPEN := 2
@@ -66,6 +78,9 @@ const VID_TOGGLE_MIXER := 113
 const VID_TOGGLE_LOG := 114
 const VID_TOGGLE_PLAYER := 115
 const VID_TOGGLE_TIMELINE := 116
+const VID_TOGGLE_TRACK_FX := 117
+const VID_TOGGLE_CLIP_FX := 118
+const VID_TOGGLE_BUS_FX := 119
 
 const BID_NEW_BANK := 200
 const BID_VALIDATE_BANKS := 201
@@ -110,6 +125,9 @@ var _mixer_panel: CodaMixerPanel
 var _log_panel: CodaLogPanel
 var _player_panel: CodaPlayerPanel
 var _timeline_panel: CodaTimelinePanel
+var _track_effects_panel: CodaTrackEffectsPanel
+var _clip_effects_panel: CodaClipEffectsPanel
+var _bus_effects_panel: CodaBusEffectsPanel
 
 var _current_path: String = ""
 var _dirty: bool = false
@@ -223,6 +241,9 @@ func _register_panels() -> void:
 	_log_panel = LogPanelScript.new()
 	_player_panel = PlayerPanelScript.new()
 	_timeline_panel = TimelinePanelScript.new()
+	_track_effects_panel = TrackEffectsPanelScript.new()
+	_clip_effects_panel = ClipEffectsPanelScript.new()
+	_bus_effects_panel = BusEffectsPanelScript.new()
 
 	dm.register_panel(CodaDockPanelInfoScript.make(
 		PANEL_BROWSER, "Browser", CodaDockHostScript.ZONE_LEFT, _browser_panel
@@ -243,6 +264,15 @@ func _register_panels() -> void:
 		PANEL_MIXER, "Mixer", CodaDockHostScript.ZONE_BOTTOM, _mixer_panel
 	))
 	dm.register_panel(CodaDockPanelInfoScript.make(
+		PANEL_BUS_EFFECTS, "Bus FX", CodaDockHostScript.ZONE_BOTTOM, _bus_effects_panel
+	))
+	dm.register_panel(CodaDockPanelInfoScript.make(
+		PANEL_CLIP_EFFECTS, "Clip FX", CodaDockHostScript.ZONE_BOTTOM, _clip_effects_panel
+	))
+	dm.register_panel(CodaDockPanelInfoScript.make(
+		PANEL_TRACK_EFFECTS, "Track FX", CodaDockHostScript.ZONE_BOTTOM, _track_effects_panel
+	))
+	dm.register_panel(CodaDockPanelInfoScript.make(
 		PANEL_LOG, "Log", CodaDockHostScript.ZONE_BOTTOM, _log_panel, null, false
 	))
 
@@ -250,6 +280,7 @@ func _register_panels() -> void:
 	dm.layout_changed.connect(_on_layout_changed)
 
 	_wire_browser_to_others()
+	_wire_effects_panels()
 	_wire_runtime_to_panels()
 	call_deferred(&"_initial_bind")
 	call_deferred(&"_load_custom_layout_if_present")
@@ -285,6 +316,26 @@ func _wire_browser_to_others() -> void:
 		_player_panel.attach_browser_panel(_browser_panel)
 	if _graph_panel != null and _browser_panel.has_method(&"get_project"):
 		_graph_panel.attach_project(_browser_panel.get_project())
+
+
+func _wire_effects_panels() -> void:
+	if _track_effects_panel == null or _clip_effects_panel == null or _bus_effects_panel == null:
+		return
+	_track_effects_panel.attach_timeline_panel(_timeline_panel)
+	_clip_effects_panel.attach_timeline_panel(_timeline_panel)
+	_bus_effects_panel.attach_mixer_panel(_mixer_panel)
+	if _timeline_panel != null and _timeline_panel.has_signal(&"track_effects_focus_requested"):
+		if not _timeline_panel.track_effects_focus_requested.is_connected(_on_track_effects_focus_requested):
+			_timeline_panel.track_effects_focus_requested.connect(_on_track_effects_focus_requested)
+
+
+func _on_track_effects_focus_requested(_track_id: String) -> void:
+	if _dock_host == null or _dock_host.dock_manager == null:
+		return
+	var dm: CodaDockManager = _dock_host.dock_manager
+	dm.show_panel(PANEL_TRACK_EFFECTS)
+	if _track_effects_panel != null and _track_effects_panel.has_method(&"focus_current_track"):
+		_track_effects_panel.focus_current_track()
 
 
 ## Routes selection events from non-events tabs (Buses → Mixer, Banks → Inspector, etc.)
@@ -343,6 +394,12 @@ func _initial_bind() -> void:
 			_player_panel.attach_project(st as CodaState)
 		if _timeline_panel != null and st is CodaState:
 			_timeline_panel.attach_project(st as CodaState)
+		if _track_effects_panel != null and st is CodaState:
+			_track_effects_panel.attach_project(st as CodaState)
+		if _clip_effects_panel != null and st is CodaState:
+			_clip_effects_panel.attach_project(st as CodaState)
+		if _bus_effects_panel != null and st is CodaState:
+			_bus_effects_panel.attach_project(st as CodaState)
 	if _browser_panel != null and _browser_panel.has_method(&"pulse_events_selection_to_editor"):
 		_browser_panel.pulse_events_selection_to_editor()
 	_update_title()
@@ -417,6 +474,9 @@ func _rebuild_view_menu_items() -> void:
 	_view_menu.add_check_item("Show Inspector", VID_TOGGLE_INSPECTOR)
 	_view_menu.add_check_item("Show Player", VID_TOGGLE_PLAYER)
 	_view_menu.add_check_item("Show Mixer", VID_TOGGLE_MIXER)
+	_view_menu.add_check_item("Show Track FX", VID_TOGGLE_TRACK_FX)
+	_view_menu.add_check_item("Show Clip FX", VID_TOGGLE_CLIP_FX)
+	_view_menu.add_check_item("Show Bus FX", VID_TOGGLE_BUS_FX)
 	_view_menu.add_check_item("Show Log", VID_TOGGLE_LOG)
 	_view_menu.add_separator()
 	_view_menu.add_item("Save Layout", VID_SAVE_LAYOUT)
@@ -436,6 +496,9 @@ func _refresh_view_menu_check_marks() -> void:
 	_set_check(VID_TOGGLE_INSPECTOR, dm.is_panel_visible(PANEL_INSPECTOR))
 	_set_check(VID_TOGGLE_PLAYER, dm.is_panel_visible(PANEL_PLAYER))
 	_set_check(VID_TOGGLE_MIXER, dm.is_panel_visible(PANEL_MIXER))
+	_set_check(VID_TOGGLE_TRACK_FX, dm.is_panel_visible(PANEL_TRACK_EFFECTS))
+	_set_check(VID_TOGGLE_CLIP_FX, dm.is_panel_visible(PANEL_CLIP_EFFECTS))
+	_set_check(VID_TOGGLE_BUS_FX, dm.is_panel_visible(PANEL_BUS_EFFECTS))
 	_set_check(VID_TOGGLE_LOG, dm.is_panel_visible(PANEL_LOG))
 
 
@@ -719,6 +782,9 @@ func _collect_palette_entries() -> Array[Dictionary]:
 			[PANEL_INSPECTOR, "Toggle Inspector Panel"],
 			[PANEL_PLAYER, "Toggle Player Panel"],
 			[PANEL_MIXER, "Toggle Mixer Panel"],
+			[PANEL_TRACK_EFFECTS, "Toggle Track FX Panel"],
+			[PANEL_CLIP_EFFECTS, "Toggle Clip FX Panel"],
+			[PANEL_BUS_EFFECTS, "Toggle Bus FX Panel"],
 			[PANEL_LOG, "Toggle Log Panel"],
 		]
 		for entry_v in panels:
@@ -819,6 +885,12 @@ func _on_view_id_pressed(id: int) -> void:
 			dm.toggle_panel(PANEL_PLAYER)
 		VID_TOGGLE_MIXER:
 			dm.toggle_panel(PANEL_MIXER)
+		VID_TOGGLE_TRACK_FX:
+			dm.toggle_panel(PANEL_TRACK_EFFECTS)
+		VID_TOGGLE_CLIP_FX:
+			dm.toggle_panel(PANEL_CLIP_EFFECTS)
+		VID_TOGGLE_BUS_FX:
+			dm.toggle_panel(PANEL_BUS_EFFECTS)
 		VID_TOGGLE_LOG:
 			dm.toggle_panel(PANEL_LOG)
 		VID_LOAD_LAYOUT:

@@ -5,6 +5,8 @@ extends VBoxContainer
 ## Mixer panel: bus strips with peak meters + snapshot quick-recall.
 ## All edits go through CodaState's bus mutation API so save flow marks dirty.
 
+signal bus_selection_changed(bus_id: String)
+
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaEmptyStateScript := preload("res://addons/nexus_coda/editor/theme/coda_empty_state.gd")
@@ -26,6 +28,7 @@ var _pick_bus_layout_path: Callable = Callable()
 var _complete_bus_layout_export: Callable = Callable()
 var _strips_by_bus_id: Dictionary = {}
 var _meter_accumulator: float = 0.0
+var _selected_bus_id: String = ""
 
 
 func _ready() -> void:
@@ -187,11 +190,27 @@ func _rebuild_strips() -> void:
 		strip.bus_renamed.connect(_on_strip_bus_renamed)
 		strip.send_target_changed.connect(_on_strip_send_target_changed)
 		strip.context_action_requested.connect(_on_strip_context_action_requested)
+		strip.bus_strip_selected.connect(_on_bus_strip_selected)
 		_strips_by_bus_id[b.id] = strip
 
 	var add_slot := CodaMixerAddBusSlotScript.new()
 	add_slot.add_bus_requested.connect(_on_add_bus_pressed)
 	_strip_row.add_child(add_slot)
+	_ensure_bus_selection_after_rebuild(flat)
+
+
+func _ensure_bus_selection_after_rebuild(flat: Array[CodaBus]) -> void:
+	if flat.is_empty() or _project == null or _project.bus_root == null:
+		_selected_bus_id = ""
+		return
+	if not _strips_by_bus_id.has(_selected_bus_id):
+		_selected_bus_id = _project.bus_root.id
+	bus_selection_changed.emit(_selected_bus_id)
+
+
+func _on_bus_strip_selected(bus_id: String) -> void:
+	_selected_bus_id = bus_id
+	bus_selection_changed.emit(bus_id)
 
 
 func _refresh_snapshot_picker() -> void:

@@ -29,7 +29,11 @@ var _editor_runtime: CodaRuntime
 
 func _enter_tree() -> void:
 	NexusCodaLog.print_ready_banner()
-	add_autoload_singleton(AUTOLOAD_NAME, AUTOLOAD_PATH)
+	# Re-adding the same autoload rewrites project.godot on every restart, which makes the
+	# editor flag the project as dirty even when nothing meaningful changed. Only touch the
+	# settings when the entry is actually missing or stale.
+	if _needs_autoload_register():
+		add_autoload_singleton(AUTOLOAD_NAME, AUTOLOAD_PATH)
 	_ncoda_import_plugin = NCODA_IMPORT_PLUGIN.new() as EditorImportPlugin
 	add_import_plugin(_ncoda_import_plugin)
 	_filesystem_context_menu_plugin = CodaFilesystemContextMenuScript.new() as EditorContextMenuPlugin
@@ -68,6 +72,31 @@ func _exit_tree() -> void:
 
 func get_editor_runtime() -> CodaRuntime:
 	return _editor_runtime
+
+
+## Returns [code]true[/code] only when the autoload entry is missing or points to a different
+## script. Idempotent in the common case (entry already correct) — see _enter_tree comment.
+func _needs_autoload_register() -> bool:
+	var setting: String = "autoload/%s" % AUTOLOAD_NAME
+	if not ProjectSettings.has_setting(setting):
+		return true
+	var current: String = String(ProjectSettings.get_setting(setting, ""))
+	if current.is_empty():
+		return true
+	# Godot stores autoloads as "*<path-or-uid>". Both the path and any uid:// form pointing
+	# to our coda_runtime.gd are acceptable; only re-register when the entry has drifted.
+	if current == "*" + AUTOLOAD_PATH:
+		return false
+	if current.begins_with("*uid://"):
+		var uid_text: String = current.substr(1)
+		var uid_id: int = ResourceUID.text_to_id(uid_text)
+		if uid_id != -1 and ResourceUID.has_id(uid_id):
+			if ResourceUID.get_id_path(uid_id) == AUTOLOAD_PATH:
+				return false
+		# Cannot resolve right now (UID cache not built yet); leave the entry alone — Godot
+		# will fix it on its own and we avoid rewriting the project file at every restart.
+		return false
+	return true
 
 
 ## Called from the FileSystem dock context menu ("Send to Coda Assets").

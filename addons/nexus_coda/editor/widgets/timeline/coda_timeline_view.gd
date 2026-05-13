@@ -304,6 +304,9 @@ func _draw_track_lanes() -> void:
 		var rect: Rect2 = _track_lane_rect(i)
 		var bg: Color = Tokens.SURFACE_RAISED if i % 2 == 0 else Tokens.SURFACE_SUNKEN
 		draw_rect(rect, bg, true)
+		var tr: CodaTimelineTrack = _timeline.tracks[i]
+		var ac: Color = Tokens.ACCENT if tr.color.a <= 0.001 else tr.color
+		draw_rect(rect, Color(ac.r, ac.g, ac.b, 0.10), true)
 		if i == _highlight_track_index and n > 0:
 			draw_rect(rect, Color(Tokens.ACCENT.r, Tokens.ACCENT.g, Tokens.ACCENT.b, 0.12), true)
 			draw_rect(rect, Tokens.ACCENT_DIM, false, 1.0)

@@ -13,6 +13,9 @@ class_name CodaAudioBusMirror
 ## The runtime keeps this [code]false[/code] by default so shipped games keep their project-wide bus layout.
 
 const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.gd")
+const CodaEffectCatalogScript := preload(
+	"res://addons/nexus_coda/editor/browser/effects/coda_effect_catalog.gd"
+)
 
 ## Returns dictionary { coda_bus_id (String) -> godot_bus_name (String) }.
 ## Pass [code]prune_unclaimed_buses = true[/code] from editor-only callers that own the whole bus list.
@@ -111,6 +114,27 @@ static func _apply_master_settings(master: CodaBus) -> void:
 		AudioServer.set_bus_volume_db(idx, master.volume_db)
 		AudioServer.set_bus_mute(idx, master.mute)
 		AudioServer.set_bus_bypass_effects(idx, master.bypass)
+	_apply_coda_bus_effects_to_godot_bus(idx, master)
+
+
+static func _clear_godot_bus_effects(bus_idx: int) -> void:
+	if bus_idx < 0:
+		return
+	var n: int = AudioServer.get_bus_effect_count(bus_idx)
+	for i in range(n - 1, -1, -1):
+		AudioServer.remove_bus_effect(bus_idx, i)
+
+
+static func _apply_coda_bus_effects_to_godot_bus(bus_idx: int, bus: CodaBus) -> void:
+	if bus_idx < 0 or bus == null:
+		return
+	_clear_godot_bus_effects(bus_idx)
+	for eff in bus.effects:
+		var ae: AudioEffect = CodaEffectCatalogScript.build_audio_effect_from_slot(eff)
+		AudioServer.add_bus_effect(bus_idx, ae)
+		var slot: int = AudioServer.get_bus_effect_count(bus_idx) - 1
+		# Godot exposes per-slot bypass as the inverse "enabled" flag.
+		AudioServer.set_bus_effect_enabled(bus_idx, slot, not eff.bypass)
 
 
 static func _sync_bus_recursive(bus: CodaBus, tree_parent_name: String, map: Dictionary, bus_root: CodaBus) -> void:
@@ -128,6 +152,8 @@ static func _sync_bus_recursive(bus: CodaBus, tree_parent_name: String, map: Dic
 	AudioServer.set_bus_mute(idx, bus.mute)
 	AudioServer.set_bus_bypass_effects(idx, bus.bypass)
 	map[bus.id] = name
+	var gidx: int = AudioServer.get_bus_index(name)
+	_apply_coda_bus_effects_to_godot_bus(gidx, bus)
 	for child in bus.children:
 		_sync_bus_recursive(child, name, map, bus_root)
 

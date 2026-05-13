@@ -11,6 +11,7 @@ signal bypass_toggled(bus_id: String, bypass: bool)
 signal bus_renamed(bus_id: String, new_name: String)
 signal send_target_changed(bus_id: String, target_bus_id: String)
 signal context_action_requested(bus_id: String, action: StringName)
+signal bus_strip_selected(bus_id: String)
 
 const DND_TYPE := &"coda_bus_strip"
 
@@ -420,6 +421,33 @@ func bind(
 
 	_syncing_ui = false
 	_refresh_context_menu_enabled()
+	_wire_bus_selection_clicks()
+
+
+func _wire_bus_selection_clicks() -> void:
+	var ctrls: Array[Control] = [
+		_name_edit,
+		_meter_l,
+		_meter_r,
+		_fader,
+		_db_edit,
+		_send_option,
+		_mute_btn,
+		_solo_btn,
+		_bypass_btn,
+	]
+	for c in ctrls:
+		if c != null and not c.gui_input.is_connected(_on_bus_select_gui_input):
+			c.gui_input.connect(_on_bus_select_gui_input)
+
+
+func _on_bus_select_gui_input(event: InputEvent) -> void:
+	if _bus == null:
+		return
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			bus_strip_selected.emit(_bus.id)
 
 
 func set_volume_no_signal(volume_db: float) -> void:

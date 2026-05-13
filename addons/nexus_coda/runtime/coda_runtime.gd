@@ -29,6 +29,7 @@ const CodaTimelineSchedulerScript := preload(
 )
 const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
 const CodaAudioBusMirrorScript := preload("res://addons/nexus_coda/runtime/coda_audio_bus_mirror.gd")
+const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_bus_helper.gd")
 const CodaBankExportScript := preload("res://addons/nexus_coda/editor/io/coda_bank_export.gd")
 
 const RUNTIME_LOG_SCOPE := "runtime"
@@ -120,6 +121,16 @@ func resolve_bus_name_for_event(event: CodaBrowserNode) -> String:
 	return bus_name
 
 
+func resolve_godot_bus_name_for_coda_bus_id(coda_bus_id: String) -> String:
+	var tid: String = String(coda_bus_id).strip_edges()
+	if tid.is_empty():
+		return ""
+	var v: Variant = _bus_id_to_godot_name.get(tid, null)
+	if v == null:
+		return ""
+	return String(v)
+
+
 func get_project() -> CodaState:
 	return _project
 
@@ -168,6 +179,17 @@ func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 
 
 func stop_all() -> void:
+	for h in _timeline_dispatchers.keys():
+		var hh2 := h as CodaEventHandle
+		if hh2 != null:
+			hh2._alive = false
+			hh2.timeline_runtime = null
+		var d: Dictionary = _timeline_dispatchers[h]
+		for vp in d.get("voices", {}).values():
+			var pl: AudioStreamPlayer = vp as AudioStreamPlayer
+			if pl == null or not is_instance_valid(pl):
+				continue
+			_free_player_timeline_fx_bus(pl)
 	if _pool != null:
 		_pool.stop_all()
 	for h in _active_handles.values():
@@ -175,11 +197,6 @@ func stop_all() -> void:
 		if hh != null:
 			hh._alive = false
 	_active_handles.clear()
-	for h in _timeline_dispatchers.keys():
-		var hh2 := h as CodaEventHandle
-		if hh2 != null:
-			hh2._alive = false
-			hh2.timeline_runtime = null
 	_timeline_dispatchers.clear()
 	_timeline_voice_owner.clear()
 
@@ -637,6 +654,9 @@ func _prime_timeline_overlapping_voices(
 				"track_id": track.id,
 				"stream_offset_seconds": clip.offset_seconds + into_clip,
 				"duration_seconds": clip.duration_seconds - into_clip,
+				"clip_effects": clip.effects,
+				"track_effects": track.effects,
+				"track_output_bus_id": track.output_bus_id,
 			}
 			_spawn_timeline_voice(handle, d, entry)
 			fired[clip.id] = true
@@ -787,10 +807,48 @@ func _fire_clips_in_range(
 				"track_id": track.id,
 				"stream_offset_seconds": clip.offset_seconds,
 				"duration_seconds": clip.duration_seconds,
+				"clip_effects": clip.effects,
+				"track_effects": track.effects,
+				"track_output_bus_id": track.output_bus_id,
 			}
 			_spawn_timeline_voice(handle, d, entry)
 			fired[clip.id] = true
 	d["fired_clip_ids"] = fired
+
+
+func _timeline_send_bus_for_track(handle: CodaEventHandle, track_output_bus_id: String) -> String:
+	# Track-level output bus wins over the event-level fallback so designers can route lanes
+	# to dedicated buses without changing the event itself.
+	var mapped: String = resolve_godot_bus_name_for_coda_bus_id(track_output_bus_id)
+	if not mapped.is_empty() and AudioServer.get_bus_index(mapped) >= 0:
+		return mapped
+	var fallback: String = String(handle.params.get("_coda_voice_bus", bus_name))
+	if AudioServer.get_bus_index(fallback) < 0:
+		fallback = "Master"
+	return fallback
+
+
+func _free_player_timeline_fx_bus(player: AudioStreamPlayer) -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	if not player.has_meta(&"_coda_fx_bus"):
+		return
+	var nm: String = String(player.get_meta(&"_coda_fx_bus", ""))
+	player.remove_meta(&"_coda_fx_bus")
+	CodaFxBusHelperScript.destroy_if_ours(nm)
+
+
+func _collect_timeline_fx_chain(entry: Dictionary) -> Array:
+	var out: Array = []
+	# Clip-level inserts run first, then the track's, so a per-clip gain doesn't get
+	# undone by a track compressor downstream of it.
+	for e in entry.get("clip_effects", []) as Array:
+		if e is CodaTrackEffect:
+			out.append(e)
+	for e2 in entry.get("track_effects", []) as Array:
+		if e2 is CodaTrackEffect:
+			out.append(e2)
+	return out
 
 
 func _spawn_timeline_voice(
@@ -809,9 +867,18 @@ func _spawn_timeline_voice(
 	if player == null:
 		_warn("voice pool exhausted while playing timeline clip '%s'" % stream_path)
 		return
-	var route_bus: String = String(handle.params.get("_coda_voice_bus", bus_name))
-	if AudioServer.get_bus_index(route_bus) < 0:
-		route_bus = "Master"
+	# Carry-over from a previous voice on the same pooled player.
+	_free_player_timeline_fx_bus(player)
+	var send_bus: String = _timeline_send_bus_for_track(
+		handle, String(entry.get("track_output_bus_id", ""))
+	)
+	var route_bus: String = send_bus
+	var fx_chain: Array = _collect_timeline_fx_chain(entry)
+	if fx_chain.size() > 0:
+		var fx_nm: String = CodaFxBusHelperScript.create_effects_bus(send_bus, fx_chain)
+		if not fx_nm.is_empty():
+			route_bus = fx_nm
+			player.set_meta(&"_coda_fx_bus", fx_nm)
 	player.bus = route_bus
 	player.stream = stream
 	var override_db: float = float(handle.params.get("volume_db", 0.0))
@@ -835,6 +902,7 @@ func _spawn_timeline_voice(
 
 
 func _on_timeline_voice_finished(player: AudioStreamPlayer, key: int) -> void:
+	_free_player_timeline_fx_bus(player)
 	var h: CodaEventHandle = _timeline_voice_owner.get(key, null) as CodaEventHandle
 	_timeline_voice_owner.erase(key)
 	if h == null or not _timeline_dispatchers.has(h):
@@ -869,6 +937,7 @@ func _stop_timeline_voices(d: Dictionary, handle: CodaEventHandle = null) -> voi
 		_timeline_voice_owner.erase(p.get_instance_id())
 		if p.playing:
 			p.stop()
+		_free_player_timeline_fx_bus(p)
 	d["voices"] = {}
 	if handle != null:
 		handle.clear_player_binding()
