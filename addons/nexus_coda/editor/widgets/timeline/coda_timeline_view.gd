@@ -74,6 +74,8 @@ var _drag_track_id: String = ""
 var _drag_start_seconds: float = 0.0
 var _drag_initial_clip_start: float = 0.0
 var _drag_initial_clip_duration: float = 0.0
+## Source trim baseline when dragging the clip's left edge ([member CodaTimelineClip.offset_seconds] at drag start).
+var _drag_initial_clip_offset: float = 0.0
 var _drag_marker_id: String = ""
 var _drag_initial_loop_start: float = 0.0
 var _drag_initial_loop_end: float = 0.0
@@ -728,14 +730,18 @@ func _handle_mouse_motion(mm: InputEventMouseMotion) -> void:
 		DragKind.CLIP_RESIZE_LEFT:
 			var info_l: Dictionary = _timeline.find_clip(_drag_clip_id)
 			var clip_l: CodaTimelineClip = info_l.get("clip") as CodaTimelineClip
-			var max_play_l: float = (
-				clip_l.max_source_playable_seconds() if clip_l != null else 1.0e12
-			)
+			if clip_l == null:
+				return
 			var anchor_end: float = _drag_initial_clip_start + _drag_initial_clip_duration
-			var min_start: float = max(0.0, anchor_end - max_play_l)
+			# Keep offset_seconds in sync with timeline trim so the audible segment stays correct.
+			var min_start: float = maxf(0.0, _drag_initial_clip_start - _drag_initial_clip_offset)
 			var new_start: float = clampf(_apply_snap(t), min_start, anchor_end - 0.01)
-			_apply_clip_resize(_drag_clip_id, new_start, anchor_end - new_start)
-			clip_resized.emit(_drag_clip_id, new_start, anchor_end - new_start)
+			var new_dur: float = anchor_end - new_start
+			var new_off: float = maxf(
+				0.0, _drag_initial_clip_offset + new_start - _drag_initial_clip_start
+			)
+			_apply_clip_resize(_drag_clip_id, new_start, new_dur, new_off)
+			clip_resized.emit(_drag_clip_id, clip_l.start_seconds, clip_l.duration_seconds)
 		DragKind.CLIP_RESIZE_RIGHT:
 			var info_r: Dictionary = _timeline.find_clip(_drag_clip_id)
 			var clip_r: CodaTimelineClip = info_r.get("clip") as CodaTimelineClip
@@ -813,6 +819,7 @@ func _begin_drag(hit: Dictionary, mb: InputEventMouseButton) -> void:
 		var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
 		_drag_initial_clip_start = clip.start_seconds
 		_drag_initial_clip_duration = clip.duration_seconds
+		_drag_initial_clip_offset = clip.offset_seconds
 		_selected_clip_id = clip_id
 		clip_selected.emit(clip_id)
 		queue_redraw()
@@ -963,7 +970,9 @@ func _apply_clip_move(clip_id: String, new_start: float) -> void:
 	queue_redraw()
 
 
-func _apply_clip_resize(clip_id: String, new_start: float, new_duration: float) -> void:
+func _apply_clip_resize(
+	clip_id: String, new_start: float, new_duration: float, new_offset_seconds: float = NAN
+) -> void:
 	if _timeline == null:
 		return
 	var info: Dictionary = _timeline.find_clip(clip_id)
@@ -971,6 +980,8 @@ func _apply_clip_resize(clip_id: String, new_start: float, new_duration: float) 
 		return
 	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
 	clip.start_seconds = max(0.0, new_start)
+	if new_offset_seconds == new_offset_seconds:
+		clip.offset_seconds = maxf(0.0, new_offset_seconds)
 	var max_by_source: float = clip.max_source_playable_seconds()
 	var max_by_tl: float = max(0.0, _timeline.length_seconds - clip.start_seconds)
 	var max_d: float = minf(max_by_source, max_by_tl)
