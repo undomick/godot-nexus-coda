@@ -156,6 +156,10 @@ func duplicate_clip(clip_id: String, gap_seconds: float = 0.05) -> String:
 	var d: Dictionary = c.to_dictionary()
 	d.erase("id")
 	var dup: CodaTimelineClip = CodaTimelineClipScript.from_dictionary(d)
+	# New clip id only; effect entries still carried source ids from serialization. Assign
+	# fresh ids so the duplicate cannot collide with the original (same invariant as split).
+	for i in range(dup.effects.size()):
+		dup.effects[i] = dup.effects[i].clone_new_id()
 	var new_start: float = c.start_seconds + c.duration_seconds + max(0.0, gap_seconds)
 	if new_start >= length_seconds - 0.01:
 		return "No space after the clip to duplicate."
