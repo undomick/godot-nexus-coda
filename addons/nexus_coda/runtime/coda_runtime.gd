@@ -52,6 +52,10 @@ var _timeline_dispatchers: Dictionary = {}
 ## player_instance_id -> CodaEventHandle (timeline-mode only). Lets [code]_on_voice_finished[/code]
 ## resolve a finished timeline voice without going through [code]_active_handles[/code].
 var _timeline_voice_owner: Dictionary = {}
+## True while [method stop_all] is iterating pooled [AudioStreamPlayer]s. A synthetic
+## [signal AudioStreamPlayer.finished] from [method AudioStreamPlayer.stop] must not dequeue graph
+## plan entries or new voices would start during teardown.
+var _stop_all_in_progress: bool = false
 
 
 func _ready() -> void:
@@ -195,13 +199,25 @@ func stop_all() -> void:
 			hh2._alive = false
 			hh2.finished.emit()
 		voice_finished.emit(hh2)
+	# Snapshot graph handles before stopping the pool so we can emit finished / voice_finished after
+	# teardown. While the pool calls AudioStreamPlayer.stop(), finished may fire synchronously; see
+	# _stop_all_in_progress in _on_voice_finished.
+	var graph_handles: Array[CodaEventHandle] = []
+	var graph_seen: Dictionary = {}
+	for h in _active_handles.values():
+		var gh: CodaEventHandle = h as CodaEventHandle
+		if gh != null and not graph_seen.has(gh):
+			graph_seen[gh] = true
+			graph_handles.append(gh)
+	_stop_all_in_progress = true
 	if _pool != null:
 		_pool.stop_all()
-	for h in _active_handles.values():
-		var hh := h as CodaEventHandle
-		if hh != null and hh._alive:
-			hh._alive = false
-			hh.finished.emit()
+	_stop_all_in_progress = false
+	for gh2 in graph_handles:
+		if gh2._alive:
+			gh2._alive = false
+			gh2.finished.emit()
+		voice_finished.emit(gh2)
 	_active_handles.clear()
 	_timeline_dispatchers.clear()
 	_timeline_voice_owner.clear()
@@ -547,6 +563,9 @@ func _on_voice_finished(player: AudioStreamPlayer) -> void:
 		_on_timeline_voice_finished(player, key)
 		return
 	if not _active_handles.has(key):
+		return
+	if _stop_all_in_progress:
+		_active_handles.erase(key)
 		return
 	var h: CodaEventHandle = _active_handles[key] as CodaEventHandle
 	_active_handles.erase(key)
