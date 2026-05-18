@@ -179,23 +179,29 @@ func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 
 
 func stop_all() -> void:
-	for h in _timeline_dispatchers.keys():
-		var hh2 := h as CodaEventHandle
-		if hh2 != null:
+	# Mirror [_finalize_timeline_handle]: stop lane voices, drop dispatcher refs, then emit the
+	# same handle/runtime signals as a normal timeline end. Otherwise `await handle.finished` and
+	# `voice_finished` subscribers never run for timeline previews stopped via stop_all().
+	var timeline_handles: Array = _timeline_dispatchers.keys()
+	for h in timeline_handles:
+		var hh2: CodaEventHandle = h as CodaEventHandle
+		if hh2 == null or not _timeline_dispatchers.has(hh2):
+			continue
+		var d: Dictionary = _timeline_dispatchers[hh2]
+		_stop_timeline_voices(d, hh2)
+		hh2.timeline_runtime = null
+		_timeline_dispatchers.erase(hh2)
+		if hh2._alive:
 			hh2._alive = false
-			hh2.timeline_runtime = null
-		var d: Dictionary = _timeline_dispatchers[h]
-		for vp in d.get("voices", {}).values():
-			var pl: AudioStreamPlayer = vp as AudioStreamPlayer
-			if pl == null or not is_instance_valid(pl):
-				continue
-			_free_player_timeline_fx_bus(pl)
+			hh2.finished.emit()
+		voice_finished.emit(hh2)
 	if _pool != null:
 		_pool.stop_all()
 	for h in _active_handles.values():
 		var hh := h as CodaEventHandle
-		if hh != null:
+		if hh != null and hh._alive:
 			hh._alive = false
+			hh.finished.emit()
 	_active_handles.clear()
 	_timeline_dispatchers.clear()
 	_timeline_voice_owner.clear()
