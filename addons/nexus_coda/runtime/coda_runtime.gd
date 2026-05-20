@@ -227,6 +227,11 @@ func stop_all() -> void:
 		_pool.stop_all()
 	_stop_all_in_progress = false
 	for gh2 in graph_handles:
+		# BLEND parallel legs use sibling handles that never receive [signal voice_started]. Emitting
+		# [signal voice_finished] for them here would duplicate teardown for one [method play] call.
+		if bool(gh2.params.get("_coda_is_sibling", false)):
+			gh2._alive = false
+			continue
 		if gh2._alive:
 			gh2._alive = false
 			gh2.finished.emit()
