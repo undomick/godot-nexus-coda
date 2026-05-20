@@ -179,6 +179,19 @@ func play_event_node(node: Variant, params: Dictionary = {}) -> CodaEventHandle:
 func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	if handle == null:
 		return
+	if handle.is_timeline:
+		if _timeline_dispatchers.has(handle):
+			_finalize_timeline_handle(handle)
+		elif handle._alive:
+			handle.stop(fade_ms)
+		return
+	for sib in handle.graph_parallel_siblings:
+		if sib == null:
+			continue
+		sib._alive = false
+		if sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
+			sib._player.stop()
+	handle.graph_parallel_siblings.clear()
 	handle.stop(fade_ms)
 
 
@@ -477,7 +490,9 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 		else:
 			# Sibling parallel voice: track separately so it stops with the handle but doesn't get
 			# its own modulation pass (Phase 4 limitation).
-			_active_handles[player.get_instance_id()] = _make_sibling_handle(handle, entry, player)
+			var sib_h: CodaEventHandle = _make_sibling_handle(handle, entry, player)
+			handle.graph_parallel_siblings.append(sib_h)
+			_active_handles[player.get_instance_id()] = sib_h
 	if primary_player == null:
 		return null
 	handle.params["_coda_plan"] = queued_after_parallel
@@ -593,6 +608,8 @@ func _on_voice_finished(player: AudioStreamPlayer) -> void:
 				h._bind_player(p2)
 				_active_handles[p2.get_instance_id()] = h
 				return
+	if bool(h.params.get("_coda_is_sibling", false)) and not h._alive:
+		return
 	h._on_player_finished()
 	voice_finished.emit(h)
 
@@ -702,7 +719,6 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 		var d: Dictionary = _timeline_dispatchers[handle]
 		var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
 		if timeline == null:
-			handle._alive = false
 			_finalize_timeline_handle(handle)
 			continue
 
@@ -744,7 +760,6 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 					handle, d, timeline, prev_cursor, timeline.length_seconds
 				)
 				handle.timeline_cursor_seconds = timeline.length_seconds
-				handle._alive = false
 				_finalize_timeline_handle(handle)
 				continue
 
@@ -971,11 +986,14 @@ func _stop_timeline_voices(d: Dictionary, handle: CodaEventHandle = null) -> voi
 func _finalize_timeline_handle(handle: CodaEventHandle) -> void:
 	if not _timeline_dispatchers.has(handle):
 		return
+	var was_alive: bool = handle._alive
 	var d: Dictionary = _timeline_dispatchers[handle]
 	_stop_timeline_voices(d, handle)
 	handle.timeline_runtime = null
 	_timeline_dispatchers.erase(handle)
-	handle._on_player_finished()
+	if was_alive:
+		handle._alive = false
+		handle.finished.emit()
 	voice_finished.emit(handle)
 
 

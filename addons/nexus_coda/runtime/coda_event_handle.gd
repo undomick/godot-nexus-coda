@@ -26,6 +26,9 @@ var base_pitch_scale: float = 1.0
 ## Extra weight (BLEND only): final volume_db = base_volume_db + 20*log10(blend_weight).
 var blend_weight: float = 1.0
 
+## Parallel graph voices (BLEND) started with this handle. Filled by [CodaRuntime]; cleared on stop.
+var graph_parallel_siblings: Array[CodaEventHandle] = []
+
 ## Timeline-mode metadata (graph-mode handles ignore these).
 ## [code]is_timeline[/code] flips the player-panel cursor source from the player position to
 ## [code]timeline_cursor_seconds[/code], which the runtime advances each frame.
@@ -137,8 +140,9 @@ func clear_player_binding() -> void:
 
 
 func _on_player_finished() -> void:
-	if loop and _player != null and is_instance_valid(_player):
+	if loop and _alive and _player != null and is_instance_valid(_player):
 		_player.play()
 		return
-	_alive = false
-	finished.emit()
+	if _alive:
+		_alive = false
+		finished.emit()
