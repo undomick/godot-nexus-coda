@@ -220,8 +220,11 @@ func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 		elif handle._alive:
 			handle.stop(fade_ms)
 		return
+	var was_alive: bool = handle._alive
 	_stop_graph_parallel_siblings(handle)
 	handle.stop(fade_ms)
+	if was_alive:
+		voice_finished.emit(handle)
 
 
 func stop_all() -> void:
