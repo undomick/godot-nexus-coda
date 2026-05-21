@@ -783,7 +783,12 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 			)
 
 		handle.timeline_cursor_seconds = next_cursor
+		if wrapped:
+			# Same gap as seek/scrub: clips already playing across the loop point must respawn
+			# at the wrapped cursor, not only those whose start time falls in [prev, next).
+			_prime_timeline_overlapping_voices(handle, d, timeline, next_cursor)
 		_fire_clips_in_range(handle, d, timeline, prev_cursor, next_cursor)
+		_stop_timeline_voices_past_clip_end(handle, d, timeline, next_cursor)
 
 
 func _refresh_timeline_voice_output_levels(
@@ -975,16 +980,58 @@ func _apply_timeline_seek(
 	_prime_timeline_overlapping_voices(handle, d, timeline, clamped)
 
 
+func _stop_timeline_voice_player(
+	d: Dictionary, player: AudioStreamPlayer, handle: CodaEventHandle = null
+) -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	_timeline_voice_owner.erase(player.get_instance_id())
+	if player.playing:
+		player.stop()
+	_free_player_timeline_fx_bus(player)
+	var voices: Dictionary = d.get("voices", {})
+	for k in voices.keys():
+		if voices[k] == player:
+			voices.erase(k)
+			break
+	d["voices"] = voices
+	if handle != null and voices.is_empty():
+		handle.clear_player_binding()
+
+
+func _stop_timeline_voices_past_clip_end(
+	handle: CodaEventHandle,
+	d: Dictionary,
+	timeline: CodaEventTimeline,
+	cursor_seconds: float,
+) -> void:
+	var voices: Dictionary = d.get("voices", {})
+	if voices.is_empty():
+		return
+	var to_stop: Array[AudioStreamPlayer] = []
+	for sound_key in voices.keys():
+		var clip_id: String = str(sound_key)
+		var info: Dictionary = timeline.find_clip(clip_id)
+		if info.is_empty():
+			continue
+		var cl: CodaTimelineClip = info.get("clip", null) as CodaTimelineClip
+		if cl == null:
+			continue
+		var clip_end: float = cl.start_seconds + cl.duration_seconds
+		if cursor_seconds + 0.0001 < clip_end:
+			continue
+		var p: AudioStreamPlayer = voices[sound_key] as AudioStreamPlayer
+		if p != null and is_instance_valid(p):
+			to_stop.append(p)
+	for player in to_stop:
+		_stop_timeline_voice_player(d, player, handle)
+
+
 func _stop_timeline_voices(d: Dictionary, handle: CodaEventHandle = null) -> void:
 	var voices: Dictionary = d.get("voices", {})
 	for k in voices.keys():
 		var p: AudioStreamPlayer = voices[k] as AudioStreamPlayer
-		if p == null or not is_instance_valid(p):
-			continue
-		_timeline_voice_owner.erase(p.get_instance_id())
-		if p.playing:
-			p.stop()
-		_free_player_timeline_fx_bus(p)
+		_stop_timeline_voice_player(d, p, null)
 	d["voices"] = {}
 	if handle != null:
 		handle.clear_player_binding()
