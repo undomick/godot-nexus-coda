@@ -432,7 +432,10 @@ func _on_pin_toggled(on: bool) -> void:
 
 
 func _stop_active_voice() -> void:
-	if _active_handle != null:
+	if _active_handle != null and _runtime != null:
+		_runtime.stop(_active_handle)
+		_active_handle = null
+	elif _active_handle != null:
 		_active_handle.stop()
 		_active_handle = null
 	if _runtime != null and _selected_event != null:

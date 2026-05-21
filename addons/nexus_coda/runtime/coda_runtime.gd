@@ -53,6 +53,13 @@ var _timeline_dispatchers: Dictionary = {}
 ## player_instance_id -> CodaEventHandle (timeline-mode only). Lets [code]_on_voice_finished[/code]
 ## resolve a finished timeline voice without going through [code]_active_handles[/code].
 var _timeline_voice_owner: Dictionary = {}
+## player_instance_id -> playback generation stamped at the last [method AudioStreamPlayer.play]
+## on that pooled player. Guards against stale [signal AudioStreamPlayer.finished] after reuse.
+var _timeline_voice_playback_gen: Dictionary = {}
+## Monotonic generation per pooled-player play; prior gens are marked orphaned on supersede.
+var _next_playback_gen: int = 1
+var _player_pending_finish_gen: Dictionary = {}  ## player_instance_id -> int
+var _orphaned_finish_gens: Dictionary = {}  ## gen -> true
 ## True while [method stop_all] is iterating pooled [AudioStreamPlayer]s. A synthetic
 ## [signal AudioStreamPlayer.finished] from [method AudioStreamPlayer.stop] must not dequeue graph
 ## plan entries or new voices would start during teardown.
@@ -267,6 +274,8 @@ func stop_all() -> void:
 	_active_handles.clear()
 	_timeline_dispatchers.clear()
 	_timeline_voice_owner.clear()
+	_timeline_voice_playback_gen.clear()
+	_player_pending_finish_gen.clear()
 
 
 func is_alive(handle: CodaEventHandle) -> bool:
@@ -530,6 +539,7 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 			handle.base_pitch_scale = float(entry.get("pitch_scale", 1.0)) * float(params.get("pitch_scale", 1.0))
 			handle.blend_weight = float(entry.get("blend_weight", 1.0))
 			handle._bind_player(player)
+			handle.params["_coda_playback_gen"] = int(player.get_meta(&"_coda_playback_gen", -1))
 			_active_handles[player.get_instance_id()] = handle
 		else:
 			# Sibling parallel voice: track separately so it stops with the handle but doesn't get
@@ -579,7 +589,71 @@ func _make_sibling_handle(parent: CodaEventHandle, entry: Dictionary, player: Au
 	sib.base_pitch_scale = float(entry.get("pitch_scale", 1.0))
 	sib.blend_weight = float(entry.get("blend_weight", 1.0))
 	sib._bind_player(player)
+	sib.params["_coda_playback_gen"] = int(player.get_meta(&"_coda_playback_gen", -1))
 	return sib
+
+
+func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
+	var full: Variant = h.params.get("_coda_full_plan", [])
+	if not full is Array or (full as Array).is_empty():
+		return false
+	for sib in h.graph_parallel_siblings:
+		if sib == null:
+			continue
+		sib._alive = false
+		if sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
+			sib._player.stop()
+		if sib._player != null and is_instance_valid(sib._player):
+			_active_handles.erase(sib._player.get_instance_id())
+	h.graph_parallel_siblings.clear()
+	var plan_entries: Array = full as Array
+	var parallel_entries: Array = _split_parallel_entries(plan_entries)
+	var queued_after_parallel: Array = plan_entries.slice(parallel_entries.size())
+	h.params["_coda_plan"] = queued_after_parallel
+	var primary_player: AudioStreamPlayer = null
+	for entry in parallel_entries:
+		var player: AudioStreamPlayer = _start_player_for_entry(entry, h.params)
+		if player == null:
+			continue
+		if primary_player == null:
+			primary_player = player
+			h.current_sound_id = String(entry.get("sound_id", ""))
+			h._bind_player(player)
+			h.params["_coda_playback_gen"] = int(player.get_meta(&"_coda_playback_gen", -1))
+			_active_handles[player.get_instance_id()] = h
+		else:
+			var sib_h: CodaEventHandle = _make_sibling_handle(h, entry, player)
+			h.graph_parallel_siblings.append(sib_h)
+			_active_handles[player.get_instance_id()] = sib_h
+	if primary_player == null:
+		return false
+	return true
+
+
+## Stamp a new playback generation and orphan any still-pending finish for this pooled player.
+func _begin_player_voice(player: AudioStreamPlayer) -> int:
+	var key: int = player.get_instance_id()
+	var prior_gen: int = int(player.get_meta(&"_coda_playback_gen", -1))
+	if prior_gen >= 0:
+		_orphaned_finish_gens[prior_gen] = true
+	var gen: int = _next_playback_gen
+	_next_playback_gen += 1
+	player.set_meta(&"_coda_playback_gen", gen)
+	_player_pending_finish_gen[key] = gen
+	_active_handles.erase(key)
+	_timeline_voice_owner.erase(key)
+	_timeline_voice_playback_gen.erase(key)
+	return gen
+
+
+func _is_stale_player_finish(player: AudioStreamPlayer) -> bool:
+	var key: int = player.get_instance_id()
+	var gen: int = int(player.get_meta(&"_coda_playback_gen", -1))
+	if gen < 0:
+		return true
+	if _orphaned_finish_gens.erase(gen):
+		return true
+	return int(_player_pending_finish_gen.get(key, -1)) != gen
 
 
 func _start_player_for_entry(entry: Dictionary, params: Dictionary) -> AudioStreamPlayer:
@@ -612,13 +686,16 @@ func _start_player_for_entry(entry: Dictionary, params: Dictionary) -> AudioStre
 		blend_db = -80.0
 	player.volume_db = float(entry.get("volume_db", 0.0)) + override_db + blend_db
 	player.pitch_scale = float(entry.get("pitch_scale", 1.0)) * float(params.get("pitch_scale", 1.0))
+	_begin_player_voice(player)
 	player.play()
 	return player
 
 
 func _on_voice_finished(player: AudioStreamPlayer) -> void:
+	if _is_stale_player_finish(player):
+		return
 	var key: int = player.get_instance_id()
-	if _timeline_voice_owner.has(key):
+	if int(_timeline_voice_playback_gen.get(key, -1)) == int(player.get_meta(&"_coda_playback_gen", -1)):
 		_on_timeline_voice_finished(player, key)
 		return
 	if not _active_handles.has(key):
@@ -630,6 +707,8 @@ func _on_voice_finished(player: AudioStreamPlayer) -> void:
 	_active_handles.erase(key)
 	if h == null:
 		return
+	if int(h.params.get("_coda_playback_gen", -1)) != int(player.get_meta(&"_coda_playback_gen", -1)):
+		return
 	# If the plan still has queued entries, play the next one on a fresh player.
 	var queued: Variant = h.params.get("_coda_plan", [])
 	if queued is Array and (queued as Array).size() > 0 and h._alive:
@@ -638,20 +717,13 @@ func _on_voice_finished(player: AudioStreamPlayer) -> void:
 		var next_player: AudioStreamPlayer = _start_player_for_entry(entry, h.params)
 		if next_player != null:
 			h._bind_player(next_player)
+			h.params["_coda_playback_gen"] = int(next_player.get_meta(&"_coda_playback_gen", -1))
 			h.params["_coda_plan"] = rest
 			_active_handles[next_player.get_instance_id()] = h
 			return
 	if h.loop and h._alive:
-		# Restart the full plan from scratch.
-		var full: Variant = h.params.get("_coda_full_plan", [])
-		if full is Array and (full as Array).size() > 0:
-			var entry2: Dictionary = (full as Array)[0]
-			h.params["_coda_plan"] = (full as Array).slice(1)
-			var p2: AudioStreamPlayer = _start_player_for_entry(entry2, h.params)
-			if p2 != null:
-				h._bind_player(p2)
-				_active_handles[p2.get_instance_id()] = h
-				return
+		if _restart_graph_loop_from_full_plan(h):
+			return
 	if bool(h.params.get("_coda_is_sibling", false)) and not h._alive:
 		return
 	h._on_player_finished()
@@ -960,6 +1032,7 @@ func _spawn_timeline_voice(
 		return
 	# Carry-over from a previous voice on the same pooled player.
 	_free_player_timeline_fx_bus(player)
+	var voice_gen: int = _begin_player_voice(player)
 	var send_bus: String = _timeline_send_bus_for_track(
 		handle, String(entry.get("track_output_bus_id", ""))
 	)
@@ -986,7 +1059,9 @@ func _spawn_timeline_voice(
 	var voices: Dictionary = d.get("voices", {})
 	voices[entry.get("sound_id", "")] = player
 	d["voices"] = voices
-	_timeline_voice_owner[player.get_instance_id()] = handle
+	var player_key: int = player.get_instance_id()
+	_timeline_voice_owner[player_key] = handle
+	_timeline_voice_playback_gen[player_key] = voice_gen
 	# Track the most recent voice on the handle so legacy graph-based code paths (modulation
 	# bookkeeping, status checks) keep referencing a live player object.
 	handle._bind_player(player)
@@ -1003,6 +1078,7 @@ func _on_timeline_voice_finished(player: AudioStreamPlayer, key: int) -> void:
 		return
 	_free_player_timeline_fx_bus(player)
 	_timeline_voice_owner.erase(key)
+	_timeline_voice_playback_gen.erase(key)
 	if not _timeline_dispatchers.has(h):
 		return
 	var d: Dictionary = _timeline_dispatchers[h]
@@ -1047,7 +1123,9 @@ func _stop_timeline_voices_past_clip_end(
 			continue
 		if p.playing:
 			p.stop()
-		_timeline_voice_owner.erase(p.get_instance_id())
+		var pk: int = p.get_instance_id()
+		_timeline_voice_owner.erase(pk)
+		_timeline_voice_playback_gen.erase(pk)
 		_free_player_timeline_fx_bus(p)
 		stale_keys.append(sound_key)
 	for k in stale_keys:
@@ -1063,7 +1141,9 @@ func _stop_timeline_voices(d: Dictionary, handle: CodaEventHandle = null) -> voi
 		var p: AudioStreamPlayer = voices[k] as AudioStreamPlayer
 		if p == null or not is_instance_valid(p):
 			continue
-		_timeline_voice_owner.erase(p.get_instance_id())
+		var pk: int = p.get_instance_id()
+		_timeline_voice_owner.erase(pk)
+		_timeline_voice_playback_gen.erase(pk)
 		if p.playing:
 			p.stop()
 		_free_player_timeline_fx_bus(p)
