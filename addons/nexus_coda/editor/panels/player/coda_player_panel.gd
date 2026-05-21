@@ -279,11 +279,18 @@ func _set_event_internal(node: Variant) -> void:
 		_rebuild_param_rows()
 		return
 	var changed: bool = bn != _selected_event
+	var prev_event: CodaBrowserNode = _selected_event
 	_selected_event = bn
 	_header.heading = bn.name
 	_show_event()
 	_refresh_play_enabled()
 	if changed:
+		if _runtime != null and prev_event != null:
+			var old_tl: CodaEventHandle = _runtime.get_active_timeline_handle_for_event(
+				prev_event.id
+			)
+			if old_tl != null:
+				_runtime.stop(old_tl)
 		_stop_active_voice()
 	_rebuild_param_rows()
 
