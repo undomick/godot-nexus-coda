@@ -44,8 +44,10 @@ var _global_params: Dictionary = {}
 var _next_handle_id: int = 1
 ## Map of coda_bus_id (String) -> godot_bus_name (String); refreshed on project change.
 var _bus_id_to_godot_name: Dictionary = {}
-## Loaded banks: bank_id (String) -> { "bank_name": String, "events_by_path": { path: CodaBrowserNode } }
+## Loaded banks: bank_id (String) -> { "bank_name", "events_by_path", "buses_dict" (optional) }
 var _loaded_banks: Dictionary = {}
+## Insertion order for [method load_bank]; last entry wins bus routing when no project is set.
+var _loaded_bank_order: Array[String] = []
 ## Active timeline-mode handles: handle -> dispatcher state. Each entry tracks the timeline
 ## cursor, currently-playing per-clip voices and which clips have already been fired in this
 ## (loop) iteration so the same clip is not retriggered every frame.
@@ -416,19 +418,19 @@ func load_bank(path: String) -> String:
 		if node == null or event_path.is_empty():
 			continue
 		events_by_path[event_path] = node
+	var buses_raw: Variant = manifest.get("buses", null)
+	var buses_dict: Dictionary = buses_raw if buses_raw is Dictionary else {}
 	_loaded_banks[bank_id] = {
 		"bank_name": str(manifest.get("bank_name", "Bank")),
 		"events_by_path": events_by_path,
+		"buses_dict": buses_dict,
 	}
-	var buses_raw: Variant = manifest.get("buses", null)
-	if buses_raw is Dictionary:
-		var bank_bus_root: CodaBus = CodaBusScript.from_dictionary(buses_raw as Dictionary)
-		if bank_bus_root != null:
-			_bus_id_to_godot_name = CodaAudioBusMirrorScript.sync_to_audio_server(
-				bank_bus_root, false
-			)
+	_loaded_bank_order.erase(bank_id)
+	_loaded_bank_order.append(bank_id)
 	if _project != null:
 		_sync_buses()
+	else:
+		_apply_bus_routing_from_loaded_banks()
 	return bank_id
 
 
@@ -437,11 +439,32 @@ func unload_bank(bank_id: String) -> bool:
 	if not _loaded_banks.has(bank_id):
 		return false
 	_loaded_banks.erase(bank_id)
+	_loaded_bank_order.erase(bank_id)
 	if _project != null:
 		_sync_buses()
-	elif _loaded_banks.is_empty():
-		_bus_id_to_godot_name.clear()
+	else:
+		_apply_bus_routing_from_loaded_banks()
 	return true
+
+
+## Bank-only games: restore bus routing from the last still-loaded bank manifest.
+func _apply_bus_routing_from_loaded_banks() -> void:
+	var last_buses: Dictionary = {}
+	for bank_id in _loaded_bank_order:
+		if not _loaded_banks.has(bank_id):
+			continue
+		var entry: Dictionary = _loaded_banks[bank_id]
+		var buses_raw: Variant = entry.get("buses_dict", null)
+		if buses_raw is Dictionary and not (buses_raw as Dictionary).is_empty():
+			last_buses = buses_raw as Dictionary
+	if last_buses.is_empty():
+		_bus_id_to_godot_name.clear()
+		return
+	var bank_bus_root: CodaBus = CodaBusScript.from_dictionary(last_buses)
+	if bank_bus_root == null:
+		_bus_id_to_godot_name.clear()
+		return
+	_bus_id_to_godot_name = CodaAudioBusMirrorScript.sync_to_audio_server(bank_bus_root, false)
 
 
 func loaded_bank_ids() -> PackedStringArray:
