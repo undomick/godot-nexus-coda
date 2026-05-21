@@ -90,7 +90,7 @@ func set_project(project: Variant) -> void:
 			_project.project_dirty.disconnect(_on_project_dirty_sync_buses)
 	if project == null:
 		_project = null
-		_bus_id_to_godot_name.clear()
+		_apply_loaded_bank_buses()
 		return
 	_project = project as CodaState
 	_sync_buses()
@@ -111,9 +111,33 @@ func _on_project_dirty_sync_buses() -> void:
 
 func _sync_buses() -> void:
 	if _project == null or _project.bus_root == null:
-		_bus_id_to_godot_name.clear()
+		_rebuild_bus_id_map_from_loaded_banks()
 		return
 	_bus_id_to_godot_name = CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root)
+
+
+## Bank-only gameplay may load multiple .coda_bank files. Merge each manifest bus tree into
+## AudioServer and union id→name maps so earlier banks keep routing after later loads/unloads.
+func _apply_loaded_bank_buses() -> void:
+	if _project != null:
+		_sync_buses()
+		return
+	_rebuild_bus_id_map_from_loaded_banks()
+
+
+func _rebuild_bus_id_map_from_loaded_banks() -> void:
+	_bus_id_to_godot_name.clear()
+	if _loaded_banks.is_empty():
+		return
+	for bank_id in _loaded_banks.keys():
+		var entry: Dictionary = _loaded_banks[bank_id]
+		var root: Variant = entry.get("bus_root", null)
+		if root is CodaBus:
+			var partial: Dictionary = CodaAudioBusMirrorScript.sync_to_audio_server(
+				root as CodaBus, false
+			)
+			for cid in partial.keys():
+				_bus_id_to_godot_name[cid] = partial[cid]
 
 
 func resolve_bus_name_for_event(event: CodaBrowserNode) -> String:
@@ -416,19 +440,16 @@ func load_bank(path: String) -> String:
 		if node == null or event_path.is_empty():
 			continue
 		events_by_path[event_path] = node
+	var bank_bus_root: CodaBus = null
+	var buses_raw: Variant = manifest.get("buses", null)
+	if buses_raw is Dictionary:
+		bank_bus_root = CodaBusScript.from_dictionary(buses_raw as Dictionary)
 	_loaded_banks[bank_id] = {
 		"bank_name": str(manifest.get("bank_name", "Bank")),
 		"events_by_path": events_by_path,
+		"bus_root": bank_bus_root,
 	}
-	var buses_raw: Variant = manifest.get("buses", null)
-	if buses_raw is Dictionary:
-		var bank_bus_root: CodaBus = CodaBusScript.from_dictionary(buses_raw as Dictionary)
-		if bank_bus_root != null:
-			_bus_id_to_godot_name = CodaAudioBusMirrorScript.sync_to_audio_server(
-				bank_bus_root, false
-			)
-	if _project != null:
-		_sync_buses()
+	_apply_loaded_bank_buses()
 	return bank_id
 
 
@@ -437,10 +458,7 @@ func unload_bank(bank_id: String) -> bool:
 	if not _loaded_banks.has(bank_id):
 		return false
 	_loaded_banks.erase(bank_id)
-	if _project != null:
-		_sync_buses()
-	elif _loaded_banks.is_empty():
-		_bus_id_to_godot_name.clear()
+	_apply_loaded_bank_buses()
 	return true
 
 
