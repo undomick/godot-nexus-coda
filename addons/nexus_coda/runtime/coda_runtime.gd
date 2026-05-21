@@ -769,6 +769,9 @@ func _warn(msg: String) -> void:
 func _start_timeline_event(
 	event: CodaBrowserNode, path: String, params: Dictionary
 ) -> CodaEventHandle:
+	var existing: CodaEventHandle = get_active_timeline_handle_for_event(event.id)
+	if existing != null:
+		stop(existing)
 	var timeline: CodaEventTimeline = event.event_timeline
 	if timeline == null:
 		_warn("event '%s' is in timeline mode but has no timeline data" % event.name)
@@ -822,7 +825,7 @@ func _prime_timeline_overlapping_voices(
 		if tr.solo:
 			has_solo = true
 			break
-	var fired: Dictionary = {}
+	var fired: Dictionary = d.get("fired_clip_ids", {}).duplicate()
 	for track in timeline.tracks:
 		if track.mute:
 			continue
@@ -1126,12 +1129,52 @@ func _apply_timeline_seek(
 	var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
 	if timeline == null:
 		return
+	var prev_cursor: float = handle.timeline_cursor_seconds
 	var clamped: float = clampf(target_seconds, 0.0, timeline.length_seconds)
 	handle.timeline_cursor_seconds = clamped
 	_stop_timeline_voices(d, handle)
+	var fired: Dictionary = d.get("fired_clip_ids", {}).duplicate()
+	_timeline_apply_seek_fired_state(fired, timeline, prev_cursor, clamped)
+	d["fired_clip_ids"] = fired
 	# Re-prime clips overlapping the new cursor. Without this, scrubbing the playhead or using
 	# the transport seek slider leaves silence until the cursor crosses another clip start.
 	_prime_timeline_overlapping_voices(handle, d, timeline, clamped)
+
+
+func _timeline_apply_seek_fired_state(
+	fired: Dictionary,
+	timeline: CodaEventTimeline,
+	prev_seconds: float,
+	cursor_seconds: float,
+) -> void:
+	if is_equal_approx(prev_seconds, cursor_seconds):
+		return
+	var has_solo: bool = false
+	for tr in timeline.tracks:
+		if tr.solo:
+			has_solo = true
+			break
+	if cursor_seconds < prev_seconds:
+		for track in timeline.tracks:
+			if track.mute:
+				continue
+			if has_solo and not track.solo:
+				continue
+			for clip in track.clips:
+				if clip.start_seconds >= cursor_seconds:
+					fired.erase(clip.id)
+	elif cursor_seconds > prev_seconds:
+		for track in timeline.tracks:
+			if track.mute:
+				continue
+			if has_solo and not track.solo:
+				continue
+			for clip in track.clips:
+				if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
+					continue
+				var clip_end: float = clip.start_seconds + clip.duration_seconds
+				if clip_end <= cursor_seconds:
+					fired[clip.id] = true
 
 
 func _stop_timeline_voices_past_clip_end(
