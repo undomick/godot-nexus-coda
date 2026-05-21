@@ -971,10 +971,14 @@ func _spawn_timeline_voice(
 
 
 func _on_timeline_voice_finished(player: AudioStreamPlayer, key: int) -> void:
-	_free_player_timeline_fx_bus(player)
+	# Stop/seek/loop-wrap clears owner + FX before the pool reuses this player. A late
+	# [signal AudioStreamPlayer.finished] must not tear down a new lane's FX bus.
 	var h: CodaEventHandle = _timeline_voice_owner.get(key, null) as CodaEventHandle
+	if h == null:
+		return
+	_free_player_timeline_fx_bus(player)
 	_timeline_voice_owner.erase(key)
-	if h == null or not _timeline_dispatchers.has(h):
+	if not _timeline_dispatchers.has(h):
 		return
 	var d: Dictionary = _timeline_dispatchers[h]
 	var voices: Dictionary = d.get("voices", {})
