@@ -447,6 +447,10 @@ func load_bank(path: String) -> String:
 	var buses_raw: Variant = manifest.get("buses", null)
 	if buses_raw is Dictionary:
 		bank_bus_root = CodaBusScript.from_dictionary(buses_raw as Dictionary)
+	# Re-loading an existing bank_id must move it to the end of insertion order. Godot keeps
+	# key position on assignment, but later load_bank / hotfix wins rely on reverse iteration.
+	if _loaded_banks.has(bank_id):
+		_loaded_banks.erase(bank_id)
 	_loaded_banks[bank_id] = {
 		"bank_name": str(manifest.get("bank_name", "Bank")),
 		"events_by_path": events_by_path,
