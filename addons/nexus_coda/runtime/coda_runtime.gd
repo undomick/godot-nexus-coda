@@ -970,7 +970,9 @@ func _apply_timeline_seek(
 	var clamped: float = clampf(target_seconds, 0.0, timeline.length_seconds)
 	handle.timeline_cursor_seconds = clamped
 	_stop_timeline_voices(d, handle)
-	d["fired_clip_ids"] = {}
+	# Re-prime clips overlapping the new cursor. Without this, scrubbing the playhead or using
+	# the transport seek slider leaves silence until the cursor crosses another clip start.
+	_prime_timeline_overlapping_voices(handle, d, timeline, clamped)
 
 
 func _stop_timeline_voices(d: Dictionary, handle: CodaEventHandle = null) -> void:
