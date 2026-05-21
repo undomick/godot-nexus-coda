@@ -750,6 +750,8 @@ func _notify_timeline_changed() -> void:
 	if _project == null or _selected_event == null:
 		return
 	_project.notify_event_timeline_changed(_selected_event.id)
+	if _runtime != null:
+		_runtime.resync_timeline_preview_for_event(_selected_event.id)
 	_update_validation()
 	if _length_spin != null and _selected_event.event_timeline != null:
 		_suppress_writeback = true
