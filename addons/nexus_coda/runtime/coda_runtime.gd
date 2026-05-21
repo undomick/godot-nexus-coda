@@ -778,9 +778,11 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 			d["fired_clip_ids"] = {}
 			# Stop currently-playing voices so the next iteration retriggers them on cue.
 			_stop_timeline_voices(d, handle)
-			prev_cursor = (
-				loop_start if loop_start >= 0.0 else 0.0
-			)
+			handle.timeline_cursor_seconds = next_cursor
+			# Re-prime clips overlapping the post-wrap cursor (same as seek/scrub). Without this,
+			# long clips that started before the loop point stay silent until the next clip start.
+			_prime_timeline_overlapping_voices(handle, d, timeline, next_cursor)
+			continue
 
 		handle.timeline_cursor_seconds = next_cursor
 		_fire_clips_in_range(handle, d, timeline, prev_cursor, next_cursor)
