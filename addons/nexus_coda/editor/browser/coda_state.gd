@@ -844,7 +844,15 @@ func _normalized_bus_name(name: String) -> String:
 
 ## Deep-clones a bus subtree, generating fresh ids for the clone and all descendants.
 func _clone_bus_new_ids(src: CodaBus) -> CodaBus:
+	var id_remap: Dictionary = {}
+	var dup: CodaBus = _clone_bus_new_ids_build(src, id_remap)
+	_remap_send_targets_in_subtree(dup, id_remap)
+	return dup
+
+
+func _clone_bus_new_ids_build(src: CodaBus, id_remap: Dictionary) -> CodaBus:
 	var b: CodaBus = CodaBus.new(src.bus_name)
+	id_remap[src.id] = b.id
 	b.volume_db = src.volume_db
 	b.mute = src.mute
 	b.solo = src.solo
@@ -853,8 +861,20 @@ func _clone_bus_new_ids(src: CodaBus) -> CodaBus:
 	for e in src.effects:
 		b.effects.append(e.clone_new_id())
 	for c in src.children:
-		b.children.append(_clone_bus_new_ids(c))
+		b.children.append(_clone_bus_new_ids_build(c, id_remap))
 	return b
+
+
+## Rewire explicit sends that pointed at another bus in the duplicated subtree.
+func _remap_send_targets_in_subtree(root: CodaBus, id_remap: Dictionary) -> void:
+	if root == null or id_remap.is_empty():
+		return
+	for b in root.collect_flat([]):
+		var tid: String = String(b.send_target_id).strip_edges()
+		if tid.is_empty():
+			continue
+		if id_remap.has(tid):
+			b.send_target_id = id_remap[tid]
 
 
 ## Duplicates the bus (and its subtree) and inserts the copy right after the original among siblings.
