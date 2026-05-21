@@ -1228,9 +1228,10 @@ static func _timeline_layout_signature(timeline: CodaEventTimeline) -> String:
 	var parts: PackedStringArray = PackedStringArray()
 	for tr in timeline.tracks:
 		var bus_id: String = String(tr.output_bus_id)
+		var track_fx: String = _timeline_fx_chain_signature(tr.effects)
 		for clip in tr.clips:
 			parts.append(
-				"%s|%s|%s|%.6f|%.6f|%s"
+				"%s|%s|%s|%.6f|%.6f|%s|fx:%s|tfx:%s"
 				% [
 					clip.id,
 					tr.id,
@@ -1238,10 +1239,27 @@ static func _timeline_layout_signature(timeline: CodaEventTimeline) -> String:
 					clip.start_seconds,
 					clip.duration_seconds,
 					bus_id,
+					_timeline_fx_chain_signature(clip.effects),
+					track_fx,
 				]
 			)
 	parts.sort()
 	return "|".join(parts)
+
+
+static func _timeline_fx_chain_signature(effects: Array) -> String:
+	if effects.is_empty():
+		return ""
+	var fx_parts: PackedStringArray = PackedStringArray()
+	for eff in effects:
+		if eff is CodaTrackEffect:
+			var e: CodaTrackEffect = eff as CodaTrackEffect
+			fx_parts.append(
+				"%s|%d|%s|%s"
+				% [e.id, int(e.type), str(e.bypass), JSON.stringify(e.params)]
+			)
+	fx_parts.sort()
+	return ",".join(fx_parts)
 
 
 ## Returns the active timeline handle for the given event id, or null. Used by the timeline

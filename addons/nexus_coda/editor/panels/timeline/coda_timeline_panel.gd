@@ -464,6 +464,15 @@ func _soft_refresh_timeline_after_param_edit() -> void:
 
 func _on_project_structure_changed() -> void:
 	_refresh_view_state()
+	# Clip/track effect add/remove/reorder emits structure_changed; reprime preview voices so
+	# runtime FX buses match the edited chains (layout_sig includes effect fingerprints).
+	if (
+		_selected_event != null
+		and _split_root != null
+		and _split_root.visible
+		and _selected_event.event_authoring_mode == CodaBrowserNode.AuthoringMode.TIMELINE
+	):
+		_notify_timeline_changed()
 
 
 func _refresh_view_state() -> void:
