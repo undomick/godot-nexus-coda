@@ -220,13 +220,7 @@ func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 		elif handle._alive:
 			handle.stop(fade_ms)
 		return
-	for sib in handle.graph_parallel_siblings:
-		if sib == null:
-			continue
-		sib._alive = false
-		if sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
-			sib._player.stop()
-	handle.graph_parallel_siblings.clear()
+	_stop_graph_parallel_siblings(handle)
 	handle.stop(fade_ms)
 
 
@@ -579,7 +573,7 @@ func _make_sibling_handle(parent: CodaEventHandle, entry: Dictionary, player: Au
 	sib.event_path = parent.event_path
 	sib.event_node = parent.event_node
 	# Siblings carry no plan stash so they don't advance the sequence on finish.
-	sib.params = {"_coda_is_sibling": true}
+	sib.params = {"_coda_is_sibling": true, "_coda_graph_parent": parent}
 	sib.param_values = parent.param_values
 	sib.param_values_smoothed = parent.param_values_smoothed
 	sib.loop = false
@@ -593,11 +587,8 @@ func _make_sibling_handle(parent: CodaEventHandle, entry: Dictionary, player: Au
 	return sib
 
 
-func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
-	var full: Variant = h.params.get("_coda_full_plan", [])
-	if not full is Array or (full as Array).is_empty():
-		return false
-	for sib in h.graph_parallel_siblings:
+func _stop_graph_parallel_siblings(handle: CodaEventHandle) -> void:
+	for sib in handle.graph_parallel_siblings:
 		if sib == null:
 			continue
 		sib._alive = false
@@ -605,7 +596,25 @@ func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
 			sib._player.stop()
 		if sib._player != null and is_instance_valid(sib._player):
 			_active_handles.erase(sib._player.get_instance_id())
-	h.graph_parallel_siblings.clear()
+	handle.graph_parallel_siblings.clear()
+
+
+func _graph_parallel_still_playing(handle: CodaEventHandle) -> bool:
+	if handle._player != null and is_instance_valid(handle._player) and handle._player.playing:
+		return true
+	for sib in handle.graph_parallel_siblings:
+		if sib == null:
+			continue
+		if sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
+			return true
+	return false
+
+
+func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
+	var full: Variant = h.params.get("_coda_full_plan", [])
+	if not full is Array or (full as Array).is_empty():
+		return false
+	_stop_graph_parallel_siblings(h)
 	var plan_entries: Array = full as Array
 	var parallel_entries: Array = _split_parallel_entries(plan_entries)
 	var queued_after_parallel: Array = plan_entries.slice(parallel_entries.size())
@@ -709,9 +718,29 @@ func _on_voice_finished(player: AudioStreamPlayer) -> void:
 		return
 	if int(h.params.get("_coda_playback_gen", -1)) != int(player.get_meta(&"_coda_playback_gen", -1)):
 		return
+	if bool(h.params.get("_coda_is_sibling", false)):
+		if not h._alive:
+			return
+		h._alive = false
+		var parent: CodaEventHandle = h.params.get("_coda_graph_parent", null) as CodaEventHandle
+		if parent != null:
+			var sib_idx: int = parent.graph_parallel_siblings.find(h)
+			if sib_idx >= 0:
+				parent.graph_parallel_siblings.remove_at(sib_idx)
+			_try_finish_graph_handle(parent)
+		return
+	_try_finish_graph_handle(h)
+
+
+func _try_finish_graph_handle(h: CodaEventHandle) -> void:
+	if h == null or not h._alive:
+		return
+	if _graph_parallel_still_playing(h):
+		return
 	# If the plan still has queued entries, play the next one on a fresh player.
 	var queued: Variant = h.params.get("_coda_plan", [])
-	if queued is Array and (queued as Array).size() > 0 and h._alive:
+	if queued is Array and (queued as Array).size() > 0:
+		_stop_graph_parallel_siblings(h)
 		var entry: Dictionary = (queued as Array)[0]
 		var rest: Array = (queued as Array).slice(1)
 		var next_player: AudioStreamPlayer = _start_player_for_entry(entry, h.params)
@@ -721,11 +750,9 @@ func _on_voice_finished(player: AudioStreamPlayer) -> void:
 			h.params["_coda_plan"] = rest
 			_active_handles[next_player.get_instance_id()] = h
 			return
-	if h.loop and h._alive:
+	if h.loop:
 		if _restart_graph_loop_from_full_plan(h):
 			return
-	if bool(h.params.get("_coda_is_sibling", false)) and not h._alive:
-		return
 	h._on_player_finished()
 	voice_finished.emit(h)
 
