@@ -783,6 +783,10 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 			)
 
 		handle.timeline_cursor_seconds = next_cursor
+		if wrapped:
+			# Same gap as seek/scrub: clips already playing across the loop point must respawn
+			# at the wrapped cursor, not only those whose start time falls in [prev, next).
+			_prime_timeline_overlapping_voices(handle, d, timeline, next_cursor)
 		_fire_clips_in_range(handle, d, timeline, prev_cursor, next_cursor)
 
 
