@@ -31,6 +31,7 @@ const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/co
 const CodaAudioBusMirrorScript := preload("res://addons/nexus_coda/runtime/coda_audio_bus_mirror.gd")
 const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_bus_helper.gd")
 const CodaBankExportScript := preload("res://addons/nexus_coda/editor/io/coda_bank_export.gd")
+const CodaBusScript := preload("res://addons/nexus_coda/editor/browser/coda_bus.gd")
 
 const RUNTIME_LOG_SCOPE := "runtime"
 
@@ -116,7 +117,7 @@ func _sync_buses() -> void:
 
 
 func resolve_bus_name_for_event(event: CodaBrowserNode) -> String:
-	if event == null or _project == null or _project.bus_root == null:
+	if event == null:
 		return bus_name
 	if not event.event_output_bus_id.is_empty():
 		var name: Variant = _bus_id_to_godot_name.get(event.event_output_bus_id, null)
@@ -419,6 +420,15 @@ func load_bank(path: String) -> String:
 		"bank_name": str(manifest.get("bank_name", "Bank")),
 		"events_by_path": events_by_path,
 	}
+	var buses_raw: Variant = manifest.get("buses", null)
+	if buses_raw is Dictionary:
+		var bank_bus_root: CodaBus = CodaBusScript.from_dictionary(buses_raw as Dictionary)
+		if bank_bus_root != null:
+			_bus_id_to_godot_name = CodaAudioBusMirrorScript.sync_to_audio_server(
+				bank_bus_root, false
+			)
+	if _project != null:
+		_sync_buses()
 	return bank_id
 
 
@@ -427,6 +437,10 @@ func unload_bank(bank_id: String) -> bool:
 	if not _loaded_banks.has(bank_id):
 		return false
 	_loaded_banks.erase(bank_id)
+	if _project != null:
+		_sync_buses()
+	elif _loaded_banks.is_empty():
+		_bus_id_to_godot_name.clear()
 	return true
 
 
