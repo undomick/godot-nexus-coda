@@ -447,6 +447,10 @@ func _on_project_project_dirty() -> void:
 	if not _split_root.visible:
 		return
 	_soft_refresh_timeline_after_param_edit()
+	# Clip/track FX param and bypass edits emit project_dirty only; reprime preview voices
+	# so runtime FX buses match (layout_sig includes effect fingerprints).
+	if _runtime != null and _selected_event != null:
+		_runtime.resync_timeline_preview_for_event(_selected_event.id)
 
 
 func _soft_refresh_timeline_after_param_edit() -> void:
