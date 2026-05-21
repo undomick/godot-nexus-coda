@@ -116,6 +116,28 @@ func _sync_buses() -> void:
 	_bus_id_to_godot_name = CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root)
 
 
+## Rebuild [member _bus_id_to_godot_name] after [method load_bank] / [method unload_bank].
+## With [method set_project], the live project bus tree wins. Otherwise each loaded bank's manifest
+## buses are applied in load order (last bank with a bus tree wins), matching sequential [method load_bank].
+func _refresh_bus_routing_from_loaded_banks() -> void:
+	if _project != null:
+		_sync_buses()
+		return
+	if _loaded_banks.is_empty():
+		_bus_id_to_godot_name.clear()
+		return
+	for bank_id in _loaded_banks.keys():
+		var entry: Dictionary = _loaded_banks[bank_id]
+		var buses_raw: Variant = entry.get("buses", null)
+		if not (buses_raw is Dictionary):
+			continue
+		var bank_bus_root: CodaBus = CodaBusScript.from_dictionary(buses_raw as Dictionary)
+		if bank_bus_root != null:
+			_bus_id_to_godot_name = CodaAudioBusMirrorScript.sync_to_audio_server(
+				bank_bus_root, false
+			)
+
+
 func resolve_bus_name_for_event(event: CodaBrowserNode) -> String:
 	if event == null:
 		return bus_name
@@ -416,19 +438,13 @@ func load_bank(path: String) -> String:
 		if node == null or event_path.is_empty():
 			continue
 		events_by_path[event_path] = node
+	var buses_raw: Variant = manifest.get("buses", null)
 	_loaded_banks[bank_id] = {
 		"bank_name": str(manifest.get("bank_name", "Bank")),
 		"events_by_path": events_by_path,
+		"buses": buses_raw if buses_raw is Dictionary else null,
 	}
-	var buses_raw: Variant = manifest.get("buses", null)
-	if buses_raw is Dictionary:
-		var bank_bus_root: CodaBus = CodaBusScript.from_dictionary(buses_raw as Dictionary)
-		if bank_bus_root != null:
-			_bus_id_to_godot_name = CodaAudioBusMirrorScript.sync_to_audio_server(
-				bank_bus_root, false
-			)
-	if _project != null:
-		_sync_buses()
+	_refresh_bus_routing_from_loaded_banks()
 	return bank_id
 
 
@@ -437,10 +453,7 @@ func unload_bank(bank_id: String) -> bool:
 	if not _loaded_banks.has(bank_id):
 		return false
 	_loaded_banks.erase(bank_id)
-	if _project != null:
-		_sync_buses()
-	elif _loaded_banks.is_empty():
-		_bus_id_to_godot_name.clear()
+	_refresh_bus_routing_from_loaded_banks()
 	return true
 
 
