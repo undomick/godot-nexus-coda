@@ -662,6 +662,7 @@ func _start_timeline_event(
 		"timeline": timeline,
 		"voices": {},  # clip_id -> AudioStreamPlayer
 		"fired_clip_ids": {},  # clip_id -> true (cleared on loop wrap or seek)
+		"layout_sig": _timeline_layout_signature(timeline),
 		"live_params": live_params,
 		"loop_override_start": loop_override_start,
 		"loop_override_end": loop_override_end,
@@ -1043,6 +1044,52 @@ func _finalize_timeline_handle(handle: CodaEventHandle) -> void:
 
 
 # ---- Player panel ↔ Timeline panel sync ----
+
+## Editor: after timeline layout edits (clip move/trim/delete, track changes), clear stale
+## [code]fired_clip_ids[/code] and re-prime voices at the playhead. Skips work when layout is
+## unchanged so volume/mute drags do not restart every lane.
+func resync_timeline_preview_for_event(event_id: String) -> void:
+	if event_id.is_empty():
+		return
+	var handle: CodaEventHandle = get_active_timeline_handle_for_event(event_id)
+	if handle == null or not _timeline_dispatchers.has(handle):
+		return
+	var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
+	if event == null or event.event_timeline == null:
+		return
+	var timeline: CodaEventTimeline = event.event_timeline
+	var d: Dictionary = _timeline_dispatchers[handle]
+	var sig: String = _timeline_layout_signature(timeline)
+	if String(d.get("layout_sig", "")) == sig:
+		return
+	d["timeline"] = timeline
+	d["layout_sig"] = sig
+	d["fired_clip_ids"] = {}
+	_stop_timeline_voices(d, handle)
+	_prime_timeline_overlapping_voices(handle, d, timeline, handle.timeline_cursor_seconds)
+
+
+static func _timeline_layout_signature(timeline: CodaEventTimeline) -> String:
+	if timeline == null:
+		return ""
+	var parts: PackedStringArray = PackedStringArray()
+	for tr in timeline.tracks:
+		var bus_id: String = String(tr.output_bus_id)
+		for clip in tr.clips:
+			parts.append(
+				"%s|%s|%s|%.6f|%.6f|%s"
+				% [
+					clip.id,
+					tr.id,
+					clip.audio_path,
+					clip.start_seconds,
+					clip.duration_seconds,
+					bus_id,
+				]
+			)
+	parts.sort()
+	return "|".join(parts)
+
 
 ## Returns the active timeline handle for the given event id, or null. Used by the timeline
 ## panel to keep its visual cursor in sync with the player panel without leaking dispatcher
