@@ -809,6 +809,39 @@ func add_bus_after(after_bus_id: String, bus_name: String = "Bus") -> CodaBus:
 	return b
 
 
+## Ensures [param bus] and its descendants use Godot-unique [member CodaBus.bus_name] values.
+## The audio mirror maps Coda buses by name; duplicate names alias to one AudioServer bus.
+func _assign_unique_bus_names_for_subtree(bus: CodaBus) -> void:
+	if bus_root == null or bus == null:
+		return
+	var taken: Dictionary = {}
+	for existing in bus_root.collect_flat():
+		taken[_normalized_bus_name(existing.bus_name)] = true
+	_assign_unique_bus_names_recursive(bus, taken)
+
+
+func _assign_unique_bus_names_recursive(bus: CodaBus, taken: Dictionary) -> void:
+	var base: String = String(bus.bus_name).strip_edges()
+	if base.is_empty():
+		base = "Bus"
+	var candidate: String = base
+	if taken.has(_normalized_bus_name(candidate)):
+		var n: int = 2
+		while true:
+			candidate = "%s (%d)" % [base, n]
+			if not taken.has(_normalized_bus_name(candidate)):
+				break
+			n += 1
+	bus.bus_name = candidate
+	taken[_normalized_bus_name(candidate)] = true
+	for child in bus.children:
+		_assign_unique_bus_names_recursive(child, taken)
+
+
+func _normalized_bus_name(name: String) -> String:
+	return String(name).strip_edges().to_lower()
+
+
 ## Deep-clones a bus subtree, generating fresh ids for the clone and all descendants.
 func _clone_bus_new_ids(src: CodaBus) -> CodaBus:
 	var b: CodaBus = CodaBus.new(src.bus_name)
@@ -839,6 +872,7 @@ func duplicate_bus(bus_id: String) -> CodaBus:
 	if idx < 0:
 		return null
 	var dup: CodaBus = _clone_bus_new_ids(src)
+	_assign_unique_bus_names_for_subtree(dup)
 	p.children.insert(idx + 1, dup)
 	structure_changed.emit()
 	return dup

@@ -701,6 +701,7 @@ func _prime_timeline_overlapping_voices(
 				"track_id": track.id,
 				"stream_offset_seconds": clip.offset_seconds + into_clip,
 				"duration_seconds": clip.duration_seconds - into_clip,
+				"timeline_clip_end_seconds": clip_end,
 				"clip_effects": clip.effects,
 				"track_effects": track.effects,
 				"track_output_bus_id": track.output_bus_id,
@@ -778,11 +779,15 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 			d["fired_clip_ids"] = {}
 			# Stop currently-playing voices so the next iteration retriggers them on cue.
 			_stop_timeline_voices(d, handle)
+			# Re-prime clips overlapping the post-wrap cursor (same as seek). Without this,
+			# clips that started before loop_start stay silent after the first loop iteration.
+			_prime_timeline_overlapping_voices(handle, d, timeline, next_cursor)
 			prev_cursor = (
 				loop_start if loop_start >= 0.0 else 0.0
 			)
 
 		handle.timeline_cursor_seconds = next_cursor
+		_stop_timeline_voices_past_clip_end(d, handle, next_cursor)
 		_fire_clips_in_range(handle, d, timeline, prev_cursor, next_cursor)
 
 
@@ -852,6 +857,7 @@ func _fire_clips_in_range(
 				"track_id": track.id,
 				"stream_offset_seconds": clip.offset_seconds,
 				"duration_seconds": clip.duration_seconds,
+				"timeline_clip_end_seconds": clip.start_seconds + clip.duration_seconds,
 				"clip_effects": clip.effects,
 				"track_effects": track.effects,
 				"track_output_bus_id": track.output_bus_id,
@@ -931,6 +937,9 @@ func _spawn_timeline_voice(
 	player.pitch_scale = float(entry.get("pitch_scale", 1.0)) * float(
 		handle.params.get("pitch_scale", 1.0)
 	)
+	var clip_end: float = float(entry.get("timeline_clip_end_seconds", -1.0))
+	if clip_end > 0.0:
+		player.set_meta(&"_coda_clip_timeline_end", clip_end)
 	player.play(maxf(0.0, float(entry.get("stream_offset_seconds", 0.0))))
 	if handle._paused:
 		player.stream_paused = true
@@ -973,6 +982,35 @@ func _apply_timeline_seek(
 	# Re-prime clips overlapping the new cursor. Without this, scrubbing the playhead or using
 	# the transport seek slider leaves silence until the cursor crosses another clip start.
 	_prime_timeline_overlapping_voices(handle, d, timeline, clamped)
+
+
+func _stop_timeline_voices_past_clip_end(
+	d: Dictionary, handle: CodaEventHandle, cursor_seconds: float
+) -> void:
+	var voices: Dictionary = d.get("voices", {})
+	if voices.is_empty():
+		return
+	var stale_keys: Array = []
+	for sound_key in voices.keys():
+		var p: AudioStreamPlayer = voices[sound_key] as AudioStreamPlayer
+		if p == null or not is_instance_valid(p):
+			stale_keys.append(sound_key)
+			continue
+		if not p.has_meta(&"_coda_clip_timeline_end"):
+			continue
+		var end_at: float = float(p.get_meta(&"_coda_clip_timeline_end", -1.0))
+		if cursor_seconds < end_at:
+			continue
+		if p.playing:
+			p.stop()
+		_timeline_voice_owner.erase(p.get_instance_id())
+		_free_player_timeline_fx_bus(p)
+		stale_keys.append(sound_key)
+	for k in stale_keys:
+		voices.erase(k)
+	d["voices"] = voices
+	if stale_keys.size() > 0 and handle != null:
+		handle.clear_player_binding()
 
 
 func _stop_timeline_voices(d: Dictionary, handle: CodaEventHandle = null) -> void:
