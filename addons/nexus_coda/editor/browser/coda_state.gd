@@ -817,6 +817,8 @@ func _clone_bus_new_ids(src: CodaBus) -> CodaBus:
 	b.solo = src.solo
 	b.bypass = src.bypass
 	b.send_target_id = src.send_target_id
+	for e in src.effects:
+		b.effects.append(e.clone_new_id())
 	for c in src.children:
 		b.children.append(_clone_bus_new_ids(c))
 	return b
