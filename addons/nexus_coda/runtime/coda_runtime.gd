@@ -179,8 +179,11 @@ func _resolve_in_loaded_banks(event_path: String) -> CodaBrowserNode:
 	var p: String = event_path.strip_edges()
 	if p.begins_with("events/"):
 		p = p.substr(7)
-	for bank_id in _loaded_banks.keys():
-		var entry: Dictionary = _loaded_banks[bank_id]
+	# Later load_bank() calls should override earlier banks (DLC / hotfix), matching
+	# _rebuild_bus_id_map_from_loaded_banks where the last manifest wins per bus id.
+	var bank_ids: Array = _loaded_banks.keys()
+	for i in range(bank_ids.size() - 1, -1, -1):
+		var entry: Dictionary = _loaded_banks[bank_ids[i]]
 		var by_path: Dictionary = entry.get("events_by_path", {})
 		if by_path.has(p):
 			return by_path[p] as CodaBrowserNode
