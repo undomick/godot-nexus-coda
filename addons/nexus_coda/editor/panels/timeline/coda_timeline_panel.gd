@@ -788,6 +788,7 @@ func _on_loop_toggled(on: bool) -> void:
 func _on_timeline_length_spin_changed(value: float) -> void:
 	if _suppress_writeback or _selected_event == null or _selected_event.event_timeline == null:
 		return
+	_push_timeline_undo()
 	var t: CodaEventTimeline = _selected_event.event_timeline
 	t.length_seconds = maxf(0.5, value)
 	_clamp_clips_to_timeline_length(t)
@@ -1082,9 +1083,15 @@ func _push_timeline_undo() -> void:
 func _restore_timeline_from(source: CodaEventTimeline) -> void:
 	if _selected_event == null or source == null:
 		return
+	if _view != null:
+		_view.cancel_active_interaction()
 	_selected_event.event_timeline = source.clone_keep_ids()
 	_show_timeline()
 	_notify_timeline_changed()
+	if _runtime != null and _selected_event != null:
+		var h: CodaEventHandle = _runtime.get_active_timeline_handle_for_event(_selected_event.id)
+		if h != null and h.is_timeline:
+			_runtime.resync_timeline_dispatcher(h, _selected_event.event_timeline)
 
 
 func _undo_timeline() -> void:

@@ -843,6 +843,10 @@ func _begin_drag(hit: Dictionary, mb: InputEventMouseButton) -> void:
 		return
 
 
+func cancel_active_interaction() -> void:
+	_end_drag()
+
+
 func _end_drag() -> void:
 	_drag_kind = DragKind.NONE
 	_drag_clip_id = ""
