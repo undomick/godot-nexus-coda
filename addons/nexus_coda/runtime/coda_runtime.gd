@@ -557,16 +557,26 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 
 func _split_parallel_entries(entries: Array) -> Array:
 	# Treat consecutive entries with blend_weight < 1.0 at the front of the plan as parallel siblings
-	# (this is what a BLEND container produces). Sequence/Random produce blend_weight == 1.0 so they
-	# stay sequential.
+	# (this is what a BLEND container produces). BLEND crossfades also stamp blend_parallel_step so
+	# interleaved SEQUENCE children only mix within the same step. Sequence/Random produce
+	# blend_weight == 1.0 so they stay sequential.
 	var out: Array = []
+	var first_step: int = -1
 	for i in entries.size():
-		var w: float = float((entries[i] as Dictionary).get("blend_weight", 1.0))
+		var entry: Dictionary = entries[i] as Dictionary
+		var w: float = float(entry.get("blend_weight", 1.0))
 		if w >= 1.0:
 			if out.is_empty():
 				out.append(entries[i])
 			break
-		out.append(entries[i])
+		var step: int = int(entry.get("blend_parallel_step", 0))
+		if out.is_empty():
+			first_step = step
+			out.append(entries[i])
+		elif step == first_step:
+			out.append(entries[i])
+		else:
+			break
 	if out.is_empty() and not entries.is_empty():
 		out.append(entries[0])
 	return out
@@ -756,6 +766,11 @@ func _try_finish_graph_handle(h: CodaEventHandle) -> void:
 			h.params["_coda_plan"] = rest
 			_active_handles[next_player.get_instance_id()] = h
 			return
+		_warn(
+			"voice pool exhausted; sequence paused for '%s' (%d entries remain)"
+			% [h.event_path, (queued as Array).size()]
+		)
+		return
 	if h.loop:
 		if _restart_graph_loop_from_full_plan(h):
 			return
@@ -854,8 +869,8 @@ func _prime_timeline_overlapping_voices(
 				"track_effects": track.effects,
 				"track_output_bus_id": track.output_bus_id,
 			}
-			_spawn_timeline_voice(handle, d, entry)
-			fired[clip.id] = true
+			if _spawn_timeline_voice(handle, d, entry):
+				fired[clip.id] = true
 	d["fired_clip_ids"] = fired
 
 
@@ -901,13 +916,14 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 				loop_end = -1.0
 
 		var wrapped: bool = false
-		if loop_end > 0.0 and next_cursor >= loop_end:
-			var overshoot: float = next_cursor - loop_end
-			next_cursor = loop_start + overshoot
-			wrapped = true
+		if loop_end > 0.0:
+			while next_cursor >= loop_end:
+				next_cursor = loop_start + (next_cursor - loop_end)
+				wrapped = true
 		elif next_cursor >= timeline.length_seconds:
 			if handle.loop:
-				next_cursor = next_cursor - timeline.length_seconds
+				while next_cursor >= timeline.length_seconds and timeline.length_seconds > 0.0:
+					next_cursor -= timeline.length_seconds
 				wrapped = true
 			else:
 				_fire_clips_in_range(
@@ -994,24 +1010,33 @@ func _fire_clips_in_range(
 				continue
 			if fired.has(clip.id):
 				continue
-			# Fire when [from, to) crosses the clip start.
-			if clip.start_seconds < from_seconds or clip.start_seconds >= to_seconds:
+			var clip_end: float = clip.start_seconds + clip.duration_seconds
+			if clip_end <= from_seconds or clip.start_seconds >= to_seconds:
 				continue
+			# Fire on start crossing, or retry while the playhead is still inside an unfired clip
+			# (e.g. voice pool was exhausted on the first attempt).
+			var crosses_start: bool = (
+				clip.start_seconds >= from_seconds and clip.start_seconds < to_seconds
+			)
+			var overlaps_unfired: bool = clip.start_seconds < from_seconds and clip_end > from_seconds
+			if not crosses_start and not overlaps_unfired:
+				continue
+			var into_clip: float = maxf(0.0, from_seconds - clip.start_seconds)
 			var entry: Dictionary = {
 				"audio_path": clip.audio_path,
 				"volume_db": clip.volume_db + track.volume_db,
 				"pitch_scale": clip.pitch_scale,
 				"sound_id": clip.id,
 				"track_id": track.id,
-				"stream_offset_seconds": clip.offset_seconds,
-				"duration_seconds": clip.duration_seconds,
-				"timeline_clip_end_seconds": clip.start_seconds + clip.duration_seconds,
+				"stream_offset_seconds": clip.offset_seconds + into_clip,
+				"duration_seconds": clip.duration_seconds - into_clip,
+				"timeline_clip_end_seconds": clip_end,
 				"clip_effects": clip.effects,
 				"track_effects": track.effects,
 				"track_output_bus_id": track.output_bus_id,
 			}
-			_spawn_timeline_voice(handle, d, entry)
-			fired[clip.id] = true
+			if _spawn_timeline_voice(handle, d, entry):
+				fired[clip.id] = true
 	d["fired_clip_ids"] = fired
 
 
@@ -1052,20 +1077,20 @@ func _collect_timeline_fx_chain(entry: Dictionary) -> Array:
 
 func _spawn_timeline_voice(
 	handle: CodaEventHandle, d: Dictionary, entry: Dictionary
-) -> void:
+) -> bool:
 	var stream_path: String = String(entry.get("audio_path", "")).strip_edges()
 	if stream_path.is_empty():
-		return
+		return false
 	if not ResourceLoader.exists(stream_path):
 		_warn("timeline clip audio missing: '%s'" % stream_path)
-		return
+		return false
 	var stream: AudioStream = load(stream_path) as AudioStream
 	if stream == null:
-		return
+		return false
 	var player: AudioStreamPlayer = _pool.acquire()
 	if player == null:
 		_warn("voice pool exhausted while playing timeline clip '%s'" % stream_path)
-		return
+		return false
 	# Carry-over from a previous voice on the same pooled player.
 	_free_player_timeline_fx_bus(player)
 	var voice_gen: int = _begin_player_voice(player)
@@ -1104,6 +1129,7 @@ func _spawn_timeline_voice(
 	handle.current_sound_id = String(entry.get("sound_id", ""))
 	handle.base_volume_db = float(entry.get("volume_db", 0.0))
 	handle.base_pitch_scale = float(entry.get("pitch_scale", 1.0))
+	return true
 
 
 func _on_timeline_voice_finished(player: AudioStreamPlayer, key: int) -> void:

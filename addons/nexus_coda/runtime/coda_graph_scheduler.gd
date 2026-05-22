@@ -147,16 +147,21 @@ static func _walk_blend(
 		_walk(graph, children[lo], rng, param_values, out)
 		return
 	var frac: float = idx_f - lo
-	# Plan both branches with crossfade weights so the runtime can mix them.
+	# Interleave branch steps so SEQUENCE children crossfade in lockstep instead of
+	# flattening every sound into one parallel burst.
 	var lo_plan: Array = []
 	var hi_plan: Array = []
 	_walk(graph, children[lo], rng, param_values, lo_plan)
 	_walk(graph, children[hi], rng, param_values, hi_plan)
-	for entry in lo_plan:
-		var d: Dictionary = entry
-		d["blend_weight"] = 1.0 - frac
-		out.append(d)
-	for entry in hi_plan:
-		var d2: Dictionary = entry
-		d2["blend_weight"] = frac
-		out.append(d2)
+	var step_count: int = maxi(lo_plan.size(), hi_plan.size())
+	for step in step_count:
+		if step < lo_plan.size():
+			var d: Dictionary = (lo_plan[step] as Dictionary).duplicate()
+			d["blend_weight"] = 1.0 - frac
+			d["blend_parallel_step"] = step
+			out.append(d)
+		if step < hi_plan.size():
+			var d2: Dictionary = (hi_plan[step] as Dictionary).duplicate()
+			d2["blend_weight"] = frac
+			d2["blend_parallel_step"] = step
+			out.append(d2)
