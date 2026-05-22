@@ -753,22 +753,37 @@ func _try_finish_graph_handle(h: CodaEventHandle) -> void:
 		return
 	if _graph_parallel_still_playing(h):
 		return
-	# If the plan still has queued entries, play the next one on a fresh player.
+	# If the plan still has queued entries, play the next batch (parallel BLEND step or one sequence voice).
 	var queued: Variant = h.params.get("_coda_plan", [])
 	if queued is Array and (queued as Array).size() > 0:
 		_stop_graph_parallel_siblings(h)
-		var entry: Dictionary = (queued as Array)[0]
-		var rest: Array = (queued as Array).slice(1)
-		var next_player: AudioStreamPlayer = _start_player_for_entry(entry, h.params)
-		if next_player != null:
-			h._bind_player(next_player)
-			h.params["_coda_playback_gen"] = int(next_player.get_meta(&"_coda_playback_gen", -1))
+		var plan_slice: Array = queued as Array
+		var parallel_entries: Array = _split_parallel_entries(plan_slice)
+		var rest: Array = plan_slice.slice(parallel_entries.size())
+		var primary_player: AudioStreamPlayer = null
+		for entry in parallel_entries:
+			var player: AudioStreamPlayer = _start_player_for_entry(entry, h.params)
+			if player == null:
+				continue
+			if primary_player == null:
+				primary_player = player
+				h.current_sound_id = String(entry.get("sound_id", ""))
+				h.base_volume_db = float(entry.get("volume_db", 0.0)) + float(h.params.get("volume_db", 0.0))
+				h.base_pitch_scale = float(entry.get("pitch_scale", 1.0)) * float(h.params.get("pitch_scale", 1.0))
+				h.blend_weight = float(entry.get("blend_weight", 1.0))
+				h._bind_player(player)
+				h.params["_coda_playback_gen"] = int(player.get_meta(&"_coda_playback_gen", -1))
+				_active_handles[player.get_instance_id()] = h
+			else:
+				var sib_h: CodaEventHandle = _make_sibling_handle(h, entry, player)
+				h.graph_parallel_siblings.append(sib_h)
+				_active_handles[player.get_instance_id()] = sib_h
+		if primary_player != null:
 			h.params["_coda_plan"] = rest
-			_active_handles[next_player.get_instance_id()] = h
 			return
 		_warn(
 			"voice pool exhausted; sequence paused for '%s' (%d entries remain)"
-			% [h.event_path, (queued as Array).size()]
+			% [h.event_path, plan_slice.size()]
 		)
 		return
 	if h.loop:
