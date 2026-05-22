@@ -492,6 +492,13 @@ func loaded_bank_ids() -> PackedStringArray:
 
 
 func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> CodaEventHandle:
+	var exclusive_preview: bool = bool(params.get("_coda_exclusive_preview", false))
+	params = params.duplicate()
+	params.erase("_coda_exclusive_preview")
+	# Editor panels pass this so a pinned Player preview cannot leave another event's timeline
+	# dispatcher running and lose lane voices when the voice pool reuses a player.
+	if exclusive_preview:
+		stop_all()
 	if event.event_authoring_mode == CodaBrowserNode.AuthoringMode.TIMELINE:
 		return _start_timeline_event(event, path, params)
 	# Build the parameter snapshot used to plan the graph (Switch/Blend look this up).

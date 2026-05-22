@@ -373,7 +373,10 @@ func _on_play_requested() -> void:
 	if _selected_event == null or _runtime == null:
 		return
 	_stop_active_voice()
-	var params: Dictionary = {"loop": _transport_bar.is_loop_enabled()}
+	var params: Dictionary = {
+		"loop": _transport_bar.is_loop_enabled(),
+		"_coda_exclusive_preview": true,
+	}
 	if _selected_event.event_authoring_mode == CodaBrowserNode.AuthoringMode.TIMELINE:
 		var tline: CodaEventTimeline = _selected_event.event_timeline
 		if tline != null:
