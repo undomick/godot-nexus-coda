@@ -689,8 +689,38 @@ func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
 	return true
 
 
+## Drop pooled-player ownership from every timeline dispatcher (and FX meta) before graph
+## or another lane reuses the player. Otherwise a stale voices entry can stop unrelated audio
+## at clip-end, and orphaned finished signals can leak __CodaFx_* buses.
+func _detach_player_from_timeline_dispatchers(player: AudioStreamPlayer) -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	var key: int = player.get_instance_id()
+	_timeline_voice_owner.erase(key)
+	_timeline_voice_playback_gen.erase(key)
+	_free_player_timeline_fx_bus(player)
+	for h in _timeline_dispatchers.keys():
+		var d: Dictionary = _timeline_dispatchers[h]
+		var voices: Dictionary = d.get("voices", {})
+		if voices.is_empty():
+			continue
+		var fired: Dictionary = d.get("fired_clip_ids", {})
+		var stale_clip_ids: Array = []
+		for clip_id in voices.keys():
+			if voices[clip_id] == player:
+				stale_clip_ids.append(clip_id)
+		if stale_clip_ids.is_empty():
+			continue
+		for clip_id in stale_clip_ids:
+			voices.erase(clip_id)
+			fired.erase(clip_id)
+		d["voices"] = voices
+		d["fired_clip_ids"] = fired
+
+
 ## Stamp a new playback generation and orphan any still-pending finish for this pooled player.
 func _begin_player_voice(player: AudioStreamPlayer) -> int:
+	_detach_player_from_timeline_dispatchers(player)
 	var key: int = player.get_instance_id()
 	var prior_gen: int = int(player.get_meta(&"_coda_playback_gen", -1))
 	if prior_gen >= 0:
@@ -700,8 +730,6 @@ func _begin_player_voice(player: AudioStreamPlayer) -> int:
 	player.set_meta(&"_coda_playback_gen", gen)
 	_player_pending_finish_gen[key] = gen
 	_active_handles.erase(key)
-	_timeline_voice_owner.erase(key)
-	_timeline_voice_playback_gen.erase(key)
 	return gen
 
 
@@ -1168,6 +1196,12 @@ func _spawn_timeline_voice(
 	var stream: AudioStream = load(stream_path) as AudioStream
 	if stream == null:
 		return false
+	var stream_offset: float = maxf(0.0, float(entry.get("stream_offset_seconds", 0.0)))
+	var play_duration: float = float(entry.get("duration_seconds", 0.0))
+	var asset_len: float = stream.get_length()
+	if play_duration > 0.0 and asset_len > 0.0 and stream_offset + play_duration > asset_len + 0.001:
+		stream = stream.duplicate()
+		stream.loop = true
 	var clip_id: String = String(entry.get("sound_id", ""))
 	_retire_timeline_lane_voice(d, clip_id)
 	var player: AudioStreamPlayer = _pool.acquire()
@@ -1331,6 +1365,7 @@ func resync_timeline_preview_for_event(event_id: String) -> void:
 	var d: Dictionary = _timeline_dispatchers[handle]
 	# Always follow the event's current timeline object (undo/redo replaces the ref).
 	d["timeline"] = timeline
+	handle.timeline_length_seconds = timeline.length_seconds
 	var sig: String = _timeline_layout_signature(timeline)
 	if String(d.get("layout_sig", "")) == sig:
 		return
@@ -1362,7 +1397,7 @@ static func _timeline_layout_signature(timeline: CodaEventTimeline) -> String:
 				]
 			)
 	parts.sort()
-	return "|".join(parts)
+	return "%.6f|%s" % [timeline.length_seconds, "|".join(parts)]
 
 
 static func _timeline_fx_chain_signature(effects: Array) -> String:
