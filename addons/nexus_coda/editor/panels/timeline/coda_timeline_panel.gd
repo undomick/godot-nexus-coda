@@ -447,6 +447,9 @@ func _on_project_project_dirty() -> void:
 	if not _split_root.visible:
 		return
 	_soft_refresh_timeline_after_param_edit()
+	# Effect param/bypass edits emit project_dirty only; hot-update helper buses on active preview.
+	if _runtime != null and _runtime.get_active_timeline_handle_for_event(_selected_event.id) != null:
+		_runtime.refresh_timeline_preview_fx_for_event(_selected_event.id)
 
 
 func _soft_refresh_timeline_after_param_edit() -> void:

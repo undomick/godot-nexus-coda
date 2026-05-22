@@ -961,6 +961,10 @@ func _refresh_timeline_voice_output_levels(
 			p.volume_db = -80.0
 		else:
 			p.volume_db = float(cl.volume_db + tr.volume_db) + override_db
+			p.pitch_scale = maxf(
+				0.05,
+				float(cl.pitch_scale) * float(handle.params.get("pitch_scale", 1.0))
+			)
 
 
 func _fire_clips_in_range(
@@ -1201,6 +1205,48 @@ func _finalize_timeline_handle(handle: CodaEventHandle) -> void:
 ## Editor: after timeline layout edits (clip move/trim/delete, track changes), clear stale
 ## [code]fired_clip_ids[/code] and re-prime voices at the playhead. Skips work when layout is
 ## unchanged so volume/mute drags do not restart every lane.
+## Editor: apply live clip/track effect parameter and bypass edits to playing preview voices
+## without repriming lanes. Structural chain edits still use [method resync_timeline_preview_for_event].
+func refresh_timeline_preview_fx_for_event(event_id: String) -> void:
+	if event_id.is_empty():
+		return
+	var handle: CodaEventHandle = get_active_timeline_handle_for_event(event_id)
+	if handle == null or not _timeline_dispatchers.has(handle):
+		return
+	var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
+	if event == null or event.event_timeline == null:
+		return
+	var timeline: CodaEventTimeline = event.event_timeline
+	var d: Dictionary = _timeline_dispatchers[handle]
+	var voices: Dictionary = d.get("voices", {})
+	for clip_id in voices.keys():
+		var player: AudioStreamPlayer = voices[clip_id] as AudioStreamPlayer
+		if player == null or not is_instance_valid(player):
+			continue
+		var info: Dictionary = timeline.find_clip(String(clip_id))
+		if info.is_empty():
+			continue
+		var tr: CodaTimelineTrack = info.get("track", null) as CodaTimelineTrack
+		var cl: CodaTimelineClip = info.get("clip", null) as CodaTimelineClip
+		if tr == null or cl == null:
+			continue
+		var entry: Dictionary = {
+			"clip_effects": cl.effects,
+			"track_effects": tr.effects,
+			"track_output_bus_id": tr.output_bus_id,
+		}
+		var fx_chain: Array = _collect_timeline_fx_chain(entry)
+		if not player.has_meta(&"_coda_fx_bus"):
+			continue
+		var fx_nm: String = String(player.get_meta(&"_coda_fx_bus", ""))
+		if fx_chain.is_empty():
+			_free_player_timeline_fx_bus(player)
+			player.bus = _timeline_send_bus_for_track(handle, tr.output_bus_id)
+			continue
+		CodaFxBusHelperScript.refresh_effects_bus(fx_nm, fx_chain)
+	d["layout_sig"] = _timeline_layout_signature(timeline)
+
+
 func resync_timeline_preview_for_event(event_id: String) -> void:
 	if event_id.is_empty():
 		return

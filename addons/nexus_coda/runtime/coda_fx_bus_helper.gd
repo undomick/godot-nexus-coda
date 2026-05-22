@@ -29,16 +29,37 @@ static func create_effects_bus(send_to_bus_name: String, effects: Array) -> Stri
 	AudioServer.set_bus_volume_db(idx, 0.0)
 	AudioServer.set_bus_mute(idx, false)
 	AudioServer.set_bus_bypass_effects(idx, false)
+	_apply_effects_to_bus(idx, effects)
+	return bus_name
+
+
+## Rebuilds the effect slots on an existing helper bus (same name/send). Used while a timeline
+## preview is playing so effect parameter and bypass edits apply without restarting voices.
+static func refresh_effects_bus(bus_name: String, effects: Array) -> void:
+	var nm: String = String(bus_name).strip_edges()
+	if nm.is_empty() or not nm.begins_with(BUS_NAME_PREFIX):
+		return
+	var idx: int = AudioServer.get_bus_index(nm)
+	if idx <= 0:
+		return
+	var n: int = AudioServer.get_bus_effect_count(idx)
+	for i in range(n - 1, -1, -1):
+		AudioServer.remove_bus_effect(idx, i)
+	_apply_effects_to_bus(idx, effects)
+
+
+static func _apply_effects_to_bus(bus_idx: int, effects: Array) -> void:
+	if bus_idx <= 0:
+		return
 	for eff in effects:
 		if eff is CodaTrackEffect:
 			var e: CodaTrackEffect = eff as CodaTrackEffect
 			var ae: AudioEffect = CodaEffectCatalogScript.build_audio_effect_from_slot(e)
 			if ae == null:
 				continue
-			AudioServer.add_bus_effect(idx, ae)
-			var slot: int = AudioServer.get_bus_effect_count(idx) - 1
-			AudioServer.set_bus_effect_enabled(idx, slot, not e.bypass)
-	return bus_name
+			AudioServer.add_bus_effect(bus_idx, ae)
+			var slot: int = AudioServer.get_bus_effect_count(bus_idx) - 1
+			AudioServer.set_bus_effect_enabled(bus_idx, slot, not e.bypass)
 
 
 static func destroy_if_ours(bus_name: String) -> void:
