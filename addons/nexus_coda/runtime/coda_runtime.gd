@@ -90,6 +90,9 @@ func _process(delta: float) -> void:
 
 
 func set_project(project: Variant) -> void:
+	# Editor project loads and gameplay project swaps must not keep dispatchers tied to the
+	# previous CodaState (timeline cursors, graph plans, pooled players).
+	stop_all()
 	if _project != null:
 		if _project.structure_changed.is_connected(_on_project_structure_changed):
 			_project.structure_changed.disconnect(_on_project_structure_changed)
@@ -769,6 +772,9 @@ func _warn(msg: String) -> void:
 func _start_timeline_event(
 	event: CodaBrowserNode, path: String, params: Dictionary
 ) -> CodaEventHandle:
+	var prior: CodaEventHandle = get_active_timeline_handle_for_event(event.id)
+	if prior != null:
+		_finalize_timeline_handle(prior)
 	var timeline: CodaEventTimeline = event.event_timeline
 	if timeline == null:
 		_warn("event '%s' is in timeline mode but has no timeline data" % event.name)
@@ -822,7 +828,7 @@ func _prime_timeline_overlapping_voices(
 		if tr.solo:
 			has_solo = true
 			break
-	var fired: Dictionary = {}
+	var fired: Dictionary = d.get("fired_clip_ids", {}).duplicate()
 	for track in timeline.tracks:
 		if track.mute:
 			continue
@@ -961,6 +967,10 @@ func _refresh_timeline_voice_output_levels(
 			p.volume_db = -80.0
 		else:
 			p.volume_db = float(cl.volume_db + tr.volume_db) + override_db
+			p.pitch_scale = maxf(
+				0.05,
+				float(cl.pitch_scale) * float(handle.params.get("pitch_scale", 1.0))
+			)
 
 
 func _fire_clips_in_range(
@@ -1126,12 +1136,52 @@ func _apply_timeline_seek(
 	var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
 	if timeline == null:
 		return
+	var prev_cursor: float = handle.timeline_cursor_seconds
 	var clamped: float = clampf(target_seconds, 0.0, timeline.length_seconds)
 	handle.timeline_cursor_seconds = clamped
 	_stop_timeline_voices(d, handle)
+	var fired: Dictionary = d.get("fired_clip_ids", {}).duplicate()
+	_timeline_apply_seek_fired_state(fired, timeline, prev_cursor, clamped)
+	d["fired_clip_ids"] = fired
 	# Re-prime clips overlapping the new cursor. Without this, scrubbing the playhead or using
 	# the transport seek slider leaves silence until the cursor crosses another clip start.
 	_prime_timeline_overlapping_voices(handle, d, timeline, clamped)
+
+
+func _timeline_apply_seek_fired_state(
+	fired: Dictionary,
+	timeline: CodaEventTimeline,
+	prev_seconds: float,
+	cursor_seconds: float,
+) -> void:
+	if is_equal_approx(prev_seconds, cursor_seconds):
+		return
+	var has_solo: bool = false
+	for tr in timeline.tracks:
+		if tr.solo:
+			has_solo = true
+			break
+	if cursor_seconds < prev_seconds:
+		for track in timeline.tracks:
+			if track.mute:
+				continue
+			if has_solo and not track.solo:
+				continue
+			for clip in track.clips:
+				if clip.start_seconds >= cursor_seconds:
+					fired.erase(clip.id)
+	elif cursor_seconds > prev_seconds:
+		for track in timeline.tracks:
+			if track.mute:
+				continue
+			if has_solo and not track.solo:
+				continue
+			for clip in track.clips:
+				if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
+					continue
+				var clip_end: float = clip.start_seconds + clip.duration_seconds
+				if clip_end <= cursor_seconds:
+					fired[clip.id] = true
 
 
 func _stop_timeline_voices_past_clip_end(
@@ -1201,6 +1251,48 @@ func _finalize_timeline_handle(handle: CodaEventHandle) -> void:
 ## Editor: after timeline layout edits (clip move/trim/delete, track changes), clear stale
 ## [code]fired_clip_ids[/code] and re-prime voices at the playhead. Skips work when layout is
 ## unchanged so volume/mute drags do not restart every lane.
+## Editor: apply live clip/track effect parameter and bypass edits to playing preview voices
+## without repriming lanes. Structural chain edits still use [method resync_timeline_preview_for_event].
+func refresh_timeline_preview_fx_for_event(event_id: String) -> void:
+	if event_id.is_empty():
+		return
+	var handle: CodaEventHandle = get_active_timeline_handle_for_event(event_id)
+	if handle == null or not _timeline_dispatchers.has(handle):
+		return
+	var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
+	if event == null or event.event_timeline == null:
+		return
+	var timeline: CodaEventTimeline = event.event_timeline
+	var d: Dictionary = _timeline_dispatchers[handle]
+	var voices: Dictionary = d.get("voices", {})
+	for clip_id in voices.keys():
+		var player: AudioStreamPlayer = voices[clip_id] as AudioStreamPlayer
+		if player == null or not is_instance_valid(player):
+			continue
+		var info: Dictionary = timeline.find_clip(String(clip_id))
+		if info.is_empty():
+			continue
+		var tr: CodaTimelineTrack = info.get("track", null) as CodaTimelineTrack
+		var cl: CodaTimelineClip = info.get("clip", null) as CodaTimelineClip
+		if tr == null or cl == null:
+			continue
+		var entry: Dictionary = {
+			"clip_effects": cl.effects,
+			"track_effects": tr.effects,
+			"track_output_bus_id": tr.output_bus_id,
+		}
+		var fx_chain: Array = _collect_timeline_fx_chain(entry)
+		if not player.has_meta(&"_coda_fx_bus"):
+			continue
+		var fx_nm: String = String(player.get_meta(&"_coda_fx_bus", ""))
+		if fx_chain.is_empty():
+			_free_player_timeline_fx_bus(player)
+			player.bus = _timeline_send_bus_for_track(handle, tr.output_bus_id)
+			continue
+		CodaFxBusHelperScript.refresh_effects_bus(fx_nm, fx_chain)
+	d["layout_sig"] = _timeline_layout_signature(timeline)
+
+
 func resync_timeline_preview_for_event(event_id: String) -> void:
 	if event_id.is_empty():
 		return
