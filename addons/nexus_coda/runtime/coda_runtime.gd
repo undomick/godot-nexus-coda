@@ -898,7 +898,7 @@ func _prime_timeline_overlapping_voices(
 		if tr.solo:
 			has_solo = true
 			break
-	var fired: Dictionary = {}
+	var fired: Dictionary = d.get("fired_clip_ids", {}).duplicate()
 	for track in timeline.tracks:
 		if track.mute:
 			continue
@@ -906,6 +906,8 @@ func _prime_timeline_overlapping_voices(
 			continue
 		for clip in track.clips:
 			if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
+				continue
+			if fired.has(clip.id):
 				continue
 			var clip_end: float = clip.start_seconds + clip.duration_seconds
 			if at_seconds < clip.start_seconds or at_seconds >= clip_end:
@@ -1002,8 +1004,9 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 			var loop_lo: float = loop_start if loop_start >= 0.0 else 0.0
 			# Multi-wrap in one frame (large delta / hitch) can land before clip starts we flew past.
 			if next_cursor < cursor_at_frame_start:
-				_fire_clips_in_range(handle, d, timeline, loop_lo, wrap_target)
-				d["fired_clip_ids"] = {}
+				_fire_clips_in_range(
+					handle, d, timeline, next_cursor, cursor_at_frame_start
+				)
 			# Re-prime clips overlapping the post-wrap cursor (same as seek). Without this,
 			# clips that started before loop_start stay silent after the first loop iteration.
 			_prime_timeline_overlapping_voices(handle, d, timeline, next_cursor)
@@ -1134,6 +1137,25 @@ func _collect_timeline_fx_chain(entry: Dictionary) -> Array:
 	return out
 
 
+func _retire_timeline_lane_voice(d: Dictionary, clip_id: String) -> void:
+	if clip_id.is_empty():
+		return
+	var voices: Dictionary = d.get("voices", {})
+	if not voices.has(clip_id):
+		return
+	var p: AudioStreamPlayer = voices[clip_id] as AudioStreamPlayer
+	voices.erase(clip_id)
+	d["voices"] = voices
+	if p == null or not is_instance_valid(p):
+		return
+	var pk: int = p.get_instance_id()
+	_timeline_voice_owner.erase(pk)
+	_timeline_voice_playback_gen.erase(pk)
+	if p.playing:
+		p.stop()
+	_free_player_timeline_fx_bus(p)
+
+
 func _spawn_timeline_voice(
 	handle: CodaEventHandle, d: Dictionary, entry: Dictionary
 ) -> bool:
@@ -1146,6 +1168,8 @@ func _spawn_timeline_voice(
 	var stream: AudioStream = load(stream_path) as AudioStream
 	if stream == null:
 		return false
+	var clip_id: String = String(entry.get("sound_id", ""))
+	_retire_timeline_lane_voice(d, clip_id)
 	var player: AudioStreamPlayer = _pool.acquire()
 	if player == null:
 		_warn("voice pool exhausted while playing timeline clip '%s'" % stream_path)
