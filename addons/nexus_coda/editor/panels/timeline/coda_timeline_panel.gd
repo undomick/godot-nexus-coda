@@ -1220,7 +1220,11 @@ func _on_view_audition_requested() -> void:
 		_runtime.stop(_live_handle)
 	_live_handle = null
 	var ph: float = clampf(_view.get_playhead(), 0.0, t.length_seconds)
-	var params: Dictionary = {"loop": t.loop_enabled, "timeline_cursor_start": ph}
+	var params: Dictionary = {
+		"loop": t.loop_enabled,
+		"timeline_cursor_start": ph,
+		"_coda_exclusive_preview": true,
+	}
 	var h: CodaEventHandle = _runtime.play_event_node(_selected_event, params)
 	if h == null:
 		NexusCodaLog.warn("timeline_preview", 'Could not start preview for "%s"' % _selected_event.name)
