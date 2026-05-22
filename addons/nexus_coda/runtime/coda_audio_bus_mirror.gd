@@ -16,6 +16,7 @@ const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.g
 const CodaEffectCatalogScript := preload(
 	"res://addons/nexus_coda/editor/browser/effects/coda_effect_catalog.gd"
 )
+const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_bus_helper.gd")
 
 ## Returns dictionary { coda_bus_id (String) -> godot_bus_name (String) }.
 ## Pass [code]prune_unclaimed_buses = true[/code] from editor-only callers that own the whole bus list.
@@ -93,6 +94,8 @@ static func _claimed_godot_names(bus_root: CodaBus) -> Dictionary:
 
 
 ## Removes AudioServer buses whose names are not in [param claimed], except index 0 ([code]Master[/code]).
+## Runtime timeline clip/track FX buses ([code]__CodaFx_*[/code]) are kept — they are not part of the Coda
+## bus tree but must survive mixer sync while preview voices are routed through them.
 ## After [method AudioServer.remove_bus], another bus may occupy the same index — adjust [code]i[/code] instead of only decrementing.
 static func _prune_unclaimed_buses(claimed: Dictionary) -> void:
 	var i: int = AudioServer.get_bus_count() - 1
@@ -101,6 +104,9 @@ static func _prune_unclaimed_buses(claimed: Dictionary) -> void:
 			i = AudioServer.get_bus_count() - 1
 			continue
 		var nm: String = AudioServer.get_bus_name(i)
+		if CodaFxBusHelperScript.is_helper_bus(nm):
+			i -= 1
+			continue
 		if not claimed.has(nm):
 			AudioServer.remove_bus(i)
 			i = mini(i, AudioServer.get_bus_count() - 1)
