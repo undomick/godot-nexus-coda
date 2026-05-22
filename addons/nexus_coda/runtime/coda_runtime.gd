@@ -64,6 +64,8 @@ var _orphaned_finish_gens: Dictionary = {}  ## gen -> true
 ## [signal AudioStreamPlayer.finished] from [method AudioStreamPlayer.stop] must not dequeue graph
 ## plan entries or new voices would start during teardown.
 var _stop_all_in_progress: bool = false
+## Graph handles blocked on voice-pool exhaustion (mid-sequence or loop restart). Retried each frame.
+var _graph_plan_resume_handles: Array[CodaEventHandle] = []
 
 
 func _ready() -> void:
@@ -79,6 +81,8 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if not _timeline_dispatchers.is_empty():
 		_tick_timeline_dispatchers(delta)
+	if not _graph_plan_resume_handles.is_empty():
+		_resume_pending_graph_plans()
 	if _active_handles.is_empty():
 		return
 	for h in _active_handles.values():
@@ -224,6 +228,7 @@ func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 			handle.stop(fade_ms)
 		return
 	var was_alive: bool = handle._alive
+	_unmark_graph_plan_resume(handle)
 	_stop_graph_parallel_siblings(handle)
 	handle.stop(fade_ms)
 	if was_alive:
@@ -276,6 +281,7 @@ func stop_all() -> void:
 	_timeline_voice_owner.clear()
 	_timeline_voice_playback_gen.clear()
 	_player_pending_finish_gen.clear()
+	_graph_plan_resume_handles.clear()
 
 
 func is_alive(handle: CodaEventHandle) -> bool:
@@ -626,6 +632,34 @@ func _graph_parallel_still_playing(handle: CodaEventHandle) -> bool:
 	return false
 
 
+func _mark_graph_plan_resume(handle: CodaEventHandle) -> void:
+	if handle == null or handle.is_timeline or not handle._alive:
+		return
+	if _graph_plan_resume_handles.has(handle):
+		return
+	_graph_plan_resume_handles.append(handle)
+
+
+func _unmark_graph_plan_resume(handle: CodaEventHandle) -> void:
+	if handle == null:
+		return
+	var idx: int = _graph_plan_resume_handles.find(handle)
+	if idx >= 0:
+		_graph_plan_resume_handles.remove_at(idx)
+
+
+func _resume_pending_graph_plans() -> void:
+	var pending: Array = _graph_plan_resume_handles.duplicate()
+	for item in pending:
+		var h: CodaEventHandle = item as CodaEventHandle
+		if h == null or not h._alive or h.is_timeline:
+			_unmark_graph_plan_resume(h)
+			continue
+		if _graph_parallel_still_playing(h):
+			continue
+		_try_finish_graph_handle(h)
+
+
 func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
 	var full: Variant = h.params.get("_coda_full_plan", [])
 	if not full is Array or (full as Array).is_empty():
@@ -780,15 +814,21 @@ func _try_finish_graph_handle(h: CodaEventHandle) -> void:
 				_active_handles[player.get_instance_id()] = sib_h
 		if primary_player != null:
 			h.params["_coda_plan"] = rest
+			_unmark_graph_plan_resume(h)
 			return
 		_warn(
 			"voice pool exhausted; sequence paused for '%s' (%d entries remain)"
 			% [h.event_path, plan_slice.size()]
 		)
+		_mark_graph_plan_resume(h)
 		return
 	if h.loop:
 		if _restart_graph_loop_from_full_plan(h):
+			_unmark_graph_plan_resume(h)
 			return
+		_mark_graph_plan_resume(h)
+		return
+	_unmark_graph_plan_resume(h)
 	h._on_player_finished()
 	voice_finished.emit(h)
 
