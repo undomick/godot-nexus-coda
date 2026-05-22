@@ -994,16 +994,20 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 			var wrap_target: float = (
 				loop_end if loop_end > 0.0 else timeline.length_seconds
 			)
-			_fire_clips_in_range(handle, d, timeline, prev_cursor, wrap_target)
+			var cursor_at_frame_start: float = prev_cursor
+			_fire_clips_in_range(handle, d, timeline, cursor_at_frame_start, wrap_target)
 			d["fired_clip_ids"] = {}
 			# Stop currently-playing voices so the next iteration retriggers them on cue.
 			_stop_timeline_voices(d, handle)
+			var loop_lo: float = loop_start if loop_start >= 0.0 else 0.0
+			# Multi-wrap in one frame (large delta / hitch) can land before clip starts we flew past.
+			if next_cursor < cursor_at_frame_start:
+				_fire_clips_in_range(handle, d, timeline, loop_lo, wrap_target)
+				d["fired_clip_ids"] = {}
 			# Re-prime clips overlapping the post-wrap cursor (same as seek). Without this,
 			# clips that started before loop_start stay silent after the first loop iteration.
 			_prime_timeline_overlapping_voices(handle, d, timeline, next_cursor)
-			prev_cursor = (
-				loop_start if loop_start >= 0.0 else 0.0
-			)
+			prev_cursor = loop_lo
 
 		handle.timeline_cursor_seconds = next_cursor
 		_stop_timeline_voices_past_clip_end(d, handle, next_cursor)
