@@ -97,6 +97,10 @@ func set_project(project: Variant) -> void:
 	# Editor project loads and gameplay project swaps must not keep dispatchers tied to the
 	# previous CodaState (timeline cursors, graph plans, pooled players).
 	stop_all()
+	if project != null:
+		# Loaded banks override play() resolution; clear them when wiring a new project so stale
+		# bank events cannot shadow the new CodaState.
+		_loaded_banks.clear()
 	if _project != null:
 		if _project.structure_changed.is_connected(_on_project_structure_changed):
 			_project.structure_changed.disconnect(_on_project_structure_changed)
@@ -135,8 +139,21 @@ func _sync_buses() -> void:
 func _apply_loaded_bank_buses() -> void:
 	if _project != null:
 		_sync_buses()
+	else:
+		_rebuild_bus_id_map_from_loaded_banks()
 		return
-	_rebuild_bus_id_map_from_loaded_banks()
+	# Project + load_bank(): overlay each manifest bus tree (later banks win per coda bus id).
+	if _loaded_banks.is_empty():
+		return
+	for bank_id in _loaded_banks.keys():
+		var entry: Dictionary = _loaded_banks[bank_id]
+		var root: Variant = entry.get("bus_root", null)
+		if root is CodaBus:
+			var partial: Dictionary = CodaAudioBusMirrorScript.sync_to_audio_server(
+				root as CodaBus, false
+			)
+			for cid in partial.keys():
+				_bus_id_to_godot_name[cid] = partial[cid]
 
 
 func _rebuild_bus_id_map_from_loaded_banks() -> void:
@@ -568,7 +585,9 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 			% [event.name, parallel_started, parallel_entries.size()]
 		)
 		handle.params["_coda_full_plan"] = plan_entries
-		handle.params["_coda_plan"] = plan_entries
+		handle.params["_coda_plan"] = _graph_plan_after_incomplete_parallel_step(
+			parallel_entries, parallel_started, queued_after_parallel
+		)
 		_mark_graph_plan_resume(handle)
 		return handle
 	handle.params["_coda_plan"] = queued_after_parallel
@@ -601,6 +620,16 @@ func _split_parallel_entries(entries: Array) -> Array:
 			break
 	if out.is_empty() and not entries.is_empty():
 		out.append(entries[0])
+	return out
+
+
+## Remaining parallel legs plus the rest of the plan. Used when the voice pool starts only part
+## of a BLEND step so finished legs are not replayed from the beginning.
+func _graph_plan_after_incomplete_parallel_step(
+	parallel_entries: Array, parallel_started: int, rest: Array
+) -> Array:
+	var out: Array = parallel_entries.slice(parallel_started)
+	out.append_array(rest)
 	return out
 
 
@@ -686,7 +715,6 @@ func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
 	var plan_entries: Array = full as Array
 	var parallel_entries: Array = _split_parallel_entries(plan_entries)
 	var queued_after_parallel: Array = plan_entries.slice(parallel_entries.size())
-	h.params["_coda_plan"] = queued_after_parallel
 	var primary_player: AudioStreamPlayer = null
 	var parallel_started: int = 0
 	for entry in parallel_entries:
@@ -710,8 +738,12 @@ func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
 	if primary_player == null:
 		return false
 	if parallel_started < parallel_entries.size():
+		h.params["_coda_plan"] = _graph_plan_after_incomplete_parallel_step(
+			parallel_entries, parallel_started, queued_after_parallel
+		)
 		_mark_graph_plan_resume(h)
 		return false
+	h.params["_coda_plan"] = queued_after_parallel
 	return true
 
 
@@ -872,6 +904,9 @@ func _try_finish_graph_handle(h: CodaEventHandle) -> void:
 				_warn(
 					"voice pool exhausted; BLEND step incomplete for '%s' (%d/%d voices)"
 					% [h.event_path, parallel_started, parallel_entries.size()]
+				)
+				h.params["_coda_plan"] = _graph_plan_after_incomplete_parallel_step(
+					parallel_entries, parallel_started, rest
 				)
 				_mark_graph_plan_resume(h)
 				return
