@@ -302,7 +302,10 @@ func _on_node_position_changed(model_node_id: String) -> void:
 	if data == null:
 		return
 	data.graph_position = view.position_offset
-	# Position changes don't need full structure_changed (would re-render whole tree); save will pick it up.
+	# Layout-only edits must still mark the document dirty (close/save prompt). Avoid
+	# structure_changed here — that rebuilds the browser tree on every drag frame.
+	if _project != null:
+		_project.project_dirty.emit()
 
 
 func _on_node_property_changed(model_node_id: String, key: String, value: Variant) -> void:
