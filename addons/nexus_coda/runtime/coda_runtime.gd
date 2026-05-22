@@ -692,6 +692,8 @@ func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
 ## Drop pooled-player ownership from every timeline dispatcher (and FX meta) before graph
 ## or another lane reuses the player. Otherwise a stale voices entry can stop unrelated audio
 ## at clip-end, and orphaned finished signals can leak __CodaFx_* buses.
+## Keeps [code]fired_clip_ids[/code] intact: the playhead may still be inside the clip window, and
+## clearing fired would retrigger the lane on the next tick while the reused player plays elsewhere.
 func _detach_player_from_timeline_dispatchers(player: AudioStreamPlayer) -> void:
 	if player == null or not is_instance_valid(player):
 		return
@@ -704,7 +706,6 @@ func _detach_player_from_timeline_dispatchers(player: AudioStreamPlayer) -> void
 		var voices: Dictionary = d.get("voices", {})
 		if voices.is_empty():
 			continue
-		var fired: Dictionary = d.get("fired_clip_ids", {})
 		var stale_clip_ids: Array = []
 		for clip_id in voices.keys():
 			if voices[clip_id] == player:
@@ -713,9 +714,7 @@ func _detach_player_from_timeline_dispatchers(player: AudioStreamPlayer) -> void
 			continue
 		for clip_id in stale_clip_ids:
 			voices.erase(clip_id)
-			fired.erase(clip_id)
 		d["voices"] = voices
-		d["fired_clip_ids"] = fired
 
 
 ## Stamp a new playback generation and orphan any still-pending finish for this pooled player.
@@ -1262,11 +1261,28 @@ func _on_timeline_voice_finished(player: AudioStreamPlayer, key: int) -> void:
 		return
 	var d: Dictionary = _timeline_dispatchers[h]
 	var voices: Dictionary = d.get("voices", {})
+	var finished_clip_id: String = ""
 	for k in voices.keys():
 		if voices[k] == player:
+			finished_clip_id = str(k)
 			voices.erase(k)
 			break
 	d["voices"] = voices
+	if finished_clip_id.is_empty():
+		return
+	var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
+	if timeline == null:
+		return
+	var info: Dictionary = timeline.find_clip(finished_clip_id)
+	var cl: CodaTimelineClip = info.get("clip", null) as CodaTimelineClip
+	if cl == null:
+		return
+	var clip_end: float = cl.start_seconds + cl.duration_seconds
+	if h.timeline_cursor_seconds >= clip_end - 0.001:
+		return
+	var fired: Dictionary = d.get("fired_clip_ids", {})
+	fired.erase(finished_clip_id)
+	d["fired_clip_ids"] = fired
 
 
 func _apply_timeline_seek(
