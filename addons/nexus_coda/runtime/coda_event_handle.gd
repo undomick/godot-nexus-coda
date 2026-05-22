@@ -79,8 +79,7 @@ func pause() -> void:
 	if is_timeline and timeline_runtime != null and is_instance_valid(timeline_runtime):
 		timeline_runtime.pause_timeline_preview(self)
 		return
-	if _player != null and is_instance_valid(_player):
-		_player.stream_paused = true
+	_set_graph_players_stream_paused(true)
 
 
 func resume() -> void:
@@ -88,8 +87,17 @@ func resume() -> void:
 		timeline_runtime.resume_timeline_preview(self)
 		return
 	_paused = false
+	_set_graph_players_stream_paused(false)
+
+
+func _set_graph_players_stream_paused(paused: bool) -> void:
 	if _player != null and is_instance_valid(_player):
-		_player.stream_paused = false
+		_player.stream_paused = paused
+	for sib in graph_parallel_siblings:
+		if sib == null:
+			continue
+		if sib._player != null and is_instance_valid(sib._player):
+			sib._player.stream_paused = paused
 
 
 func is_paused() -> bool:
