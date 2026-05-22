@@ -1329,10 +1329,11 @@ func resync_timeline_preview_for_event(event_id: String) -> void:
 		return
 	var timeline: CodaEventTimeline = event.event_timeline
 	var d: Dictionary = _timeline_dispatchers[handle]
+	# Always follow the event's current timeline object (undo/redo replaces the ref).
+	d["timeline"] = timeline
 	var sig: String = _timeline_layout_signature(timeline)
 	if String(d.get("layout_sig", "")) == sig:
 		return
-	d["timeline"] = timeline
 	d["layout_sig"] = sig
 	d["fired_clip_ids"] = {}
 	_stop_timeline_voices(d, handle)

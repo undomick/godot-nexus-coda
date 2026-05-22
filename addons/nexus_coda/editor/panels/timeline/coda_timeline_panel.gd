@@ -1112,9 +1112,16 @@ func _push_timeline_undo() -> void:
 func _restore_timeline_from(source: CodaEventTimeline) -> void:
 	if _selected_event == null or source == null:
 		return
-	# Preview holds a snapshot of the pre-undo timeline; stop so audio matches the editor.
-	if _live_handle != null and is_instance_valid(_live_handle) and _runtime != null:
-		_runtime.stop(_live_handle)
+	# Runtime dispatchers keep a reference to the timeline object that was live at play time.
+	# Undo/redo replaces event.event_timeline with a clone, so stop any preview (timeline panel
+	# or player panel) before swapping data.
+	if _runtime != null:
+		var active: CodaEventHandle = _runtime.get_active_timeline_handle_for_event(
+			_selected_event.id
+		)
+		if active != null:
+			_runtime.stop(active)
+	if _live_handle != null:
 		_live_handle = null
 	_selected_event.event_timeline = source.clone_keep_ids()
 	_show_timeline()
