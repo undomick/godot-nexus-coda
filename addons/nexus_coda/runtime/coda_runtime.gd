@@ -90,6 +90,9 @@ func _process(delta: float) -> void:
 
 
 func set_project(project: Variant) -> void:
+	# Editor project loads and gameplay project swaps must not keep dispatchers tied to the
+	# previous CodaState (timeline cursors, graph plans, pooled players).
+	stop_all()
 	if _project != null:
 		if _project.structure_changed.is_connected(_on_project_structure_changed):
 			_project.structure_changed.disconnect(_on_project_structure_changed)
@@ -769,6 +772,9 @@ func _warn(msg: String) -> void:
 func _start_timeline_event(
 	event: CodaBrowserNode, path: String, params: Dictionary
 ) -> CodaEventHandle:
+	var prior: CodaEventHandle = get_active_timeline_handle_for_event(event.id)
+	if prior != null:
+		_finalize_timeline_handle(prior)
 	var timeline: CodaEventTimeline = event.event_timeline
 	if timeline == null:
 		_warn("event '%s' is in timeline mode but has no timeline data" % event.name)

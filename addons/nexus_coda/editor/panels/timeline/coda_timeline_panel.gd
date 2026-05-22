@@ -137,12 +137,15 @@ func _process(_delta: float) -> void:
 
 
 func on_browser_event_selected(node: Variant) -> void:
+	var prev_event: CodaBrowserNode = _selected_event
 	var bn := node as CodaBrowserNode
 	if bn == null or bn.kind != CodaBrowserNode.Kind.EVENT:
 		_selected_event = null
 	else:
 		_selected_event = bn
 		_selected_track_index = 0
+	if prev_event != null and prev_event != _selected_event:
+		_stop_timeline_preview_for_event_id(prev_event.id)
 	_last_track_headers_sig = ""
 	# Active handle becomes stale when the visible event changes; the next process tick re-resolves.
 	_live_handle = null
@@ -480,11 +483,22 @@ func _on_project_structure_changed() -> void:
 		_notify_timeline_changed()
 
 
+func _stop_timeline_preview_for_event_id(event_id: String) -> void:
+	if _runtime == null or event_id.is_empty():
+		return
+	var h: CodaEventHandle = _runtime.get_active_timeline_handle_for_event(event_id)
+	if h != null:
+		_runtime.stop(h)
+	if _live_handle == h:
+		_live_handle = null
+
+
 func _refresh_view_state() -> void:
 	if _selected_event == null:
 		_show_empty(true)
 		return
 	if _selected_event.event_authoring_mode != CodaBrowserNode.AuthoringMode.TIMELINE:
+		_stop_timeline_preview_for_event_id(_selected_event.id)
 		_show_empty(true, "Switch to Timeline")
 		return
 	if _selected_event.event_timeline == null:
