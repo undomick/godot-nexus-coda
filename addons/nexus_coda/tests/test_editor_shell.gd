@@ -18,6 +18,7 @@ func _init() -> void:
 	var failed: int = 0
 	failed += _test_layout_store()
 	failed += _test_bank_rename_duplicate()
+	failed += _test_duplicate_events_node()
 	failed += _test_marker_ui()
 	if failed > 0:
 		push_error("Editor shell tests failed (%d)" % failed)
@@ -61,6 +62,33 @@ static func _test_bank_rename_duplicate() -> int:
 	if state.banks.size() < 2:
 		push_error("duplicate_bank insert")
 		return 1
+	return 0
+
+
+static func _test_duplicate_events_node() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var folder: CodaBrowserNode = state.add_events_folder(state.events_root.id, "Test")
+	if folder == null:
+		push_error("add_events_folder failed")
+		return 1
+	var ev: CodaBrowserNode = state.add_events_event(folder.id, "Footstep")
+	if ev == null:
+		push_error("add_events_event failed")
+		return 1
+	var copy: CodaBrowserNode = state.duplicate_events_node(ev.id)
+	if copy == null or copy.id == ev.id:
+		push_error("duplicate_events_node id collision")
+		return 1
+	var found_orig: CodaBrowserNode = state.events_root.find_by_id(ev.id)
+	var found_copy: CodaBrowserNode = state.events_root.find_by_id(copy.id)
+	if found_orig == null or found_copy == null or found_orig == found_copy:
+		push_error("duplicate_events_node find_by_id")
+		return 1
+	if ev.event_graph != null and copy.event_graph != null:
+		for gn in copy.event_graph.nodes:
+			if ev.event_graph.find_node(gn.id) != null:
+				push_error("duplicate_events_node graph id collision")
+				return 1
 	return 0
 
 

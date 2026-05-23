@@ -8,10 +8,14 @@ enum Kind { FOLDER, EVENT, ASSET }
 enum AuthoringMode { GRAPH = 0, TIMELINE = 1 }
 
 const CodaEventGraphScript := preload("res://addons/nexus_coda/editor/browser/coda_event_graph.gd")
+const CodaEventGraphNodeDataScript := preload(
+	"res://addons/nexus_coda/editor/browser/coda_event_graph_node_data.gd"
+)
 const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
 const CodaEventTimelineScript := preload(
 	"res://addons/nexus_coda/editor/browser/timeline/coda_event_timeline.gd"
 )
+const CodaTrackEffectScript := preload("res://addons/nexus_coda/editor/browser/effects/coda_track_effect.gd")
 
 var id: String
 var name: String
@@ -96,6 +100,53 @@ func insert_child_sorted(node: CodaBrowserNode) -> void:
 			return a.is_folder()
 		return a.name.nocasecmp_to(b.name) < 0
 	)
+
+
+## After clone via [method to_dictionary]/[method from_dictionary], assign fresh ids so the
+## duplicate cannot collide with the source event or nested graph/timeline entities.
+func assign_fresh_ids_for_duplicate() -> void:
+	if kind != Kind.EVENT:
+		id = _generate_id()
+		return
+	id = _generate_id()
+	var param_remap: Dictionary = {}
+	for p in event_parameters:
+		var old_pid: String = p.id
+		p.id = CodaEventParameter._generate_id()
+		param_remap[old_pid] = p.id
+	var graph_remap: Dictionary = {}
+	if event_graph != null:
+		for gn in event_graph.nodes:
+			var old_nid: String = gn.id
+			gn.id = CodaEventGraphNodeDataScript._generate_id()
+			graph_remap[old_nid] = gn.id
+		for ge in event_graph.edges:
+			if graph_remap.has(ge.from_node_id):
+				ge.from_node_id = graph_remap[ge.from_node_id]
+			if graph_remap.has(ge.to_node_id):
+				ge.to_node_id = graph_remap[ge.to_node_id]
+		for gn in event_graph.nodes:
+			if gn.properties.has("parameter_id"):
+				var old_param: String = str(gn.properties["parameter_id"])
+				if param_remap.has(old_param):
+					gn.properties["parameter_id"] = param_remap[old_param]
+	for m in event_modulations:
+		m.id = CodaModulation._generate_id()
+		if param_remap.has(m.source_param_id):
+			m.source_param_id = param_remap[m.source_param_id]
+		if graph_remap.has(m.target_node_id):
+			m.target_node_id = graph_remap[m.target_node_id]
+	if event_timeline != null:
+		for tr in event_timeline.tracks:
+			tr.id = CodaTimelineTrack._generate_id()
+			for i in range(tr.effects.size()):
+				tr.effects[i] = tr.effects[i].clone_new_id()
+			for c in tr.clips:
+				c.id = CodaTimelineClip._generate_id()
+				for j in range(c.effects.size()):
+					c.effects[j] = c.effects[j].clone_new_id()
+		for mk in event_timeline.markers:
+			mk.id = CodaTimelineMarker._generate_id()
 
 
 func to_dictionary() -> Dictionary:

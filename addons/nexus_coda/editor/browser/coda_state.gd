@@ -108,6 +108,7 @@ func duplicate_events_node(node_id: String) -> CodaBrowserNode:
 		return null
 	var data: Dictionary = node.to_dictionary()
 	var copy: CodaBrowserNode = CodaBrowserNode.from_dictionary(data)
+	copy.assign_fresh_ids_for_duplicate()
 	copy.name = _suggest_duplicate_name(parent, node.name)
 	parent.insert_child_sorted(copy)
 	structure_changed.emit()
