@@ -16,6 +16,7 @@ const CodaDockPanelInfoScript := preload("res://addons/nexus_coda/editor/layout/
 var _zones_by_id: Dictionary = {}
 var _panels_by_id: Dictionary = {}
 var _zone_order: PackedStringArray = PackedStringArray()
+var _last_zone_by_panel: Dictionary = {}
 
 
 func register_zone(zone_id: StringName, zone: CodaDockZone) -> void:
@@ -71,7 +72,9 @@ func show_panel(panel_id: StringName) -> void:
 	if is_panel_visible(panel_id):
 		_focus_panel(info)
 		return
-	_place_panel_in_zone(info, _find_current_or_default_zone(info))
+	var zone_id: StringName = _find_current_or_default_zone(info)
+	_place_panel_in_zone(info, zone_id)
+	_last_zone_by_panel[String(info.panel_id)] = String(zone_id)
 	panel_visibility_changed.emit(info.panel_id, true)
 	layout_changed.emit()
 
@@ -83,6 +86,8 @@ func hide_panel(panel_id: StringName) -> void:
 	if info.control.get_parent() == null:
 		return
 	var parent: Node = info.control.get_parent()
+	if parent is CodaDockZone:
+		_last_zone_by_panel[String(info.panel_id)] = String((parent as CodaDockZone).zone_id)
 	parent.remove_child(info.control)
 	panel_visibility_changed.emit(info.panel_id, false)
 	layout_changed.emit()
@@ -180,6 +185,18 @@ func _focus_panel(info: CodaDockPanelInfo) -> void:
 		tabs.current_tab = idx
 
 
+func get_last_zones() -> Dictionary:
+	return _last_zone_by_panel.duplicate(true)
+
+
+func set_last_zones(zones: Dictionary) -> void:
+	_last_zone_by_panel.clear()
+	for k in zones.keys():
+		_last_zone_by_panel[String(k)] = String(zones[k])
+
+
 func _find_current_or_default_zone(info: CodaDockPanelInfo) -> StringName:
-	# In the future we may remember the last zone this panel lived in.
+	var remembered: String = str(_last_zone_by_panel.get(String(info.panel_id), ""))
+	if not remembered.is_empty() and get_zone(StringName(remembered)) != null:
+		return StringName(remembered)
 	return info.default_zone_id

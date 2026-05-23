@@ -121,6 +121,28 @@ func attach_runtime(runtime: CodaRuntime) -> void:
 	_runtime = runtime
 
 
+func select_bus(bus_id: String) -> void:
+	if bus_id.is_empty() or not _strips_by_bus_id.has(bus_id):
+		return
+	_selected_bus_id = bus_id
+	var strip: CodaBusStrip = _strips_by_bus_id.get(bus_id, null) as CodaBusStrip
+	if strip != null:
+		_scroll.ensure_control_visible(strip)
+	_apply_bus_selection_visual()
+	bus_selection_changed.emit(bus_id)
+
+
+func highlight_snapshot(snapshot_id: String) -> void:
+	if _project == null or snapshot_id.is_empty():
+		return
+	for i in _project.snapshots.size():
+		if _project.snapshots[i].id == snapshot_id:
+			for j in _snapshot_picker.item_count:
+				if _snapshot_picker.get_item_id(j) == i:
+					_snapshot_picker.select(j)
+					return
+
+
 func attach_bus_layout_export(pick_path: Callable, on_complete: Callable) -> void:
 	_pick_bus_layout_path = pick_path
 	_complete_bus_layout_export = on_complete
@@ -204,14 +226,24 @@ func _rebuild_strips() -> void:
 func _ensure_bus_selection_after_rebuild(flat: Array[CodaBus]) -> void:
 	if flat.is_empty() or _project == null or _project.bus_root == null:
 		_selected_bus_id = ""
+		_apply_bus_selection_visual()
 		return
 	if not _strips_by_bus_id.has(_selected_bus_id):
 		_selected_bus_id = _project.bus_root.id
+	_apply_bus_selection_visual()
 	bus_selection_changed.emit(_selected_bus_id)
+
+
+func _apply_bus_selection_visual() -> void:
+	for bus_id in _strips_by_bus_id.keys():
+		var strip: CodaBusStrip = _strips_by_bus_id.get(bus_id, null) as CodaBusStrip
+		if strip != null:
+			strip.set_selected(String(bus_id) == _selected_bus_id)
 
 
 func _on_bus_strip_selected(bus_id: String) -> void:
 	_selected_bus_id = bus_id
+	_apply_bus_selection_visual()
 	bus_selection_changed.emit(bus_id)
 
 
@@ -375,7 +407,15 @@ func _on_recall_pressed() -> void:
 	if snap_idx < 0 or snap_idx >= _project.snapshots.size():
 		return
 	var s: CodaSnapshot = _project.snapshots[snap_idx]
-	if not _project.apply_snapshot(s.id):
+	var applied: bool = false
+	if _runtime != null and _runtime.has_method(&"apply_snapshot"):
+		applied = _runtime.apply_snapshot(s.id, s.blend_ms)
+	elif not _project.apply_snapshot(s.id):
+		NexusCodaLog.warn("mixer", "Could not apply snapshot %s" % s.snapshot_name)
+		return
+	else:
+		applied = true
+	if not applied:
 		NexusCodaLog.warn("mixer", "Could not apply snapshot %s" % s.snapshot_name)
 		return
 	# apply_snapshot emits structure_changed (deferred rebuild), but always push to AudioServer here

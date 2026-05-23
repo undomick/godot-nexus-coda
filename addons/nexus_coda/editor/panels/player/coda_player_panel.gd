@@ -2,6 +2,8 @@
 class_name CodaPlayerPanel
 extends VBoxContainer
 
+signal playhead_changed(seconds: float)
+
 ## Standalone audition surface for the editor.
 ## Drives the editor-side CodaRuntime so designers can preview events with full
 ## time / loop / meter / live-parameter feedback. Optionally pinned so browser
@@ -461,6 +463,12 @@ func _stop_active_voice() -> void:
 	_set_status(STATUS_IDLE)
 
 
+func set_external_playhead_seconds(seconds: float) -> void:
+	if _seek_slider != null:
+		_seek_slider.set_value_no_signal(clampf(seconds, _seek_slider.min_value, _seek_slider.max_value))
+	_update_time_display()
+
+
 # ---- Frame loop ----
 
 func _process(_delta: float) -> void:
@@ -515,6 +523,7 @@ func _update_time_display() -> void:
 		else:
 			_seek_slider.max_value = 1.0
 			_seek_slider.set_value_no_signal(0.0)
+	playhead_changed.emit(pos)
 
 
 func _update_meter() -> void:

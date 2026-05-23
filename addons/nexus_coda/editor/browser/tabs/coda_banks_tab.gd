@@ -9,12 +9,23 @@ extends CodaBrowserTab
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 
+const _CTX_RENAME := 1
+const _CTX_DUPLICATE := 2
+const _CTX_DELETE := 3
+
 var _project: CodaState = null
 var _filter_edit: LineEdit
 var _list: ItemList
 var _add_button: Button
 var _delete_button: Button
 var _rebuild_queued: bool = false
+var _rename_dialog: AcceptDialog
+var _rename_field: LineEdit
+var _rename_target_id: String = ""
+var _delete_dialog: ConfirmationDialog
+var _delete_target_id: String = ""
+var _context_menu: PopupMenu
+var _context_bank_id: String = ""
 
 
 func _init() -> void:
@@ -60,7 +71,13 @@ func _ready() -> void:
 	_list.allow_reselect = true
 	_list.item_selected.connect(_on_item_selected)
 	_list.empty_clicked.connect(_on_empty_clicked)
+	_list.gui_input.connect(_on_list_gui_input)
 	add_child(_list)
+
+	_setup_rename_dialog()
+	_setup_delete_dialog()
+	_setup_context_menu()
+	set_process_unhandled_key_input(true)
 
 	if _project != null:
 		_queue_rebuild()
@@ -97,6 +114,47 @@ func select_by_id(target_id: String) -> bool:
 			_emit_selection()
 			return true
 	return false
+
+
+func request_rename_selected() -> bool:
+	var bid: String = _selected_bank_id()
+	if bid.is_empty():
+		return false
+	_open_rename(bid)
+	return true
+
+
+func request_delete_selected() -> bool:
+	var bid: String = _selected_bank_id()
+	if bid.is_empty():
+		return false
+	_open_delete(bid)
+	return true
+
+
+func duplicate_selected() -> bool:
+	if _project == null:
+		return false
+	var bid: String = _selected_bank_id()
+	if bid.is_empty():
+		return false
+	var dup: CodaBank = _project.duplicate_bank(bid)
+	if dup != null:
+		call_deferred(&"select_by_id", dup.id)
+		return true
+	return false
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not is_visible_in_tree() or _list == null:
+		return
+	if event is InputEventKey:
+		var k: InputEventKey = event as InputEventKey
+		if not k.pressed or k.echo:
+			return
+		if k.ctrl_pressed and k.keycode == KEY_D:
+			if duplicate_selected():
+				get_viewport().set_input_as_handled()
 
 
 # ---------- Internals ----------
@@ -141,7 +199,7 @@ func _rebuild_list() -> void:
 		var label: String = "%s  (%d events)" % [b.bank_name, b.event_ids.size()]
 		var idx: int = _list.add_item(label)
 		_list.set_item_metadata(idx, b.id)
-		_list.set_item_tooltip(idx, "Edit in Inspector → Banks section")
+		_list.set_item_tooltip(idx, "F2 rename · Right-click for more")
 	_update_delete_button_state()
 
 
@@ -165,6 +223,25 @@ func _on_empty_clicked(_pos: Vector2, _btn: int) -> void:
 	_update_delete_button_state()
 
 
+func _on_list_gui_input(event: InputEvent) -> void:
+	if _list == null or _context_menu == null:
+		return
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if not mb.pressed or mb.button_index != MOUSE_BUTTON_RIGHT:
+			return
+		var at: Vector2 = mb.position
+		var idx: int = _list.get_item_at_position(at, true)
+		if idx < 0:
+			return
+		_list.select(idx)
+		_emit_selection()
+		_context_bank_id = str(_list.get_item_metadata(idx))
+		var gp: Vector2i = Vector2i(int(get_global_mouse_position().x), int(get_global_mouse_position().y))
+		_context_menu.popup(Rect2i(gp, Vector2i(1, 1)))
+		accept_event()
+
+
 func _update_delete_button_state() -> void:
 	if _delete_button == null:
 		return
@@ -179,21 +256,114 @@ func _emit_selection() -> bool:
 	return true
 
 
+func _setup_rename_dialog() -> void:
+	_rename_dialog = AcceptDialog.new()
+	_rename_dialog.title = "Rename Bank"
+	_rename_field = LineEdit.new()
+	_rename_field.custom_minimum_size = Vector2(280, 0)
+	_rename_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override(&"margin_left", 8)
+	margin.add_theme_constant_override(&"margin_right", 8)
+	margin.add_theme_constant_override(&"margin_top", 8)
+	margin.add_theme_constant_override(&"margin_bottom", 8)
+	margin.add_child(_rename_field)
+	_rename_dialog.add_child(margin)
+	_rename_dialog.confirmed.connect(_on_rename_confirmed)
+	_rename_dialog.about_to_popup.connect(
+		func() -> void: _rename_field.call_deferred(&"grab_focus")
+	)
+	_rename_field.text_submitted.connect(
+		func(_t: String) -> void:
+			_on_rename_confirmed()
+			_rename_dialog.hide()
+	)
+	add_child(_rename_dialog)
+
+
+func _setup_delete_dialog() -> void:
+	_delete_dialog = ConfirmationDialog.new()
+	_delete_dialog.title = "Delete Bank"
+	_delete_dialog.ok_button_text = "Delete"
+	_delete_dialog.confirmed.connect(_on_delete_confirmed)
+	add_child(_delete_dialog)
+
+
+func _setup_context_menu() -> void:
+	_context_menu = PopupMenu.new()
+	_context_menu.add_item("Rename", _CTX_RENAME)
+	_context_menu.add_item("Duplicate", _CTX_DUPLICATE)
+	_context_menu.add_separator()
+	_context_menu.add_item("Delete", _CTX_DELETE)
+	_context_menu.id_pressed.connect(_on_context_menu_id_pressed)
+	add_child(_context_menu)
+
+
+func _on_context_menu_id_pressed(id: int) -> void:
+	var bid: String = _context_bank_id if not _context_bank_id.is_empty() else _selected_bank_id()
+	if bid.is_empty():
+		return
+	match id:
+		_CTX_RENAME:
+			_open_rename(bid)
+		_CTX_DUPLICATE:
+			if _project != null:
+				var dup: CodaBank = _project.duplicate_bank(bid)
+				if dup != null:
+					call_deferred(&"select_by_id", dup.id)
+		_CTX_DELETE:
+			_open_delete(bid)
+	_context_bank_id = ""
+
+
+func _open_rename(bank_id: String) -> void:
+	if _project == null:
+		return
+	var bank: CodaBank = _project.find_bank_by_id(bank_id)
+	if bank == null:
+		return
+	_rename_target_id = bank_id
+	_rename_field.text = bank.bank_name
+	_rename_dialog.popup_centered()
+
+
+func _on_rename_confirmed() -> void:
+	if _project == null or _rename_target_id.is_empty():
+		return
+	_project.rename_bank(_rename_target_id, _rename_field.text)
+	call_deferred(&"select_by_id", _rename_target_id)
+
+
+func _open_delete(bank_id: String) -> void:
+	if _project == null:
+		return
+	var bank: CodaBank = _project.find_bank_by_id(bank_id)
+	if bank == null:
+		return
+	_delete_target_id = bank_id
+	_delete_dialog.dialog_text = 'Delete bank "%s"?' % bank.bank_name
+	_delete_dialog.popup_centered()
+
+
+func _on_delete_confirmed() -> void:
+	if _project == null or _delete_target_id.is_empty():
+		return
+	_project.remove_bank(_delete_target_id)
+	_delete_target_id = ""
+
+
 # ---------- Quick actions ----------
 
 func _on_add_pressed() -> void:
 	if _project == null:
 		return
 	var b: CodaBank = _project.add_bank("Bank %d" % (_project.banks.size() + 1))
-	# Re-emit selection so the inspector focuses the freshly created bank.
 	if b != null:
 		call_deferred(&"select_by_id", b.id)
 
 
 func _on_delete_pressed() -> void:
-	if _project == null:
-		return
 	var bid: String = _selected_bank_id()
 	if bid.is_empty():
 		return
-	_project.remove_bank(bid)
+	_open_delete(bid)

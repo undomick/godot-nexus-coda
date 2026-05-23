@@ -49,6 +49,22 @@ const ClipEffectsPanelScript := preload(
 const BusEffectsPanelScript := preload(
 	"res://addons/nexus_coda/editor/panels/effects/coda_bus_effects_panel.gd"
 )
+const CodaEditorShortcutsScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_shortcuts.gd"
+)
+const CodaEditorSelectionRouterScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_selection_router.gd"
+)
+const CodaEditorAuthoringFocusScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_authoring_focus.gd"
+)
+const CodaEditorLayoutStoreScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_layout_store.gd"
+)
+const CodaEditorTransportScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_transport.gd"
+)
+const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
 
 const PANEL_BROWSER := &"browser"
 const PANEL_GRAPH := &"graph"
@@ -145,6 +161,11 @@ var _file_dialog_pick_complete: bool = false
 var _file_dialog_user_canceled: bool = false
 var _teardown_done: bool = false
 var _fs_asset_import_boot_attempts: int = 0
+var _selection_router: CodaEditorSelectionRouter
+var _authoring_focus: CodaEditorAuthoringFocus
+var _editor_transport: CodaEditorTransport
+var _layout_autosave_queued: bool = false
+var _focused_panel_id: StringName = &""
 
 
 ## Imports the given `res://` paths into the Coda assets tree (same rules as in-editor DnD),
@@ -213,17 +234,55 @@ func _install_overlays() -> void:
 func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey):
 		return
-	var k: InputEventKey = event
-	if not k.pressed or k.echo:
-		return
-	# Ctrl+P opens the command palette; F1 opens the shortcut sheet.
-	if k.keycode == KEY_P and k.ctrl_pressed and not k.alt_pressed and not k.shift_pressed:
-		_open_command_palette()
-		get_viewport().set_input_as_handled()
-		return
-	if k.keycode == KEY_F1:
-		_open_shortcut_sheet()
-		get_viewport().set_input_as_handled()
+	var k: InputEventKey = event as InputEventKey
+	var action: int = CodaEditorShortcutsScript.match_action(k)
+	match action:
+		CodaEditorShortcutsScript.Action.COMMAND_PALETTE:
+			_open_command_palette()
+			get_viewport().set_input_as_handled()
+		CodaEditorShortcutsScript.Action.SHORTCUT_SHEET:
+			_open_shortcut_sheet()
+			get_viewport().set_input_as_handled()
+		CodaEditorShortcutsScript.Action.NEW_PROJECT:
+			get_viewport().set_input_as_handled()
+			call_deferred(&"_action_new_async")
+		CodaEditorShortcutsScript.Action.OPEN_PROJECT:
+			get_viewport().set_input_as_handled()
+			call_deferred(&"_action_open_async")
+		CodaEditorShortcutsScript.Action.SAVE_PROJECT:
+			get_viewport().set_input_as_handled()
+			call_deferred(&"_action_save_async")
+		CodaEditorShortcutsScript.Action.SAVE_PROJECT_AS:
+			get_viewport().set_input_as_handled()
+			call_deferred(&"_action_save_as_async")
+		CodaEditorShortcutsScript.Action.BROWSER_RENAME:
+			if _browser_panel != null and _browser_panel.has_method(&"request_browser_rename"):
+				if _browser_panel.request_browser_rename():
+					get_viewport().set_input_as_handled()
+		CodaEditorShortcutsScript.Action.BROWSER_DELETE:
+			if _browser_panel != null and _browser_panel.has_method(&"request_browser_delete"):
+				if _browser_panel.request_browser_delete():
+					get_viewport().set_input_as_handled()
+		CodaEditorShortcutsScript.Action.FOCUS_BROWSER:
+			_focus_panel(PANEL_BROWSER)
+			get_viewport().set_input_as_handled()
+		CodaEditorShortcutsScript.Action.FOCUS_GRAPH:
+			_focus_panel(PANEL_GRAPH)
+			get_viewport().set_input_as_handled()
+		CodaEditorShortcutsScript.Action.FOCUS_TIMELINE:
+			_focus_panel(PANEL_TIMELINE)
+			get_viewport().set_input_as_handled()
+		CodaEditorShortcutsScript.Action.FOCUS_MIXER:
+			_focus_panel(PANEL_MIXER)
+			get_viewport().set_input_as_handled()
+		CodaEditorShortcutsScript.Action.FOCUS_PLAYER:
+			_focus_panel(PANEL_PLAYER)
+			get_viewport().set_input_as_handled()
+		CodaEditorShortcutsScript.Action.FOCUS_INSPECTOR:
+			_focus_panel(PANEL_INSPECTOR)
+			get_viewport().set_input_as_handled()
+		_:
+			pass
 
 
 func _register_panels() -> void:
@@ -277,6 +336,21 @@ func _register_panels() -> void:
 	dm.panel_visibility_changed.connect(_on_panel_visibility_changed)
 	dm.layout_changed.connect(_on_layout_changed)
 
+	_selection_router = CodaEditorSelectionRouterScript.new()
+	_selection_router.dock_manager = dm
+	_selection_router.browser_panel = _browser_panel
+	_selection_router.mixer_panel = _mixer_panel
+	_selection_router.inspector_panel = _inspector_panel
+
+	_editor_transport = CodaEditorTransportScript.new()
+	_editor_transport.player_panel = _player_panel
+	_editor_transport.timeline_panel = _timeline_panel
+
+	_authoring_focus = CodaEditorAuthoringFocusScript.new()
+	_authoring_focus.dock_manager = dm
+	_authoring_focus.graph_panel = _graph_panel
+	_authoring_focus.timeline_panel = _timeline_panel
+
 	_wire_browser_to_others()
 	_wire_effects_panels()
 	_wire_runtime_to_panels()
@@ -308,8 +382,15 @@ func _wire_browser_to_others() -> void:
 		var route_slot := Callable(self, &"_on_browser_external_selection_requested")
 		if not _browser_panel.external_selection_requested.is_connected(route_slot):
 			_browser_panel.external_selection_requested.connect(route_slot)
+	_wire_browser_authoring_signals()
+	if _plugin != null and _browser_panel.has_method(&"set_editor_plugin"):
+		_browser_panel.set_editor_plugin(_plugin)
 	if _inspector_panel != null:
 		_inspector_panel.attach_browser_panel(_browser_panel)
+		if _inspector_panel.has_signal(&"authoring_mode_changed"):
+			var mode_slot := Callable(self, &"_on_inspector_authoring_mode_changed")
+			if not _inspector_panel.authoring_mode_changed.is_connected(mode_slot):
+				_inspector_panel.authoring_mode_changed.connect(mode_slot)
 	if _player_panel != null:
 		_player_panel.attach_browser_panel(_browser_panel)
 	if _graph_panel != null and _browser_panel.has_method(&"get_project"):
@@ -336,25 +417,66 @@ func _on_track_effects_focus_requested(_track_id: String) -> void:
 		_track_effects_panel.focus_current_track()
 
 
-## Routes selection events from non-events tabs (Buses → Mixer, Banks → Inspector, etc.)
-## to the right dock panel. For Game Syncs, the source event is also pre-selected so the
-## Inspector lands on the correct sections.
 func _on_browser_external_selection_requested(
 	target_panel_id: StringName, kind: StringName, payload: Variant
 ) -> void:
+	if _selection_router != null:
+		_selection_router.route(target_panel_id, kind, payload)
+
+
+func _wire_browser_authoring_signals() -> void:
+	if _events_tab_from_browser() == null:
+		return
+	var events_tab: CodaEventsTab = _events_tab_from_browser()
+	if not events_tab.event_authoring_open_requested.is_connected(_on_event_authoring_open_requested):
+		events_tab.event_authoring_open_requested.connect(_on_event_authoring_open_requested)
+	if not events_tab.event_open_graph_requested.is_connected(_on_event_open_graph_requested):
+		events_tab.event_open_graph_requested.connect(_on_event_open_graph_requested)
+	if not events_tab.event_open_timeline_requested.is_connected(_on_event_open_timeline_requested):
+		events_tab.event_open_timeline_requested.connect(_on_event_open_timeline_requested)
+
+
+func _events_tab_from_browser() -> CodaEventsTab:
+	if _browser_panel == null or not _browser_panel.has_method(&"get_events_tab"):
+		return null
+	return _browser_panel.get_events_tab() as CodaEventsTab
+
+
+func _on_event_authoring_open_requested(node: Variant) -> void:
+	var bn := node as CodaBrowserNode
+	if bn == null or _authoring_focus == null:
+		return
+	_authoring_focus.focus_for_event(bn)
+
+
+func _on_event_open_graph_requested(node: Variant) -> void:
+	var bn := node as CodaBrowserNode
+	if bn == null or _authoring_focus == null:
+		return
+	_authoring_focus.open_graph_for_event(bn)
+
+
+func _on_event_open_timeline_requested(node: Variant) -> void:
+	var bn := node as CodaBrowserNode
+	if bn == null or _authoring_focus == null:
+		return
+	_authoring_focus.open_timeline_for_event(bn)
+
+
+func _on_inspector_authoring_mode_changed(node: Variant) -> void:
+	var bn := node as CodaBrowserNode
+	if bn == null or _authoring_focus == null:
+		return
+	_authoring_focus.focus_for_event(bn)
+
+
+func _focus_panel(panel_id: StringName) -> void:
 	if _dock_host == null or _dock_host.dock_manager == null:
 		return
-	var dm: CodaDockManager = _dock_host.dock_manager
-	if kind == &"game_sync" and payload is Dictionary:
-		var event_id: String = str((payload as Dictionary).get("event_id", ""))
-		if not event_id.is_empty() and _browser_panel != null \
-				and _browser_panel.has_method(&"select_event_by_id"):
-			_browser_panel.select_event_by_id(event_id)
-	dm.show_panel(target_panel_id)
-	NexusCodaLog.debug(
-		"browser_routing",
-		"Routed %s selection to %s panel" % [String(kind), String(target_panel_id)],
-	)
+	_dock_host.dock_manager.show_panel(panel_id)
+	_focused_panel_id = panel_id
+	if _status_bar != null and _status_bar.has_method(&"set_panel_hint"):
+		_status_bar.set_panel_hint(panel_id)
 
 
 func _wire_runtime_to_panels() -> void:
@@ -367,6 +489,10 @@ func _wire_runtime_to_panels() -> void:
 		_graph_panel.attach_runtime(rt)
 	if _player_panel != null:
 		_player_panel.attach_runtime(rt)
+		if _player_panel.has_signal(&"playhead_changed") and _editor_transport != null:
+			var ph_slot := Callable(_editor_transport, &"sync_playhead_seconds")
+			if not _player_panel.playhead_changed.is_connected(ph_slot):
+				_player_panel.playhead_changed.connect(ph_slot)
 	if _timeline_panel != null and _timeline_panel.has_method(&"attach_runtime"):
 		_timeline_panel.attach_runtime(rt)
 	if _mixer_panel != null:
@@ -910,8 +1036,31 @@ func _reset_to_factory_layout() -> void:
 
 
 func _on_layout_changed() -> void:
-	# Intentionally no autosave: user chooses when to persist custom layout.
-	pass
+	if _layout_autosave_queued:
+		return
+	_layout_autosave_queued = true
+	call_deferred(&"_deferred_autosave_layout")
+
+
+func _deferred_autosave_layout() -> void:
+	_layout_autosave_queued = false
+	if not is_instance_valid(self) or _dock_host == null or _dock_host.dock_manager == null:
+		return
+	var path: String = _custom_layout_store_path()
+	if path.is_empty():
+		return
+	var payload: Dictionary = CodaEditorLayoutStoreScript.build_payload(
+		_dock_host, _dock_host.dock_manager
+	)
+	var text: String = CodaJsonUtilScript.stringify(payload, "  ")
+	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(text)
+	if f.has_method(&"flush"):
+		f.flush()
+	f.close()
+	_set_preferred_layout(CUSTOM_LAYOUT_PREF_CUSTOM)
 
 
 func _custom_layout_store_path() -> String:
@@ -980,11 +1129,8 @@ func _save_custom_layout() -> void:
 	if not dir_path.is_empty():
 		DirAccess.make_dir_recursive_absolute(dir_path)
 	var dm: CodaDockManager = _dock_host.dock_manager
-	var payload := {
-		"version": 1,
-		"layout": dm.get_layout_state(),
-	}
-	var text: String = JSON.stringify(payload, "  ")
+	var payload: Dictionary = CodaEditorLayoutStoreScript.build_payload(_dock_host, dm)
+	var text: String = CodaJsonUtilScript.stringify(payload, "  ")
 	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		NexusCodaLog.warn("layout", "Could not save custom layout (%s)" % str(FileAccess.get_open_error()))
@@ -1023,10 +1169,9 @@ func _load_custom_layout() -> void:
 	var root: Variant = json.data
 	if typeof(root) != TYPE_DICTIONARY:
 		return
-	var layout: Variant = (root as Dictionary).get("layout", null)
-	if typeof(layout) != TYPE_DICTIONARY:
-		return
-	_dock_host.dock_manager.apply_layout_state(layout as Dictionary)
+	CodaEditorLayoutStoreScript.apply_payload(
+		_dock_host, _dock_host.dock_manager, root as Dictionary
+	)
 	_set_preferred_layout(CUSTOM_LAYOUT_PREF_CUSTOM)
 	NexusCodaLog.info("layout", "Loaded custom layout.")
 

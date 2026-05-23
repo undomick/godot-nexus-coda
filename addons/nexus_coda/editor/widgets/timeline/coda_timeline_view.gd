@@ -17,6 +17,9 @@ const CodaTimelineWaveformCacheScript := preload(
 )
 
 const RULER_HEIGHT := 22
+const MARKER_FLAG_HALF_W := 5.0
+const MARKER_FLAG_H := 10.0
+const MARKER_DRAG_THRESHOLD_PX := 3.0
 ## Two-line track headers (name + M/S/controls) need more than a single compact lane row.
 const DEFAULT_TRACK_ROW_HEIGHT := 92
 const MIN_TRACK_ROW_HEIGHT := 88
@@ -52,6 +55,11 @@ signal clip_resized(clip_id: String, new_start: float, new_duration: float)
 signal clip_delete_requested(clip_id: String)
 signal marker_changed(marker_id: String, new_time: float)
 signal marker_double_clicked(marker_id: String)
+signal marker_selected(marker_id: String)
+signal marker_delete_requested(marker_id: String)
+signal marker_rename_requested(marker_id: String)
+signal marker_go_to_time_requested(marker_id: String)
+signal marker_selection_cleared
 signal loop_region_changed(start_seconds: float, end_seconds: float)
 signal playhead_seek_requested(time_seconds: float)
 signal selection_cleared
@@ -82,13 +90,22 @@ var _drag_initial_loop_end: float = 0.0
 var _drag_pan_initial_scroll: float = 0.0
 var _drag_initial_screen_pos: Vector2 = Vector2.ZERO
 var _selected_clip_id: String = ""
+var _selected_marker_id: String = ""
 var _highlight_track_index: int = 0
+var _marker_press_id: String = ""
+var _marker_press_pos: Vector2 = Vector2.ZERO
 
 var _clip_menu: PopupMenu
 const _CTX_REMOVE_CLIP := 1
 const _CTX_DUPLICATE_CLIP := 2
 const _CTX_SPLIT_PLAYHEAD := 3
 var _menu_clip_id: String = ""
+
+var _marker_menu: PopupMenu
+const _CTX_MARKER_RENAME := 1
+const _CTX_MARKER_DELETE := 2
+const _CTX_MARKER_GO_TO := 3
+var _menu_marker_id: String = ""
 
 
 func _init() -> void:
@@ -237,6 +254,27 @@ func get_snap_mode() -> SnapMode:
 
 func get_selected_clip_id() -> String:
 	return _selected_clip_id
+
+
+func get_selected_marker_id() -> String:
+	return _selected_marker_id
+
+
+func set_selected_marker(marker_id: String) -> void:
+	if _selected_marker_id == marker_id:
+		return
+	_selected_marker_id = marker_id
+	if not marker_id.is_empty():
+		marker_selected.emit(marker_id)
+	queue_redraw()
+
+
+func clear_marker_selection() -> void:
+	if _selected_marker_id.is_empty():
+		return
+	_selected_marker_id = ""
+	marker_selection_cleared.emit()
+	queue_redraw()
 
 
 func zoom_timeline_to_fit(width_px: float, margin_px: float = 40.0) -> void:
@@ -413,19 +451,51 @@ func _draw_markers() -> void:
 		if x < 0 or x > size.x:
 			continue
 		var col: Color = _color_for_marker(m)
-		draw_line(Vector2(x, 0), Vector2(x, size.y), col, 1.0)
-		if font != null:
-			draw_string(
-				font, Vector2(x + 3, RULER_HEIGHT - 6), m.marker_name,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, Tokens.FONT_LABEL_SIZE, col
-			)
+		var selected: bool = m.id == _selected_marker_id
+		_draw_marker_flag(x, col, selected, m.marker_name, font)
+
+
+func _draw_marker_flag(x: float, col: Color, selected: bool, label: String, font: Font) -> void:
+	var tip_y: float = float(RULER_HEIGHT)
+	var base_y: float = tip_y - MARKER_FLAG_H
+	var points := PackedVector2Array([
+		Vector2(x, tip_y),
+		Vector2(x - MARKER_FLAG_HALF_W, base_y),
+		Vector2(x + MARKER_FLAG_HALF_W, base_y),
+	])
+	draw_colored_polygon(points, col)
+	if selected:
+		for i in 3:
+			draw_line(points[i], points[(i + 1) % 3], Tokens.ACCENT, 2.0)
+	if font != null and not label.is_empty():
+		draw_string(
+			font,
+			Vector2(x + MARKER_FLAG_HALF_W + 2, RULER_HEIGHT - 5),
+			label,
+			HORIZONTAL_ALIGNMENT_LEFT,
+			-1,
+			Tokens.FONT_LABEL_SIZE,
+			col if not selected else Tokens.TEXT_PRIMARY
+		)
+	var line_w: float = 2.0 if selected else 1.0
+	var line_col: Color = Tokens.ACCENT if selected else col
+	draw_line(Vector2(x, RULER_HEIGHT), Vector2(x, size.y), line_col, line_w)
 
 
 func _draw_playhead() -> void:
 	var x: float = _seconds_to_x(_playhead_seconds)
 	if x < 0 or x > size.x:
 		return
-	draw_line(Vector2(x, 0), Vector2(x, size.y), Tokens.ACCENT, 2.0)
+	var tip_y: float = float(RULER_HEIGHT)
+	var base_y: float = 2.0
+	var half_w: float = 4.0
+	var tri := PackedVector2Array([
+		Vector2(x, tip_y),
+		Vector2(x - half_w, base_y),
+		Vector2(x + half_w, base_y),
+	])
+	draw_colored_polygon(tri, Tokens.ACCENT)
+	draw_line(Vector2(x, RULER_HEIGHT), Vector2(x, size.y), Tokens.ACCENT, 2.0)
 
 
 # ---------- Geometry helpers ----------
@@ -678,7 +748,8 @@ func _handle_mouse_button(mb: InputEventMouseButton) -> void:
 	if mb.button_index == MOUSE_BUTTON_RIGHT:
 		if mb.pressed:
 			var hit_r: Dictionary = _hit_test(mb.position)
-			if String(hit_r.get("kind", "")) == "clip":
+			var hit_kind: String = String(hit_r.get("kind", ""))
+			if hit_kind == "clip":
 				_ensure_clip_menu()
 				_menu_clip_id = String(hit_r.get("clip_id", ""))
 				if not _menu_clip_id.is_empty():
@@ -687,6 +758,13 @@ func _handle_mouse_button(mb: InputEventMouseButton) -> void:
 					var gp: Vector2i = Vector2i(int(get_global_mouse_position().x), int(get_global_mouse_position().y))
 					_clip_menu.popup(Rect2i(gp, Vector2i(1, 1)))
 					queue_redraw()
+			elif hit_kind == "marker":
+				_menu_marker_id = String(hit_r.get("marker_id", ""))
+				if not _menu_marker_id.is_empty():
+					set_selected_marker(_menu_marker_id)
+					_ensure_marker_menu()
+					var gp_m: Vector2i = Vector2i(int(get_global_mouse_position().x), int(get_global_mouse_position().y))
+					_marker_menu.popup(Rect2i(gp_m, Vector2i(1, 1)))
 		accept_event()
 		return
 	if mb.button_index != MOUSE_BUTTON_LEFT:
@@ -701,6 +779,12 @@ func _handle_mouse_button(mb: InputEventMouseButton) -> void:
 
 
 func _handle_mouse_motion(mm: InputEventMouseMotion) -> void:
+	if _drag_kind == DragKind.NONE and not _marker_press_id.is_empty():
+		if mm.position.distance_to(_marker_press_pos) >= MARKER_DRAG_THRESHOLD_PX:
+			_drag_kind = DragKind.MARKER_MOVE
+			_drag_marker_id = _marker_press_id
+			_marker_press_id = ""
+			timeline_interaction_started.emit()
 	if _drag_kind == DragKind.NONE:
 		return
 	var t: float = _x_to_seconds(mm.position.x)
@@ -781,6 +865,7 @@ func _begin_drag(hit: Dictionary, mb: InputEventMouseButton) -> void:
 	_drag_initial_screen_pos = mb.position
 	_drag_start_seconds = _x_to_seconds(mb.position.x)
 	if k == "ruler":
+		clear_marker_selection()
 		_drag_kind = DragKind.PLAYHEAD_SEEK
 		var snapped: float = _apply_snap(_drag_start_seconds)
 		set_playhead(snapped)
@@ -789,12 +874,20 @@ func _begin_drag(hit: Dictionary, mb: InputEventMouseButton) -> void:
 	if k == "marker":
 		var marker_id: String = String(hit.get("marker_id", ""))
 		if mb.double_click:
+			set_selected_marker(marker_id)
 			marker_double_clicked.emit(marker_id)
 			_drag_kind = DragKind.NONE
 			return
-		_drag_kind = DragKind.MARKER_MOVE
-		_drag_marker_id = marker_id
-		timeline_interaction_started.emit()
+		var was_selected: bool = _selected_marker_id == marker_id
+		set_selected_marker(marker_id)
+		if was_selected:
+			_drag_kind = DragKind.MARKER_MOVE
+			_drag_marker_id = marker_id
+			timeline_interaction_started.emit()
+		else:
+			_marker_press_id = marker_id
+			_marker_press_pos = mb.position
+			_drag_kind = DragKind.NONE
 		return
 	if k == "loop_start":
 		_drag_kind = DragKind.LOOP_START
@@ -837,6 +930,7 @@ func _begin_drag(hit: Dictionary, mb: InputEventMouseButton) -> void:
 		if lane_idx >= 0:
 			track_row_selected.emit(lane_idx)
 		_selected_clip_id = ""
+		clear_marker_selection()
 		selection_cleared.emit()
 		queue_redraw()
 		_drag_kind = DragKind.NONE
@@ -848,6 +942,7 @@ func _end_drag() -> void:
 	_drag_clip_id = ""
 	_drag_track_id = ""
 	_drag_marker_id = ""
+	_marker_press_id = ""
 
 
 func _ensure_clip_menu() -> void:
@@ -892,6 +987,32 @@ func _on_clip_menu_id_pressed(id: int) -> void:
 		_CTX_SPLIT_PLAYHEAD:
 			clip_split_at_playhead_requested.emit(_menu_clip_id)
 	_menu_clip_id = ""
+
+
+func _ensure_marker_menu() -> void:
+	if _marker_menu != null:
+		return
+	_marker_menu = PopupMenu.new()
+	_marker_menu.name = "TimelineMarkerMenu"
+	_marker_menu.add_item("Rename", _CTX_MARKER_RENAME)
+	_marker_menu.add_item("Delete", _CTX_MARKER_DELETE)
+	_marker_menu.add_separator()
+	_marker_menu.add_item("Go to time", _CTX_MARKER_GO_TO)
+	_marker_menu.id_pressed.connect(_on_marker_menu_id_pressed)
+	add_child(_marker_menu)
+
+
+func _on_marker_menu_id_pressed(id: int) -> void:
+	if _menu_marker_id.is_empty():
+		return
+	match id:
+		_CTX_MARKER_RENAME:
+			marker_rename_requested.emit(_menu_marker_id)
+		_CTX_MARKER_DELETE:
+			marker_delete_requested.emit(_menu_marker_id)
+		_CTX_MARKER_GO_TO:
+			marker_go_to_time_requested.emit(_menu_marker_id)
+	_menu_marker_id = ""
 
 
 func _track_index_by_id(track_id: String) -> int:

@@ -99,6 +99,40 @@ func add_events_event(parent_id: String, event_name: String = "New Event") -> Co
 	return ev
 
 
+func duplicate_events_node(node_id: String) -> CodaBrowserNode:
+	var node: CodaBrowserNode = events_root.find_by_id(node_id)
+	if node == null or node.kind != CodaBrowserNode.Kind.EVENT:
+		return null
+	var parent: CodaBrowserNode = events_parent_of(node_id)
+	if parent == null:
+		return null
+	var data: Dictionary = node.to_dictionary()
+	var copy: CodaBrowserNode = CodaBrowserNode.from_dictionary(data)
+	copy.name = _suggest_duplicate_name(parent, node.name)
+	parent.insert_child_sorted(copy)
+	structure_changed.emit()
+	return copy
+
+
+func _suggest_duplicate_name(parent: CodaBrowserNode, base_name: String) -> String:
+	var stem: String = base_name.strip_edges()
+	if not stem.ends_with(" Copy"):
+		stem = "%s Copy" % stem
+	var candidate: String = stem
+	var n: int = 2
+	while _parent_has_child_name(parent, candidate):
+		candidate = "%s (%d)" % [stem, n]
+		n += 1
+	return candidate
+
+
+func _parent_has_child_name(parent: CodaBrowserNode, child_name: String) -> bool:
+	for c in parent.children:
+		if c.name == child_name:
+			return true
+	return false
+
+
 func add_assets_folder(parent_id: String, folder_name: String = "New Folder") -> CodaBrowserNode:
 	var parent: CodaBrowserNode = assets_root.find_by_id(parent_id)
 	if parent == null or not parent.is_folder():
@@ -1041,6 +1075,21 @@ func rename_bank(bank_id: String, new_name: String) -> bool:
 			structure_changed.emit()
 			return true
 	return false
+
+
+func duplicate_bank(bank_id: String) -> CodaBank:
+	var src: CodaBank = find_bank_by_id(bank_id)
+	if src == null:
+		return null
+	var dup: CodaBank = CodaBank.new("Copy of %s" % src.bank_name)
+	dup.event_ids = src.event_ids.duplicate()
+	var idx: int = banks.find(src)
+	if idx >= 0:
+		banks.insert(idx + 1, dup)
+	else:
+		banks.append(dup)
+	structure_changed.emit()
+	return dup
 
 
 func find_bank_by_id(bank_id: String) -> CodaBank:

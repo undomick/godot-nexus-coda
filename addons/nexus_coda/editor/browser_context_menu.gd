@@ -7,6 +7,10 @@ const ID_NEW_FOLDER := 0
 const ID_NEW_LEAF := 1
 const ID_RENAME := 2
 const ID_DELETE := 3
+const ID_DUPLICATE := 4
+const ID_OPEN_GRAPH := 5
+const ID_OPEN_TIMELINE := 6
+const ID_REVEAL_FS := 7
 
 var _events_popup: PopupMenu
 var _assets_popup: PopupMenu
@@ -31,6 +35,10 @@ func _create_events_popup() -> PopupMenu:
 	p.add_separator()
 	p.add_item("Rename", ID_RENAME)
 	p.add_item("Delete", ID_DELETE)
+	p.add_separator()
+	p.add_item("Duplicate", ID_DUPLICATE)
+	p.add_item("Open in Graph", ID_OPEN_GRAPH)
+	p.add_item("Open in Timeline", ID_OPEN_TIMELINE)
 	return p
 
 
@@ -43,6 +51,8 @@ func _create_assets_popup() -> PopupMenu:
 	p.add_separator()
 	p.add_item("Rename", ID_RENAME)
 	p.add_item("Delete", ID_DELETE)
+	p.add_separator()
+	p.add_item("Reveal in FileSystem", ID_REVEAL_FS)
 	return p
 
 

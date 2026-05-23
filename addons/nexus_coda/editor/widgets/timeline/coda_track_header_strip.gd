@@ -168,7 +168,7 @@ func build_ui(
 	_mute_btn.text = "M"
 	_mute_btn.custom_minimum_size = Vector2(22, 22)
 	_mute_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_mute_btn.tooltip_text = "Mute this track (visual only in MVP)"
+	_mute_btn.tooltip_text = "Mute this track in editor preview"
 	_mute_btn.button_pressed = track.mute
 	_mute_btn.toggled.connect(_on_mute_toggled)
 	bot_row.add_child(_mute_btn)
@@ -178,7 +178,7 @@ func build_ui(
 	_solo_btn.text = "S"
 	_solo_btn.custom_minimum_size = Vector2(22, 22)
 	_solo_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_solo_btn.tooltip_text = "Solo this track (visual only in MVP)"
+	_solo_btn.tooltip_text = "Solo this track in editor preview"
 	_solo_btn.button_pressed = track.solo
 	_solo_btn.toggled.connect(_on_solo_toggled)
 	bot_row.add_child(_solo_btn)

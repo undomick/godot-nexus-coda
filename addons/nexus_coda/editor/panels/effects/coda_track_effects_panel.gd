@@ -30,7 +30,7 @@ func _ready() -> void:
 	_chain.visible = false
 	_chain.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_chain.set_footer_text(
-		"Track chains are saved with the event; per-track runtime voicing is planned as a later phase."
+		"Track chains are saved with the event and included in editor preview resync."
 	)
 	add_child(_chain)
 	_chain.effect_add_requested.connect(_on_chain_add)

@@ -7,37 +7,11 @@ extends CanvasLayer
 ## query the InputMap for project-wide actions.
 
 const CodaDesignTokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
+const CodaEditorShortcutsScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_shortcuts.gd"
+)
 
-const SHORTCUTS := [
-	{"category": "Window", "rows": [
-		["Ctrl+P", "Open command palette"],
-		["F1", "Open this shortcut sheet"],
-		["Ctrl+N", "New project"],
-		["Ctrl+O", "Open project"],
-		["Ctrl+S", "Save project"],
-		["Ctrl+Shift+S", "Save project as…"],
-	]},
-	{"category": "Browser", "rows": [
-		["Enter / Double-click", "Open event in graph"],
-		["F2", "Rename selected node"],
-		["Delete", "Remove selected node"],
-		["Drag asset onto graph", "Add SOUND node"],
-	]},
-	{"category": "Graph", "rows": [
-		["Ctrl+Drag", "Box-select multiple nodes"],
-		["Delete", "Remove selected nodes/edges"],
-		["Right-click", "Context menu (palette)"],
-	]},
-	{"category": "Mixer", "rows": [
-		["Click fader, drag", "Adjust bus volume"],
-		["M", "Toggle mute on focused strip"],
-		["S", "Toggle solo on focused strip"],
-	]},
-	{"category": "Inspector", "rows": [
-		["Tab", "Cycle between fields"],
-		["Esc", "Cancel rename / drop edit"],
-	]},
-]
+const SHORTCUTS := []  # Filled from CodaEditorShortcuts at runtime.
 
 
 signal closed
@@ -98,7 +72,7 @@ func _build_ui() -> void:
 	head.add_theme_font_size_override("font_size", CodaDesignTokens.FONT_TITLE_SIZE)
 	vb.add_child(head)
 
-	for entry in SHORTCUTS:
+	for entry in CodaEditorShortcutsScript.sheet_entries():
 		_add_category(vb, entry as Dictionary)
 
 	var footer_row := HBoxContainer.new()

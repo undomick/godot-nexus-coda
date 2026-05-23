@@ -2,6 +2,8 @@
 class_name CodaInspectorPanel
 extends VBoxContainer
 
+signal authoring_mode_changed(node: Variant)
+
 ## Stacked-section inspector for the currently selected browser node.
 ## Layout:
 ##   - Header (event or asset name)
@@ -26,6 +28,12 @@ const CodaBanksSectionScript := preload(
 const CodaAssetInspectorSectionScript := preload(
 	"res://addons/nexus_coda/editor/panels/inspector/coda_asset_inspector_section.gd"
 )
+const CodaGameSyncInspectorSectionScript := preload(
+	"res://addons/nexus_coda/editor/panels/inspector/coda_game_sync_inspector_section.gd"
+)
+const CodaBankInspectorSectionScript := preload(
+	"res://addons/nexus_coda/editor/panels/inspector/coda_bank_inspector_section.gd"
+)
 
 var _browser_panel: Control = null
 var _project: CodaState = null
@@ -40,7 +48,10 @@ var _parameters_section: CodaParametersSection
 var _modulation_section: CodaModulationSection
 var _banks_section: CodaBanksSection
 var _output_placeholder: Label
+var _output_bus_picker: OptionButton
 var _asset_section: CodaAssetInspectorSection
+var _game_sync_section: CodaGameSyncInspectorSection
+var _bank_section: CodaBankInspectorSection
 var _selected_node: CodaBrowserNode = null
 var _suppress_authoring_mode_writeback: bool = false
 
@@ -128,16 +139,28 @@ func _ready() -> void:
 	_output_placeholder.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_output_placeholder.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
 	_output_placeholder.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
-	_output_placeholder.tooltip_text = (
-		"Use the Mixer panel to define buses, then assign each event to one — events without a "
-		+ "bus play on Master."
-	)
+	_output_placeholder.visible = false
 	_event_stack.add_child(_output_placeholder)
+
+	_output_bus_picker = OptionButton.new()
+	_output_bus_picker.tooltip_text = "Output bus for this event. Empty uses Master."
+	_output_bus_picker.item_selected.connect(_on_output_bus_picked)
+	_event_stack.add_child(_output_bus_picker)
 
 	_asset_section = CodaAssetInspectorSectionScript.new()
 	_asset_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_asset_section.visible = false
 	_content.add_child(_asset_section)
+
+	_game_sync_section = CodaGameSyncInspectorSectionScript.new()
+	_game_sync_section.visible = false
+	_game_sync_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.add_child(_game_sync_section)
+
+	_bank_section = CodaBankInspectorSectionScript.new()
+	_bank_section.visible = false
+	_bank_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.add_child(_bank_section)
 
 	tooltip_text = "Inspector — properties of the selection in the Browser."
 
@@ -156,6 +179,18 @@ func attach_project(project: CodaState) -> void:
 		_modulation_section.attach_project(project)
 	if _banks_section != null:
 		_banks_section.attach_project(project)
+	if _game_sync_section != null:
+		_game_sync_section.attach_project(project)
+	if _bank_section != null:
+		_bank_section.attach_project(project)
+
+
+func show_game_sync_rule(payload: Dictionary) -> void:
+	_show_game_sync(payload)
+
+
+func show_bank(bank_id: String) -> void:
+	_show_bank(bank_id)
 
 
 func on_browser_event_selected(node: Variant) -> void:
@@ -174,6 +209,7 @@ func on_browser_event_selected(node: Variant) -> void:
 	_header.heading = bn.name
 	_show_event()
 	_sync_authoring_mode_picker(bn)
+	_refresh_output_bus_picker(bn)
 	if _parameters_section != null:
 		_parameters_section.set_event(bn)
 	if _modulation_section != null:
@@ -210,6 +246,67 @@ func _on_authoring_mode_picked(idx: int) -> void:
 	var err: String = _project.set_event_authoring_mode(_selected_node.id, mode_id)
 	if not err.is_empty():
 		push_warning("Coda: " + err)
+		return
+	authoring_mode_changed.emit(_selected_node)
+
+
+func _refresh_output_bus_picker(node: CodaBrowserNode) -> void:
+	if _output_bus_picker == null:
+		return
+	_output_bus_picker.clear()
+	_output_bus_picker.add_item("Master (default)", 0)
+	var select_idx: int = 0
+	if _project != null and _project.bus_root != null:
+		var flat: Array[CodaBus] = _project.bus_root.collect_flat([])
+		for i in flat.size():
+			var b: CodaBus = flat[i]
+			_output_bus_picker.add_item(b.bus_name, i + 1)
+			_output_bus_picker.set_item_metadata(i + 1, b.id)
+			if b.id == node.event_output_bus_id:
+				select_idx = i + 1
+	_output_bus_picker.select(select_idx)
+
+
+func _on_output_bus_picked(idx: int) -> void:
+	if _selected_node == null or _project == null:
+		return
+	if idx <= 0:
+		_selected_node.event_output_bus_id = ""
+	else:
+		_selected_node.event_output_bus_id = str(_output_bus_picker.get_item_metadata(idx))
+	_project.project_dirty.emit()
+
+
+func _show_game_sync(payload: Dictionary) -> void:
+	if _empty_state != null:
+		_empty_state.visible = false
+	if _scroll != null:
+		_scroll.visible = true
+	if _event_stack != null:
+		_event_stack.visible = false
+	if _asset_section != null:
+		_asset_section.visible = false
+	if _bank_section != null:
+		_bank_section.visible = false
+	if _game_sync_section != null:
+		_game_sync_section.visible = true
+		_game_sync_section.set_rule_payload(payload)
+
+
+func _show_bank(bank_id: String) -> void:
+	if _empty_state != null:
+		_empty_state.visible = false
+	if _scroll != null:
+		_scroll.visible = true
+	if _event_stack != null:
+		_event_stack.visible = false
+	if _asset_section != null:
+		_asset_section.visible = false
+	if _game_sync_section != null:
+		_game_sync_section.visible = false
+	if _bank_section != null:
+		_bank_section.visible = true
+		_bank_section.set_bank(bank_id)
 
 
 func _show_empty() -> void:
@@ -222,6 +319,10 @@ func _show_empty() -> void:
 		_event_stack.visible = false
 	if _asset_section != null:
 		_asset_section.visible = false
+	if _game_sync_section != null:
+		_game_sync_section.visible = false
+	if _bank_section != null:
+		_bank_section.visible = false
 
 
 func _show_event() -> void:

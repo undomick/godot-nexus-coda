@@ -10,6 +10,9 @@ extends PanelContainer
 
 const CodaDesignTokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
+const CodaEditorShortcutsScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_shortcuts.gd"
+)
 
 const DEFAULT_HELP := "Hover any control for help. Press Ctrl+P to open the command palette."
 
@@ -17,6 +20,7 @@ var _help_label: Label
 var _log_label: Label
 var _project_label: Label
 var _last_focused: Control = null
+var _panel_hint: String = ""
 
 
 func _init() -> void:
@@ -92,19 +96,32 @@ func _hovered_with_help() -> Control:
 	var v: Viewport = get_viewport()
 	if v == null:
 		return null
-	var p: Vector2 = v.get_mouse_position()
-	# Walk all top-level Controls is overkill; lean on Godot's hovered-on-focus and accept
-	# that hover-only hints arrive on focus changes. Returning null keeps the default help.
+	var hovered: Control = v.gui_get_hovered_control()
+	while hovered != null:
+		if hovered.tooltip_text.strip_edges().length() > 0:
+			return hovered
+		hovered = hovered.get_parent() as Control
+	if not _panel_hint.is_empty():
+		_help_label.text = _panel_hint
 	return null
+
+
+func set_panel_hint(panel_id: StringName) -> void:
+	_panel_hint = CodaEditorShortcutsScript.panel_help_hint(panel_id)
+	if not _panel_hint.is_empty():
+		_help_label.text = _panel_hint
 
 
 func _set_help_from_control(c: Control) -> void:
 	if c == null or not is_instance_valid(c):
-		_help_label.text = DEFAULT_HELP
+		if not _panel_hint.is_empty():
+			_help_label.text = _panel_hint
+		else:
+			_help_label.text = DEFAULT_HELP
 		return
 	var hint: String = c.tooltip_text.strip_edges()
 	if hint.is_empty():
-		hint = c.name if not c.name.is_empty() else DEFAULT_HELP
+		hint = _panel_hint if not _panel_hint.is_empty() else DEFAULT_HELP
 	_help_label.text = hint
 
 

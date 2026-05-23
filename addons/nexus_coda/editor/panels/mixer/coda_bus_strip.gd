@@ -167,6 +167,7 @@ const _CTX_DELETE_BUS := 3
 const _CTX_RESET_VOLUME := 4
 
 var _context_menu: PopupMenu
+var _selected: bool = false
 
 
 func _ready() -> void:
@@ -377,6 +378,23 @@ func _make_meter() -> ProgressBar:
 	pb.custom_minimum_size = Vector2(7, 32)
 	pb.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	return pb
+
+
+func set_selected(selected: bool) -> void:
+	if _selected == selected:
+		return
+	_selected = selected
+	if _selected:
+		var bg: Color = Tokens.SURFACE_RAISED.lerp(Tokens.ACCENT, 0.10)
+		add_theme_stylebox_override(
+			&"panel",
+			Tokens.make_panel_stylebox(bg, Tokens.ACCENT, Tokens.RADIUS_SM, 2)
+		)
+	else:
+		add_theme_stylebox_override(
+			&"panel",
+			Tokens.make_panel_stylebox(Tokens.SURFACE_RAISED, Tokens.SURFACE_BORDER, Tokens.RADIUS_SM)
+		)
 
 
 func bind(

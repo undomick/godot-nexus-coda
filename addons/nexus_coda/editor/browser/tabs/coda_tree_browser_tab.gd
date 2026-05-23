@@ -26,8 +26,17 @@ const BrowserFolderIcons := preload(
 
 const FOLDER_ICON_DISPLAY_MAX := 16
 
+signal event_authoring_open_requested(node: Variant)
+signal event_open_graph_requested(node: Variant)
+signal event_open_timeline_requested(node: Variant)
+
 var _is_events_panel: bool = true
 var _project: CodaState = null
+var _editor_plugin_ref: EditorPlugin = null
+
+
+func set_editor_plugin_ref(plugin: EditorPlugin) -> void:
+	_editor_plugin_ref = plugin
 
 var _quick_actions: HBoxContainer
 var _filter_edit: LineEdit
@@ -340,8 +349,108 @@ func _emit_selection() -> bool:
 
 
 func _on_item_activated() -> void:
+	if _tree == null or _project == null:
+		return
+	var item: TreeItem = _tree.get_selected()
+	if item == null:
+		return
+	var nid: String = str(item.get_metadata(0))
+	var node: CodaBrowserNode = _project.find_node_anywhere(nid)
+	if node == null:
+		return
+	if _is_events_panel and node.kind == CodaBrowserNode.Kind.EVENT:
+		event_authoring_open_requested.emit(node)
+		return
 	if _tree != null:
 		_tree.begin_rename_selected_if_allowed()
+
+
+func request_rename_selected() -> bool:
+	if _tree == null or _project == null:
+		return false
+	var item: TreeItem = _tree.get_selected()
+	if item == null:
+		return false
+	var nid: String = str(item.get_metadata(0))
+	_open_rename(nid)
+	return true
+
+
+func request_delete_selected() -> bool:
+	if _tree == null or _project == null:
+		return false
+	var item: TreeItem = _tree.get_selected()
+	if item == null:
+		return false
+	var nid: String = str(item.get_metadata(0))
+	_open_delete(nid)
+	return true
+
+
+func _selected_event_node() -> CodaBrowserNode:
+	if _tree == null or _project == null:
+		return null
+	var item: TreeItem = _tree.get_selected()
+	if item == null:
+		return null
+	var node: CodaBrowserNode = _project.find_node_anywhere(str(item.get_metadata(0)))
+	if node == null or node.kind != CodaBrowserNode.Kind.EVENT:
+		return null
+	return node
+
+
+func open_selected_in_authoring_view() -> bool:
+	var node: CodaBrowserNode = _selected_event_node()
+	if node == null:
+		return false
+	event_authoring_open_requested.emit(node)
+	return true
+
+
+func open_selected_in_graph() -> bool:
+	var node: CodaBrowserNode = _selected_event_node()
+	if node == null:
+		return false
+	event_open_graph_requested.emit(node)
+	return true
+
+
+func open_selected_in_timeline() -> bool:
+	var node: CodaBrowserNode = _selected_event_node()
+	if node == null:
+		return false
+	event_open_timeline_requested.emit(node)
+	return true
+
+
+func duplicate_selected() -> bool:
+	if not _is_events_panel or _project == null:
+		return false
+	var node: CodaBrowserNode = _selected_event_node()
+	if node == null:
+		return false
+	var copy: CodaBrowserNode = _project.duplicate_events_node(node.id)
+	if copy == null:
+		return false
+	select_by_id(copy.id)
+	return true
+
+
+func reveal_selected_in_filesystem(plugin: EditorPlugin) -> bool:
+	if _is_events_panel or _project == null or plugin == null:
+		return false
+	var item: TreeItem = _tree.get_selected() if _tree != null else null
+	if item == null:
+		return false
+	var node: CodaBrowserNode = _project.find_node_anywhere(str(item.get_metadata(0)))
+	if node == null or node.kind != CodaBrowserNode.Kind.ASSET:
+		return false
+	var path: String = str(node.asset_source_path).strip_edges()
+	if path.is_empty() or not path.begins_with("res://"):
+		return false
+	plugin.get_editor_interface().get_resource_filesystem().update_file(path)
+	plugin.get_editor_interface().call_deferred(&"select_file", path)
+	return true
 
 
 func _on_item_edited() -> void:
@@ -439,6 +548,18 @@ func _on_browser_context_action(is_events: bool, action_id: int, clicked_node_id
 			_open_rename(clicked_node_id)
 		BrowserContextMenu.ID_DELETE:
 			_open_delete(clicked_node_id)
+		BrowserContextMenu.ID_DUPLICATE:
+			if _is_events_panel:
+				duplicate_selected()
+		BrowserContextMenu.ID_OPEN_GRAPH:
+			if _is_events_panel:
+				open_selected_in_graph()
+		BrowserContextMenu.ID_OPEN_TIMELINE:
+			if _is_events_panel:
+				open_selected_in_timeline()
+		BrowserContextMenu.ID_REVEAL_FS:
+			if not _is_events_panel:
+				reveal_selected_in_filesystem(_editor_plugin_ref)
 
 
 # ---------- Rename / delete dialogs ----------

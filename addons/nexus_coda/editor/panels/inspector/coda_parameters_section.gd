@@ -141,6 +141,32 @@ func _append_row(param: CodaEventParameter, index: int) -> void:
 
 	_update_default_widgets_visibility(param.param_type, def_float, def_int, def_bool, def_string)
 
+	var unit_edit := LineEdit.new()
+	unit_edit.placeholder_text = "Unit"
+	unit_edit.custom_minimum_size = Vector2(48, 0)
+	unit_edit.text = param.unit_hint
+	unit_edit.text_changed.connect(
+		func(t: String) -> void:
+			if index >= 0 and index < _draft_parameters.size():
+				_draft_parameters[index].unit_hint = t
+				_push_changes()
+	)
+	row.add_child(unit_edit)
+
+	var smooth_spin := SpinBox.new()
+	smooth_spin.min_value = 0.0
+	smooth_spin.max_value = 5000.0
+	smooth_spin.step = 1.0
+	smooth_spin.tooltip_text = "Smoothing ms (0 = instant)"
+	smooth_spin.value = param.smoothing_ms
+	smooth_spin.value_changed.connect(
+		func(v: float) -> void:
+			if index >= 0 and index < _draft_parameters.size():
+				_draft_parameters[index].smoothing_ms = v
+				_push_changes()
+	)
+	row.add_child(smooth_spin)
+
 	var remove_btn := Button.new()
 	remove_btn.text = "−"
 	remove_btn.tooltip_text = "Remove parameter"

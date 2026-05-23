@@ -134,6 +134,37 @@ func _apply_proportional_splits() -> void:
 	_splits_initialized = true
 
 
+func get_split_state() -> Dictionary:
+	return {
+		"top": _top_h_split.split_offset if _top_h_split != null else 0,
+		"middle": _middle_h_split.split_offset if _middle_h_split != null else 0,
+		"outer": _outer_v_split.split_offset if _outer_v_split != null else 0,
+		"bottom": _bottom_h_split.split_offset if _bottom_h_split != null else 0,
+		"user_top": _user_adjusted_top,
+		"user_middle": _user_adjusted_middle,
+		"user_outer": _user_adjusted_outer,
+		"user_bottom": _user_adjusted_bottom,
+	}
+
+
+func apply_split_state(state: Dictionary) -> void:
+	if state.is_empty():
+		return
+	_user_adjusted_top = bool(state.get("user_top", false))
+	_user_adjusted_middle = bool(state.get("user_middle", false))
+	_user_adjusted_outer = bool(state.get("user_outer", false))
+	_user_adjusted_bottom = bool(state.get("user_bottom", false))
+	if _top_h_split != null and state.has("top"):
+		_top_h_split.split_offset = int(state.get("top", _top_h_split.split_offset))
+	if _middle_h_split != null and state.has("middle"):
+		_middle_h_split.split_offset = int(state.get("middle", _middle_h_split.split_offset))
+	if _outer_v_split != null and state.has("outer"):
+		_outer_v_split.split_offset = int(state.get("outer", _outer_v_split.split_offset))
+	if _bottom_h_split != null and state.has("bottom"):
+		_bottom_h_split.split_offset = int(state.get("bottom", _bottom_h_split.split_offset))
+	_splits_initialized = true
+
+
 func _on_zone_emptied(_zone_id: StringName) -> void:
 	if not _splits_initialized:
 		_apply_proportional_splits()

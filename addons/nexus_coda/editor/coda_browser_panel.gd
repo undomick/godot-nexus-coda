@@ -22,8 +22,8 @@ signal external_selection_requested(target_panel_id: StringName, kind: StringNam
 
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
-const CodaBrowserTabScript := preload(
-	"res://addons/nexus_coda/editor/browser/tabs/coda_browser_tab.gd"
+const CodaTreeBrowserTabScript := preload(
+	"res://addons/nexus_coda/editor/browser/tabs/coda_tree_browser_tab.gd"
 )
 const CodaEventsTabScript := preload(
 	"res://addons/nexus_coda/editor/browser/tabs/coda_events_tab.gd"
@@ -37,6 +37,12 @@ const CodaBanksTabScript := preload(
 const CodaGameSyncsTabScript := preload(
 	"res://addons/nexus_coda/editor/browser/tabs/coda_game_syncs_tab.gd"
 )
+const CodaBusesTabScript := preload(
+	"res://addons/nexus_coda/editor/browser/tabs/coda_buses_tab.gd"
+)
+const CodaSnapshotsTabScript := preload(
+	"res://addons/nexus_coda/editor/browser/tabs/coda_snapshots_tab.gd"
+)
 
 @onready var _tabs: TabContainer = %BrowserTabContainer
 
@@ -45,12 +51,24 @@ var _events_tab: CodaEventsTab
 var _assets_tab: CodaAssetsTab
 var _banks_tab: CodaBanksTab
 var _game_syncs_tab: CodaGameSyncsTab
+var _buses_tab: CodaBusesTab
+var _snapshots_tab: CodaSnapshotsTab
 
 
 func _ready() -> void:
 	_register_default_tabs()
 	for tab in _all_tabs():
 		tab.attach_state(_project)
+
+
+func set_editor_plugin(plugin: EditorPlugin) -> void:
+	for tab in _all_tabs():
+		if tab is CodaTreeBrowserTab:
+			(tab as CodaTreeBrowserTab).set_editor_plugin_ref(plugin)
+
+
+func get_events_tab() -> CodaEventsTab:
+	return _events_tab
 
 
 func get_project():
@@ -91,6 +109,72 @@ func focus_assets_tab() -> void:
 		_tabs.current_tab = idx
 
 
+func focus_events_tab() -> void:
+	if _tabs == null or _events_tab == null:
+		return
+	var idx: int = _tabs.get_tab_idx_from_control(_events_tab)
+	if idx >= 0:
+		_tabs.current_tab = idx
+
+
+func request_browser_rename() -> bool:
+	var active: CodaBrowserTab = _active_browser_tab()
+	if active == _banks_tab and _banks_tab.has_method(&"request_rename_selected"):
+		return bool(_banks_tab.call(&"request_rename_selected"))
+	if _events_tab != null and _events_tab.has_method(&"request_rename_selected"):
+		return bool(_events_tab.call(&"request_rename_selected"))
+	if _assets_tab != null and _assets_tab.has_method(&"request_rename_selected"):
+		return bool(_assets_tab.call(&"request_rename_selected"))
+	return false
+
+
+func request_browser_delete() -> bool:
+	var active: CodaBrowserTab = _active_browser_tab()
+	if active == _banks_tab and _banks_tab.has_method(&"request_delete_selected"):
+		return bool(_banks_tab.call(&"request_delete_selected"))
+	if _events_tab != null and _events_tab.has_method(&"request_delete_selected"):
+		return bool(_events_tab.call(&"request_delete_selected"))
+	if _assets_tab != null and _assets_tab.has_method(&"request_delete_selected"):
+		return bool(_assets_tab.call(&"request_delete_selected"))
+	return false
+
+
+func duplicate_selected_bank() -> bool:
+	if _banks_tab == null or not _banks_tab.has_method(&"duplicate_selected"):
+		return false
+	return bool(_banks_tab.call(&"duplicate_selected"))
+
+
+func open_selected_event_in_authoring_view() -> bool:
+	if _events_tab == null or not _events_tab.has_method(&"open_selected_in_authoring_view"):
+		return false
+	return bool(_events_tab.call(&"open_selected_in_authoring_view"))
+
+
+func duplicate_selected_event() -> bool:
+	if _events_tab == null or not _events_tab.has_method(&"duplicate_selected"):
+		return false
+	return bool(_events_tab.call(&"duplicate_selected"))
+
+
+func open_selected_event_in_graph() -> bool:
+	if _events_tab == null or not _events_tab.has_method(&"open_selected_in_graph"):
+		return false
+	return bool(_events_tab.call(&"open_selected_in_graph"))
+
+
+func open_selected_event_in_timeline() -> bool:
+	if _events_tab == null or not _events_tab.has_method(&"open_selected_in_timeline"):
+		return false
+	return bool(_events_tab.call(&"open_selected_in_timeline"))
+
+
+func reveal_selected_asset_in_filesystem(plugin: EditorPlugin) -> bool:
+	if _assets_tab == null or not _assets_tab.has_method(&"reveal_selected_in_filesystem"):
+		return false
+	return bool(_assets_tab.call(&"reveal_selected_in_filesystem", plugin))
+
+
 # ---------- Tab registration ----------
 
 func _register_default_tabs() -> void:
@@ -105,8 +189,14 @@ func _register_default_tabs() -> void:
 	_banks_tab.name = "Banks"
 	_game_syncs_tab = CodaGameSyncsTabScript.new()
 	_game_syncs_tab.name = "GameSyncs"
+	_buses_tab = CodaBusesTabScript.new()
+	_buses_tab.name = "Buses"
+	_snapshots_tab = CodaSnapshotsTabScript.new()
+	_snapshots_tab.name = "Snapshots"
 	_register_tab(_events_tab)
 	_register_tab(_assets_tab)
+	_register_tab(_buses_tab)
+	_register_tab(_snapshots_tab)
 	_register_tab(_banks_tab)
 	_register_tab(_game_syncs_tab)
 
@@ -133,6 +223,13 @@ func _all_tabs() -> Array[CodaBrowserTab]:
 	return out
 
 
+func _active_browser_tab() -> CodaBrowserTab:
+	if _tabs == null:
+		return null
+	var ctrl: Control = _tabs.get_tab_control(_tabs.current_tab) as Control
+	return ctrl as CodaBrowserTab
+
+
 # ---------- Selection routing ----------
 
 ## Match patterns in GDScript reject function calls; an if/elif chain on plain StringName
@@ -145,6 +242,10 @@ func _on_tab_selection_emitted(category: StringName, payload: Variant) -> void:
 		asset_selection_changed.emit(payload)
 	elif category == &"bank":
 		external_selection_requested.emit(&"inspector", category, payload)
+	elif category == &"bus":
+		external_selection_requested.emit(&"mixer", category, payload)
+	elif category == &"snapshot":
+		external_selection_requested.emit(&"mixer", category, payload)
 	elif category == &"game_sync":
 		external_selection_requested.emit(&"inspector", category, payload)
 	else:

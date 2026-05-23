@@ -68,9 +68,9 @@ func _build_body(data: CodaEventGraphNodeData) -> void:
 		NodeData.Kind.SOUND:
 			_build_sound_body(data)
 		NodeData.Kind.SWITCH:
-			_build_placeholder_body("Switch — Phase 4 (parameter-driven)")
+			_build_switch_body(data)
 		NodeData.Kind.BLEND:
-			_build_placeholder_body("Blend — Phase 4 (parameter-driven)")
+			_build_blend_body(data)
 
 
 func _build_trigger_body() -> void:
@@ -97,10 +97,53 @@ func _build_sequence_body(data: CodaEventGraphNodeData) -> void:
 
 func _build_random_body() -> void:
 	var hint := Label.new()
-	hint.text = "Picks one child by weight"
+	hint.text = "Child weights are edited on connected nodes (Inspector modulation)."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
 	hint.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
 	add_child(hint)
+	var weight_spin := SpinBox.new()
+	weight_spin.min_value = 0.0
+	weight_spin.max_value = 100.0
+	weight_spin.step = 0.1
+	weight_spin.value = float(_data_ref.properties.get("weight", 1.0))
+	weight_spin.value_changed.connect(
+		func(v: float) -> void: property_changed.emit(_model_node_id, "weight", v)
+	)
+	add_child(_make_labeled("Weight", weight_spin))
+
+
+func _build_switch_body(data: CodaEventGraphNodeData) -> void:
+	var param_edit := LineEdit.new()
+	param_edit.placeholder_text = "Parameter name"
+	param_edit.text = str(data.properties.get("parameter_name", ""))
+	param_edit.text_changed.connect(
+		func(t: String) -> void: property_changed.emit(_model_node_id, "parameter_name", t)
+	)
+	add_child(_make_labeled("Parameter", param_edit))
+
+
+func _build_blend_body(data: CodaEventGraphNodeData) -> void:
+	var param_edit := LineEdit.new()
+	param_edit.placeholder_text = "Parameter name"
+	param_edit.text = str(data.properties.get("parameter_name", ""))
+	param_edit.text_changed.connect(
+		func(t: String) -> void: property_changed.emit(_model_node_id, "parameter_name", t)
+	)
+	add_child(_make_labeled("Blend param", param_edit))
+
+
+func _make_labeled(label_text: String, control: Control) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
+	var lbl := Label.new()
+	lbl.text = label_text
+	lbl.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
+	lbl.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
+	row.add_child(lbl)
+	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(control)
+	return row
 
 
 func _build_sound_body(data: CodaEventGraphNodeData) -> void:

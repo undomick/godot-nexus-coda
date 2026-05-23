@@ -18,6 +18,9 @@ const CodaTimelineViewScript := preload(
 const CodaTrackHeaderStripScript := preload(
 	"res://addons/nexus_coda/editor/widgets/timeline/coda_track_header_strip.gd"
 )
+const CodaTimelineMarkerUiScript := preload(
+	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_marker_ui.gd"
+)
 
 const RULER_HEIGHT := CodaTimelineViewScript.RULER_HEIGHT
 const MAX_TIMELINE_UNDO := 40
@@ -69,6 +72,7 @@ var _track_row_spin: SpinBox
 var _suppress_track_row_spin: bool = false
 var _track_reorder_from: int = -1
 var _track_drag_watch_running: bool = false
+var _marker_rename_dialog_ref: Array = []
 
 
 func _ready() -> void:
@@ -134,6 +138,11 @@ func _process(_delta: float) -> void:
 	if _live_handle != null and _live_handle.is_timeline:
 		if not _live_handle.is_paused():
 			_view.set_playhead(_live_handle.timeline_cursor_seconds)
+
+
+func set_external_playhead_seconds(seconds: float) -> void:
+	if _view != null:
+		_view.set_playhead(seconds)
 
 
 func on_browser_event_selected(node: Variant) -> void:
@@ -345,6 +354,10 @@ func _build_split_root() -> void:
 	_view.loop_region_changed.connect(_on_view_loop_region_changed)
 	_view.playhead_seek_requested.connect(_on_view_playhead_seek_requested)
 	_view.marker_double_clicked.connect(_on_view_marker_double_clicked)
+	_view.marker_selected.connect(_on_view_marker_selected)
+	_view.marker_delete_requested.connect(_on_view_marker_delete_requested)
+	_view.marker_rename_requested.connect(_on_view_marker_rename_requested)
+	_view.marker_go_to_time_requested.connect(_on_view_marker_go_to_time_requested)
 	_view.track_row_selected.connect(_on_view_track_row_selected)
 	_view.clip_audio_assign_requested.connect(_on_view_clip_audio_assign_requested)
 	_view.timeline_interaction_started.connect(_on_view_timeline_interaction_started)
@@ -1073,25 +1086,56 @@ func _on_view_playhead_seek_requested(time_seconds: float) -> void:
 
 
 func _on_view_marker_double_clicked(marker_id: String) -> void:
+	_open_marker_rename(marker_id)
+
+
+func _on_view_marker_selected(_marker_id: String) -> void:
+	pass
+
+
+func _on_view_marker_rename_requested(marker_id: String) -> void:
+	_open_marker_rename(marker_id)
+
+
+func _on_view_marker_delete_requested(marker_id: String) -> void:
+	_delete_marker(marker_id)
+
+
+func _on_view_marker_go_to_time_requested(marker_id: String) -> void:
+	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
+		return
+	var m: CodaTimelineMarker = _selected_event.event_timeline.find_marker(marker_id)
+	if m == null:
+		return
+	_view.set_playhead(m.time_seconds)
+	_on_view_playhead_seek_requested(m.time_seconds)
+
+
+func _open_marker_rename(marker_id: String) -> void:
 	if _selected_event == null or _selected_event.event_timeline == null:
 		return
 	var m: CodaTimelineMarker = _selected_event.event_timeline.find_marker(marker_id)
 	if m == null:
 		return
-	# Inline rename via a tiny popup; deferring to a richer popup_menu would be Phase C polish.
-	var dlg := AcceptDialog.new()
-	dlg.title = "Rename Marker"
-	var le := LineEdit.new()
-	le.text = m.marker_name
-	le.custom_minimum_size = Vector2(240, 0)
-	dlg.add_child(le)
-	dlg.confirmed.connect(
-		func() -> void:
-			m.marker_name = le.text
-			_notify_timeline_changed()
+	CodaTimelineMarkerUiScript.open_rename_dialog(
+		self,
+		m,
+		func(new_name: String) -> void:
+			_push_timeline_undo()
+			CodaTimelineMarkerUiScript.rename_marker(m, new_name)
+			_notify_timeline_changed(),
+		_marker_rename_dialog_ref
 	)
-	add_child(dlg)
-	dlg.popup_centered()
+
+
+func _delete_marker(marker_id: String) -> void:
+	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
+		return
+	_push_timeline_undo()
+	if CodaTimelineMarkerUiScript.delete_marker(_selected_event.event_timeline, marker_id):
+		if _view.get_selected_marker_id() == marker_id:
+			_view.clear_marker_selection()
+		_notify_timeline_changed()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -1113,6 +1157,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if k.ctrl_pressed and not k.alt_pressed and (k.keycode == KEY_Y or (k.keycode == KEY_Z and k.shift_pressed)):
 			_redo_timeline()
 			get_viewport().set_input_as_handled()
+			return
+		if _view != null and not _view.get_selected_marker_id().is_empty():
+			if k.keycode == KEY_F2:
+				_open_marker_rename(_view.get_selected_marker_id())
+				get_viewport().set_input_as_handled()
+				return
+			if k.keycode == KEY_DELETE or k.keycode == KEY_BACKSPACE:
+				_delete_marker(_view.get_selected_marker_id())
+				get_viewport().set_input_as_handled()
+				return
 
 
 func _push_timeline_undo() -> void:
