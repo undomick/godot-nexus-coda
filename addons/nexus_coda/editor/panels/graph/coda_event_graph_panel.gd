@@ -450,7 +450,8 @@ func _selected_event_has_preview_audio() -> bool:
 		return false
 	var plan_entries: Array = []
 	if _selected_event.event_graph != null:
-		plan_entries = CodaGraphSchedulerScript.plan(_selected_event.event_graph, {})
+		var planned: Dictionary = CodaGraphSchedulerScript.plan(_selected_event.event_graph, {})
+		plan_entries = planned.get("entries", []) as Array
 	if not plan_entries.is_empty():
 		return true
 	return _selected_event.event_audio_paths.size() > 0

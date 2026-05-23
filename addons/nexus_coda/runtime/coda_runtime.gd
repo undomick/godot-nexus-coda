@@ -525,8 +525,11 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 	params["_coda_voice_bus"] = resolve_bus_name_for_event(event)
 	# Resolve the play list. Prefer the v2 graph; fall back to legacy flat list (random pick) if missing.
 	var plan_entries: Array = []
+	var graph_event_loop: bool = false
 	if event.event_graph != null:
-		plan_entries = CodaGraphSchedulerScript.plan(event.event_graph, live_params)
+		var planned: Dictionary = CodaGraphSchedulerScript.plan(event.event_graph, live_params)
+		plan_entries = planned.get("entries", []) as Array
+		graph_event_loop = bool(planned.get("event_loop", false))
 	if plan_entries.is_empty() and event.event_audio_paths.size() > 0:
 		var legacy_path: String = event.event_audio_paths[randi() % event.event_audio_paths.size()]
 		plan_entries = [{
@@ -549,8 +552,9 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 	handle.params = params.duplicate()
 	handle.param_values = live_params
 	handle.param_values_smoothed = live_params.duplicate()
-	handle.loop = bool(params.get("loop", false))
+	handle.loop = bool(params.get("loop", false)) or graph_event_loop
 	handle._bus_name = bus_name
+	handle.timeline_runtime = self
 
 	# Phase 4: BLEND can produce two simultaneous voices that share a handle. Detect this by
 	# looking at blend_weight on the first two entries; if both are <1, start them in parallel.
@@ -558,12 +562,13 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 	var queued_after_parallel: Array = plan_entries.slice(parallel_entries.size())
 
 	var primary_player: AudioStreamPlayer = null
-	var parallel_started: int = 0
-	for entry in parallel_entries:
+	var parallel_started_indices: Dictionary = {}
+	for i in parallel_entries.size():
+		var entry: Dictionary = parallel_entries[i] as Dictionary
 		var player: AudioStreamPlayer = _start_player_for_entry(entry, params)
 		if player == null:
 			continue
-		parallel_started += 1
+		parallel_started_indices[i] = true
 		if primary_player == null:
 			primary_player = player
 			handle.current_sound_id = String(entry.get("sound_id", ""))
@@ -579,14 +584,14 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 			_active_handles[player.get_instance_id()] = sib_h
 	if primary_player == null:
 		return null
-	if parallel_started < parallel_entries.size():
+	if parallel_started_indices.size() < parallel_entries.size():
 		_warn(
 			"voice pool exhausted; BLEND step incomplete for '%s' (%d/%d voices)"
-			% [event.name, parallel_started, parallel_entries.size()]
+			% [event.name, parallel_started_indices.size(), parallel_entries.size()]
 		)
 		handle.params["_coda_full_plan"] = plan_entries
 		handle.params["_coda_plan"] = _graph_plan_after_incomplete_parallel_step(
-			parallel_entries, parallel_started, queued_after_parallel
+			parallel_entries, parallel_started_indices, queued_after_parallel
 		)
 		_mark_graph_plan_resume(handle)
 		return handle
@@ -626,9 +631,12 @@ func _split_parallel_entries(entries: Array) -> Array:
 ## Remaining parallel legs plus the rest of the plan. Used when the voice pool starts only part
 ## of a BLEND step so finished legs are not replayed from the beginning.
 func _graph_plan_after_incomplete_parallel_step(
-	parallel_entries: Array, parallel_started: int, rest: Array
+	parallel_entries: Array, started_indices: Dictionary, rest: Array
 ) -> Array:
-	var out: Array = parallel_entries.slice(parallel_started)
+	var out: Array = []
+	for i in parallel_entries.size():
+		if not started_indices.has(i):
+			out.append(parallel_entries[i])
 	out.append_array(rest)
 	return out
 
@@ -716,12 +724,13 @@ func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
 	var parallel_entries: Array = _split_parallel_entries(plan_entries)
 	var queued_after_parallel: Array = plan_entries.slice(parallel_entries.size())
 	var primary_player: AudioStreamPlayer = null
-	var parallel_started: int = 0
-	for entry in parallel_entries:
+	var parallel_started_indices: Dictionary = {}
+	for i in parallel_entries.size():
+		var entry: Dictionary = parallel_entries[i] as Dictionary
 		var player: AudioStreamPlayer = _start_player_for_entry(entry, h.params)
 		if player == null:
 			continue
-		parallel_started += 1
+		parallel_started_indices[i] = true
 		if primary_player == null:
 			primary_player = player
 			h.current_sound_id = String(entry.get("sound_id", ""))
@@ -737,9 +746,9 @@ func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
 			_active_handles[player.get_instance_id()] = sib_h
 	if primary_player == null:
 		return false
-	if parallel_started < parallel_entries.size():
+	if parallel_started_indices.size() < parallel_entries.size():
 		h.params["_coda_plan"] = _graph_plan_after_incomplete_parallel_step(
-			parallel_entries, parallel_started, queued_after_parallel
+			parallel_entries, parallel_started_indices, queued_after_parallel
 		)
 		_mark_graph_plan_resume(h)
 		return false
@@ -812,6 +821,9 @@ func _start_player_for_entry(entry: Dictionary, params: Dictionary) -> AudioStre
 	if stream == null:
 		_warn("audio resource not an AudioStream: '%s'" % stream_path)
 		return null
+	if bool(entry.get("loop", false)):
+		stream = stream.duplicate()
+		stream.loop = true
 	var player: AudioStreamPlayer = _pool.acquire()
 	if player == null:
 		_warn("voice pool exhausted while playing '%s'" % stream_path)
@@ -862,13 +874,16 @@ func _on_voice_finished(player: AudioStreamPlayer) -> void:
 			var sib_idx: int = parent.graph_parallel_siblings.find(h)
 			if sib_idx >= 0:
 				parent.graph_parallel_siblings.remove_at(sib_idx)
-			_try_finish_graph_handle(parent)
+			if not parent._paused:
+				_try_finish_graph_handle(parent)
 		return
 	_try_finish_graph_handle(h)
 
 
 func _try_finish_graph_handle(h: CodaEventHandle) -> void:
 	if h == null or not h._alive:
+		return
+	if h._paused:
 		return
 	if _graph_parallel_still_playing(h):
 		return
@@ -880,12 +895,13 @@ func _try_finish_graph_handle(h: CodaEventHandle) -> void:
 		var parallel_entries: Array = _split_parallel_entries(plan_slice)
 		var rest: Array = plan_slice.slice(parallel_entries.size())
 		var primary_player: AudioStreamPlayer = null
-		var parallel_started: int = 0
-		for entry in parallel_entries:
+		var parallel_started_indices: Dictionary = {}
+		for i in parallel_entries.size():
+			var entry: Dictionary = parallel_entries[i] as Dictionary
 			var player: AudioStreamPlayer = _start_player_for_entry(entry, h.params)
 			if player == null:
 				continue
-			parallel_started += 1
+			parallel_started_indices[i] = true
 			if primary_player == null:
 				primary_player = player
 				h.current_sound_id = String(entry.get("sound_id", ""))
@@ -900,13 +916,13 @@ func _try_finish_graph_handle(h: CodaEventHandle) -> void:
 				h.graph_parallel_siblings.append(sib_h)
 				_active_handles[player.get_instance_id()] = sib_h
 		if primary_player != null:
-			if parallel_started < parallel_entries.size():
+			if parallel_started_indices.size() < parallel_entries.size():
 				_warn(
 					"voice pool exhausted; BLEND step incomplete for '%s' (%d/%d voices)"
-					% [h.event_path, parallel_started, parallel_entries.size()]
+					% [h.event_path, parallel_started_indices.size(), parallel_entries.size()]
 				)
 				h.params["_coda_plan"] = _graph_plan_after_incomplete_parallel_step(
-					parallel_entries, parallel_started, rest
+					parallel_entries, parallel_started_indices, rest
 				)
 				_mark_graph_plan_resume(h)
 				return
@@ -976,6 +992,7 @@ func _start_timeline_event(
 		"timeline": timeline,
 		"voices": {},  # clip_id -> AudioStreamPlayer
 		"fired_clip_ids": {},  # clip_id -> true (cleared on loop wrap or seek)
+		"spent_clip_ids": {},  # clip_id -> true when source ended before clip window ends
 		"layout_sig": _timeline_layout_signature(timeline),
 		"live_params": live_params,
 		"loop_override_start": loop_override_start,
@@ -1050,6 +1067,9 @@ func _heal_timeline_orphaned_fired_clips(
 			continue
 		for clip in track.clips:
 			if not fired.has(clip.id):
+				continue
+			var spent: Dictionary = d.get("spent_clip_ids", {})
+			if spent.has(clip.id):
 				continue
 			if voices.has(clip.id):
 				continue
@@ -1130,6 +1150,7 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 			var cursor_at_frame_start: float = prev_cursor
 			_fire_clips_in_range(handle, d, timeline, cursor_at_frame_start, wrap_target)
 			d["fired_clip_ids"] = {}
+			d["spent_clip_ids"] = {}
 			# Stop currently-playing voices so the next iteration retriggers them on cue.
 			_stop_timeline_voices(d, handle)
 			var loop_lo: float = loop_start if loop_start >= 0.0 else 0.0
@@ -1203,6 +1224,9 @@ func _fire_clips_in_range(
 			if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
 				continue
 			if fired.has(clip.id):
+				continue
+			var spent: Dictionary = d.get("spent_clip_ids", {})
+			if spent.has(clip.id):
 				continue
 			var clip_end: float = clip.start_seconds + clip.duration_seconds
 			if clip_end <= from_seconds or clip.start_seconds >= to_seconds:
@@ -1385,9 +1409,11 @@ func _on_timeline_voice_finished(player: AudioStreamPlayer, key: int) -> void:
 	var clip_end: float = cl.start_seconds + cl.duration_seconds
 	if h.timeline_cursor_seconds >= clip_end - 0.001:
 		return
-	var fired: Dictionary = d.get("fired_clip_ids", {})
-	fired.erase(finished_clip_id)
-	d["fired_clip_ids"] = fired
+	# Source ended before the clip window ends. Keep fired set so we do not respawn every frame;
+	# pool-orphan recovery uses _heal_timeline_orphaned_fired_clips (spent lanes are excluded).
+	var spent: Dictionary = d.get("spent_clip_ids", {})
+	spent[finished_clip_id] = true
+	d["spent_clip_ids"] = spent
 
 
 func _apply_timeline_seek(
@@ -1401,6 +1427,7 @@ func _apply_timeline_seek(
 	_stop_timeline_voices(d, handle)
 	# Seek invalidates prior start-crossing state; _prime skips ids still listed in fired_clip_ids.
 	d["fired_clip_ids"] = {}
+	d["spent_clip_ids"] = {}
 	# Re-prime clips overlapping the new cursor. Without this, scrubbing the playhead or using
 	# the transport seek slider leaves silence until the cursor crosses another clip start.
 	_prime_timeline_overlapping_voices(handle, d, timeline, clamped)
@@ -1492,6 +1519,7 @@ func resync_timeline_preview_for_event(event_id: String) -> void:
 		return
 	d["layout_sig"] = sig
 	d["fired_clip_ids"] = {}
+	d["spent_clip_ids"] = {}
 	_stop_timeline_voices(d, handle)
 	_prime_timeline_overlapping_voices(handle, d, timeline, handle.timeline_cursor_seconds)
 
@@ -1554,6 +1582,63 @@ func get_active_timeline_handle_for_event(event_id: String) -> CodaEventHandle:
 	return null
 
 
+## Graph preview: stop pooled players on pause so [code]stream_paused[/code] voices do not pin the pool.
+func pause_graph_preview(handle: CodaEventHandle) -> void:
+	if handle == null or handle.is_timeline:
+		return
+	var positions: Dictionary = {}
+	if handle._player != null and is_instance_valid(handle._player):
+		if handle._player.playing:
+			positions[str(handle._player.get_instance_id())] = handle._player.get_playback_position()
+		var pk: int = handle._player.get_instance_id()
+		_active_handles.erase(pk)
+		if handle._player.playing:
+			handle._player.stop()
+	for sib in handle.graph_parallel_siblings:
+		if sib == null or sib._player == null or not is_instance_valid(sib._player):
+			continue
+		if sib._player.playing:
+			positions[str(sib._player.get_instance_id())] = sib._player.get_playback_position()
+		var sk: int = sib._player.get_instance_id()
+		_active_handles.erase(sk)
+		if sib._player.playing:
+			sib._player.stop()
+	handle.params["_coda_graph_pause_positions"] = positions
+
+
+## Graph preview: resume voices stopped by [method pause_graph_preview].
+func resume_graph_preview(handle: CodaEventHandle) -> void:
+	if handle == null or handle.is_timeline:
+		return
+	var positions: Dictionary = handle.params.get("_coda_graph_pause_positions", {})
+	if positions is Dictionary:
+		_resume_graph_paused_player(handle, handle, positions as Dictionary)
+		for sib in handle.graph_parallel_siblings:
+			if sib == null:
+				continue
+			_resume_graph_paused_player(handle, sib, positions as Dictionary)
+	handle.params.erase("_coda_graph_pause_positions")
+
+
+func _resume_graph_paused_player(
+	owner: CodaEventHandle, voice: CodaEventHandle, positions: Dictionary
+) -> void:
+	if voice._player == null or not is_instance_valid(voice._player):
+		return
+	if voice._player.stream == null:
+		return
+	var key: String = str(voice._player.get_instance_id())
+	var at: float = maxf(0.0, float(positions.get(key, 0.0)))
+	voice._player.play(at)
+	var gen: int = int(voice._player.get_meta(&"_coda_playback_gen", -1))
+	if voice == owner:
+		owner.params["_coda_playback_gen"] = gen
+		_active_handles[voice._player.get_instance_id()] = owner
+	else:
+		voice.params["_coda_playback_gen"] = gen
+		_active_handles[voice._player.get_instance_id()] = voice
+
+
 ## Editor preview: pause every timeline lane voice (handle.pause() routes here when [member CodaEventHandle.is_timeline]).
 func pause_timeline_preview(handle: CodaEventHandle) -> void:
 	if handle == null or not _timeline_dispatchers.has(handle):
@@ -1563,6 +1648,7 @@ func pause_timeline_preview(handle: CodaEventHandle) -> void:
 	# Stop lane voices instead of stream_paused so pooled players stay available for graph preview.
 	_stop_timeline_voices(d, handle)
 	d["fired_clip_ids"] = {}
+	d["spent_clip_ids"] = {}
 
 
 ## Editor preview: resume all lane voices; if seek cleared every player, re-prime at the cursor.
@@ -1578,6 +1664,7 @@ func resume_timeline_preview(handle: CodaEventHandle) -> void:
 			return
 		handle._paused = false
 		d["fired_clip_ids"] = {}
+		d["spent_clip_ids"] = {}
 		_prime_timeline_overlapping_voices(handle, d, timeline, handle.timeline_cursor_seconds)
 		return
 	handle._paused = false
