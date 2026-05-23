@@ -246,12 +246,12 @@ func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 		if _timeline_dispatchers.has(handle):
 			_finalize_timeline_handle(handle)
 		elif handle._alive:
-			handle.stop(fade_ms)
+			handle._stop_immediate(fade_ms)
 		return
 	var was_alive: bool = handle._alive
 	_unmark_graph_plan_resume(handle)
 	_stop_graph_parallel_siblings(handle)
-	handle.stop(fade_ms)
+	handle._stop_immediate(fade_ms)
 	if was_alive:
 		voice_finished.emit(handle)
 
