@@ -200,16 +200,18 @@ func get_project() -> CodaState:
 
 func play(event_path: String, params: Dictionary = {}) -> CodaEventHandle:
 	# Loaded banks win over the live project so gameplay is deterministic across builds.
-	var event_node: CodaBrowserNode = _resolve_in_loaded_banks(event_path)
+	var bank_resolved: Dictionary = _resolve_in_loaded_banks(event_path)
+	var event_node: CodaBrowserNode = bank_resolved.get("node", null) as CodaBrowserNode
+	var source_bank_id: String = str(bank_resolved.get("bank_id", ""))
 	if event_node == null and _project != null:
 		event_node = CodaEventResolverScript.resolve(_project, event_path)
 	if event_node == null:
 		_warn("event not found: '%s'" % event_path)
 		return null
-	return _start_event(event_node, event_path, params)
+	return _start_event(event_node, event_path, params, source_bank_id)
 
 
-func _resolve_in_loaded_banks(event_path: String) -> CodaBrowserNode:
+func _resolve_in_loaded_banks(event_path: String) -> Dictionary:
 	var p: String = event_path.strip_edges()
 	if p.begins_with("events/"):
 		p = p.substr(7)
@@ -217,11 +219,12 @@ func _resolve_in_loaded_banks(event_path: String) -> CodaBrowserNode:
 	# _rebuild_bus_id_map_from_loaded_banks where the last manifest wins per bus id.
 	var bank_ids: Array = _loaded_banks.keys()
 	for i in range(bank_ids.size() - 1, -1, -1):
-		var entry: Dictionary = _loaded_banks[bank_ids[i]]
+		var bank_id: String = String(bank_ids[i])
+		var entry: Dictionary = _loaded_banks[bank_id]
 		var by_path: Dictionary = entry.get("events_by_path", {})
 		if by_path.has(p):
-			return by_path[p] as CodaBrowserNode
-	return null
+			return {"node": by_path[p] as CodaBrowserNode, "bank_id": bank_id}
+	return {"node": null, "bank_id": ""}
 
 
 func play_event_node(node: Variant, params: Dictionary = {}) -> CodaEventHandle:
@@ -307,7 +310,7 @@ func stop_all() -> void:
 
 
 func is_alive(handle: CodaEventHandle) -> bool:
-	return handle != null and handle.is_playing()
+	return handle != null and handle._alive
 
 
 func set_parameter(handle: CodaEventHandle, name_or_id: String, value: Variant) -> void:
@@ -487,6 +490,7 @@ func load_bank(path: String) -> String:
 	# Re-loading an existing bank_id must move it to the end of insertion order. Godot keeps
 	# key position on assignment, but later load_bank / hotfix wins rely on reverse iteration.
 	if _loaded_banks.has(bank_id):
+		_stop_voices_for_bank(bank_id)
 		_loaded_banks.erase(bank_id)
 	_loaded_banks[bank_id] = {
 		"bank_name": str(manifest.get("bank_name", "Bank")),
@@ -501,6 +505,7 @@ func load_bank(path: String) -> String:
 func unload_bank(bank_id: String) -> bool:
 	if not _loaded_banks.has(bank_id):
 		return false
+	_stop_voices_for_bank(bank_id)
 	_loaded_banks.erase(bank_id)
 	_apply_loaded_bank_buses()
 	return true
@@ -513,7 +518,45 @@ func loaded_bank_ids() -> PackedStringArray:
 	return out
 
 
-func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> CodaEventHandle:
+func _stop_voices_for_bank(bank_id: String) -> void:
+	if bank_id.is_empty():
+		return
+	var seen: Dictionary = {}
+	for item in _collect_runtime_handles():
+		var h: CodaEventHandle = item as CodaEventHandle
+		if h == null or seen.has(h):
+			continue
+		if h.source_bank_id != bank_id:
+			continue
+		seen[h] = true
+		stop(h)
+
+
+func _collect_runtime_handles() -> Array:
+	var out: Array = []
+	var seen: Dictionary = {}
+	for h in _active_handles.values():
+		if h != null and not seen.has(h):
+			seen[h] = true
+			out.append(h)
+	for h in _timeline_dispatchers.keys():
+		if h != null and not seen.has(h):
+			seen[h] = true
+			out.append(h)
+	for h in _graph_plan_resume_handles:
+		if h != null and not seen.has(h):
+			seen[h] = true
+			out.append(h)
+	for h in _paused_graph_handles:
+		if h != null and not seen.has(h):
+			seen[h] = true
+			out.append(h)
+	return out
+
+
+func _start_event(
+	event: CodaBrowserNode, path: String, params: Dictionary, source_bank_id: String = ""
+) -> CodaEventHandle:
 	var exclusive_preview: bool = bool(params.get("_coda_exclusive_preview", false))
 	params = params.duplicate()
 	params.erase("_coda_exclusive_preview")
@@ -522,7 +565,7 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 	if exclusive_preview:
 		stop_all()
 	if event.event_authoring_mode == CodaBrowserNode.AuthoringMode.TIMELINE:
-		return _start_timeline_event(event, path, params)
+		return _start_timeline_event(event, path, params, source_bank_id)
 	# Build the parameter snapshot used to plan the graph (Switch/Blend look this up).
 	var live_params: Dictionary = _build_param_values(event, params)
 	# Stamp routing on params so _start_player_for_entry uses the right bus per voice.
@@ -554,6 +597,7 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 	_next_handle_id += 1
 	handle.event_path = path
 	handle.event_node = event
+	handle.source_bank_id = source_bank_id
 	handle.params = params.duplicate()
 	handle.param_values = live_params
 	handle.param_values_smoothed = live_params.duplicate()
@@ -657,6 +701,7 @@ func _make_sibling_handle(parent: CodaEventHandle, entry: Dictionary, player: Au
 	_next_handle_id += 1
 	sib.event_path = parent.event_path
 	sib.event_node = parent.event_node
+	sib.source_bank_id = parent.source_bank_id
 	# Siblings carry no plan stash so they don't advance the sequence on finish.
 	sib.params = {"_coda_is_sibling": true, "_coda_graph_parent": parent}
 	sib.param_values = parent.param_values
@@ -986,7 +1031,7 @@ func _warn(msg: String) -> void:
 # ---- Timeline-mode dispatching ----
 
 func _start_timeline_event(
-	event: CodaBrowserNode, path: String, params: Dictionary
+	event: CodaBrowserNode, path: String, params: Dictionary, source_bank_id: String = ""
 ) -> CodaEventHandle:
 	var prior: CodaEventHandle = get_active_timeline_handle_for_event(event.id)
 	if prior != null:
@@ -1004,6 +1049,7 @@ func _start_timeline_event(
 	_next_handle_id += 1
 	handle.event_path = path
 	handle.event_node = event
+	handle.source_bank_id = source_bank_id
 	handle.params = params.duplicate()
 	handle.param_values = live_params
 	handle.param_values_smoothed = live_params.duplicate()

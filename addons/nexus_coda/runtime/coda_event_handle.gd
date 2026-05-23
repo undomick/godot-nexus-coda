@@ -10,6 +10,8 @@ signal finished
 var id: int = 0
 var event_path: String = ""
 var event_node: Variant = null  ## CodaBrowserNode or null after free
+## When non-empty, this voice was started from [method CodaRuntime.load_bank] and should stop on unload/reload.
+var source_bank_id: String = ""
 var params: Dictionary = {}
 ## Live parameter values keyed by parameter id (string). Mutated via Coda.set_parameter().
 var param_values: Dictionary = {}
