@@ -565,7 +565,11 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 	var parallel_started_indices: Dictionary = {}
 	for i in parallel_entries.size():
 		var entry: Dictionary = parallel_entries[i] as Dictionary
-		var player: AudioStreamPlayer = _start_player_for_entry(entry, params)
+		var tail: Array = parallel_entries.slice(i + 1)
+		tail.append_array(queued_after_parallel)
+		var player: AudioStreamPlayer = _start_player_for_entry(
+			entry, params, tail, handle.loop
+		)
 		if player == null:
 			continue
 		parallel_started_indices[i] = true
@@ -728,7 +732,9 @@ func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
 	var parallel_started_indices: Dictionary = {}
 	for i in parallel_entries.size():
 		var entry: Dictionary = parallel_entries[i] as Dictionary
-		var player: AudioStreamPlayer = _start_player_for_entry(entry, h.params)
+		var tail: Array = parallel_entries.slice(i + 1)
+		tail.append_array(queued_after_parallel)
+		var player: AudioStreamPlayer = _start_player_for_entry(entry, h.params, tail, h.loop)
 		if player == null:
 			continue
 		parallel_started_indices[i] = true
@@ -810,7 +816,25 @@ func _is_stale_player_finish(player: AudioStreamPlayer) -> bool:
 	return int(_player_pending_finish_gen.get(key, -1)) != gen
 
 
-func _start_player_for_entry(entry: Dictionary, params: Dictionary) -> AudioStreamPlayer:
+## Sound-node Loop only applies as [member AudioStream.loop] when this entry is the last queued
+## step and the event is not using plan-level loop (Sequence Loop). Otherwise [code]stream.loop[/code]
+## never emits [signal AudioStreamPlayer.finished] and later plan entries / [member CodaEventHandle.loop]
+## restarts never run.
+static func _entry_should_loop_stream(
+	entry: Dictionary, plan_remaining: Array, event_loops: bool
+) -> bool:
+	if not bool(entry.get("loop", false)):
+		return false
+	if not plan_remaining.is_empty():
+		return false
+	if event_loops:
+		return false
+	return true
+
+
+func _start_player_for_entry(
+	entry: Dictionary, params: Dictionary, plan_remaining: Array = [], event_loops: bool = false
+) -> AudioStreamPlayer:
 	var stream_path: String = String(entry.get("audio_path", "")).strip_edges()
 	if stream_path.is_empty():
 		_warn("plan entry has empty audio_path")
@@ -822,7 +846,7 @@ func _start_player_for_entry(entry: Dictionary, params: Dictionary) -> AudioStre
 	if stream == null:
 		_warn("audio resource not an AudioStream: '%s'" % stream_path)
 		return null
-	if bool(entry.get("loop", false)):
+	if _entry_should_loop_stream(entry, plan_remaining, event_loops):
 		stream = stream.duplicate()
 		stream.loop = true
 	var player: AudioStreamPlayer = _pool.acquire()
@@ -899,7 +923,9 @@ func _try_finish_graph_handle(h: CodaEventHandle) -> void:
 		var parallel_started_indices: Dictionary = {}
 		for i in parallel_entries.size():
 			var entry: Dictionary = parallel_entries[i] as Dictionary
-			var player: AudioStreamPlayer = _start_player_for_entry(entry, h.params)
+			var tail: Array = parallel_entries.slice(i + 1)
+			tail.append_array(rest)
+			var player: AudioStreamPlayer = _start_player_for_entry(entry, h.params, tail, h.loop)
 			if player == null:
 				continue
 			parallel_started_indices[i] = true
