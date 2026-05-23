@@ -1784,15 +1784,19 @@ func resume_graph_preview(handle: CodaEventHandle) -> void:
 	if typeof(snapshot) != TYPE_DICTIONARY:
 		return
 	var snap: Dictionary = snapshot as Dictionary
-	var any_resumed: bool = false
+	if snap.is_empty():
+		return
+	var expected: int = snap.size()
+	var resumed: int = 0
 	if _resume_graph_paused_player(handle, handle, snap):
-		any_resumed = true
+		resumed += 1
 	for sib in handle.graph_parallel_siblings:
 		if sib == null:
 			continue
 		if _resume_graph_paused_player(handle, sib, snap):
-			any_resumed = true
-	if not any_resumed and handle._alive:
+			resumed += 1
+	# Partial resume (e.g. voice pool reused a paused BLEND leg) leaves a wrong mix — stop cleanly.
+	if resumed != expected and handle._alive:
 		stop(handle)
 
 
