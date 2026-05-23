@@ -141,8 +141,6 @@ var _choice_result: int = 0
 const UNSAVED_LAYER_NODEPATH := NodePath("UnsavedPromptLayer")
 
 ## If EditorFileDialog returns no path (editor bug / signal issue), we still write JSON here so work is not lost.
-const FALLBACK_SAVE_RES_PATH := "res://nexus_coda_projects/untitled.ncoda"
-
 var _file_dialog_pick_result: String = ""
 var _file_dialog_pick_complete: bool = false
 var _teardown_done: bool = false
@@ -1253,19 +1251,12 @@ func _action_save_as_async() -> void:
 		suggest = _current_path.get_file()
 	var p: String = await _pick_file_via_editor_dialog(true, suggest)
 	if p.is_empty():
-		NexusCodaLog.warn(
-			"project_io",
-			"Save dialog returned no path; saving to fallback %s" % FALLBACK_SAVE_RES_PATH
+		NexusCodaLog.warn("project_io", "Save As cancelled: save dialog returned no path.")
+		_editor_notify(
+			"Save cancelled — no file path was chosen. Use Save if the project already has a path.",
+			true
 		)
-		OS.alert(
-			(
-				"The save dialog did not return a file path (known issue with some Godot/editor builds).\n"
-				+ "Saving to:\n%s"
-			)
-			% FALLBACK_SAVE_RES_PATH,
-			"Nexus Coda"
-		)
-		p = FALLBACK_SAVE_RES_PATH
+		return
 	if p.get_extension().to_lower() != CodaProjectIo.FORMAT_EXTENSION:
 		p = "%s.%s" % [p, CodaProjectIo.FORMAT_EXTENSION]
 	var err_msg: String = _write_and_finish_save(p)
