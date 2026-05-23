@@ -819,7 +819,10 @@ func _on_timeline_length_spin_changed(value: float) -> void:
 	if _suppress_writeback or _selected_event == null or _selected_event.event_timeline == null:
 		return
 	var t: CodaEventTimeline = _selected_event.event_timeline
-	t.length_seconds = maxf(0.5, value)
+	var new_length: float = maxf(0.5, value)
+	if _timeline_length_change_would_truncate(t, new_length):
+		_push_timeline_undo()
+	t.length_seconds = new_length
 	_clamp_clips_to_timeline_length(t)
 	if t.loop_enabled:
 		t.loop_start_seconds = clampf(t.loop_start_seconds, 0.0, t.length_seconds)
@@ -861,6 +864,19 @@ func _extend_timeline_if_content_exceeds() -> void:
 	var margin: float = 0.25
 	if need > t.length_seconds + 0.0001:
 		t.length_seconds = need + margin
+
+
+func _timeline_length_change_would_truncate(t: CodaEventTimeline, new_length: float) -> bool:
+	for tr in t.tracks:
+		for c in tr.clips:
+			if c.start_seconds >= new_length:
+				return true
+			var room: float = maxf(0.0, new_length - c.start_seconds)
+			var max_src: float = c.max_source_playable_seconds()
+			var max_d: float = minf(room, max_src)
+			if c.duration_seconds > max_d + 0.0001:
+				return true
+	return false
 
 
 func _clamp_clips_to_timeline_length(t: CodaEventTimeline) -> void:
