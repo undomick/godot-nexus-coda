@@ -108,10 +108,71 @@ func duplicate_events_node(node_id: String) -> CodaBrowserNode:
 		return null
 	var data: Dictionary = node.to_dictionary()
 	var copy: CodaBrowserNode = CodaBrowserNode.from_dictionary(data)
+	_regenerate_duplicate_event_ids(copy)
 	copy.name = _suggest_duplicate_name(parent, node.name)
 	parent.insert_child_sorted(copy)
 	structure_changed.emit()
 	return copy
+
+
+## Event duplicate must not reuse node/graph/timeline ids or inspector and bank lookups alias the original.
+func _regenerate_duplicate_event_ids(node: CodaBrowserNode) -> void:
+	if node == null or node.kind != CodaBrowserNode.Kind.EVENT:
+		return
+	var temp_node := CodaBrowserNode.new(node.name, CodaBrowserNode.Kind.EVENT)
+	node.id = temp_node.id
+	var param_remap: Dictionary = {}
+	for p in node.event_parameters:
+		var old_pid: String = p.id
+		var temp_param := CodaEventParameter.new()
+		p.id = temp_param.id
+		if not old_pid.is_empty():
+			param_remap[old_pid] = p.id
+	if node.event_graph != null:
+		var graph := node.event_graph
+		var node_remap: Dictionary = {}
+		for gn in graph.nodes:
+			var old_nid: String = gn.id
+			var temp_gn := CodaEventGraphNodeData.new(gn.kind)
+			gn.id = temp_gn.id
+			if not old_nid.is_empty():
+				node_remap[old_nid] = gn.id
+		for e in graph.edges:
+			if node_remap.has(e.from_node_id):
+				e.from_node_id = str(node_remap[e.from_node_id])
+			if node_remap.has(e.to_node_id):
+				e.to_node_id = str(node_remap[e.to_node_id])
+		for m in node.event_modulations:
+			var temp_mod := CodaModulation.new()
+			m.id = temp_mod.id
+			if param_remap.has(m.source_param_id):
+				m.source_param_id = str(param_remap[m.source_param_id])
+			if node_remap.has(m.target_node_id):
+				m.target_node_id = str(node_remap[m.target_node_id])
+	elif not node.event_modulations.is_empty():
+		for m in node.event_modulations:
+			var temp_mod := CodaModulation.new()
+			m.id = temp_mod.id
+			if param_remap.has(m.source_param_id):
+				m.source_param_id = str(param_remap[m.source_param_id])
+	if node.event_timeline != null:
+		_regenerate_duplicate_timeline_ids(node.event_timeline)
+
+
+func _regenerate_duplicate_timeline_ids(timeline: CodaEventTimeline) -> void:
+	for tr in timeline.tracks:
+		var temp_track := CodaTimelineTrack.new()
+		tr.id = temp_track.id
+		for i in range(tr.effects.size()):
+			tr.effects[i] = tr.effects[i].clone_new_id()
+		for c in tr.clips:
+			var temp_clip := CodaTimelineClip.new()
+			c.id = temp_clip.id
+			for i in range(c.effects.size()):
+				c.effects[i] = c.effects[i].clone_new_id()
+	for m in timeline.markers:
+		var temp_marker := CodaTimelineMarker.new()
+		m.id = temp_marker.id
 
 
 func _suggest_duplicate_name(parent: CodaBrowserNode, base_name: String) -> String:
