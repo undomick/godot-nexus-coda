@@ -67,7 +67,16 @@ func is_playing() -> bool:
 	return _player.playing
 
 
-func stop(_fade_ms: int = 0) -> void:
+func stop(fade_ms: int = 0) -> void:
+	# Route through the runtime so BLEND siblings, timeline dispatchers, and plan resume
+	# state are torn down the same way as CodaRuntime.stop().
+	if timeline_runtime != null and is_instance_valid(timeline_runtime):
+		timeline_runtime.stop(self, fade_ms)
+		return
+	_stop_local(fade_ms)
+
+
+func _stop_local(_fade_ms: int = 0) -> void:
 	# Phase 4 will add proper fade; for MVP we stop immediately.
 	_alive = false
 	if _player != null and is_instance_valid(_player) and _player.playing:
