@@ -779,6 +779,7 @@ func _detach_player_from_timeline_dispatchers(player: AudioStreamPlayer) -> void
 	var key: int = player.get_instance_id()
 	_timeline_voice_owner.erase(key)
 	_timeline_voice_playback_gen.erase(key)
+	_clear_timeline_voice_player_meta(player)
 	_free_player_timeline_fx_bus(player)
 	for h in _timeline_dispatchers.keys():
 		var d: Dictionary = _timeline_dispatchers[h]
@@ -1325,11 +1326,13 @@ func _collect_timeline_fx_chain(entry: Dictionary) -> Array:
 	return out
 
 
-func _clear_timeline_voice_extend_meta(player: AudioStreamPlayer) -> void:
+func _clear_timeline_voice_player_meta(player: AudioStreamPlayer) -> void:
 	if player == null or not is_instance_valid(player):
 		return
 	if player.has_meta(&"_coda_timeline_restart_offset"):
 		player.remove_meta(&"_coda_timeline_restart_offset")
+	if player.has_meta(&"_coda_clip_timeline_end"):
+		player.remove_meta(&"_coda_clip_timeline_end")
 
 
 func _retire_timeline_lane_voice(d: Dictionary, clip_id: String) -> void:
@@ -1348,7 +1351,7 @@ func _retire_timeline_lane_voice(d: Dictionary, clip_id: String) -> void:
 	_timeline_voice_playback_gen.erase(pk)
 	if p.playing:
 		p.stop()
-	_clear_timeline_voice_extend_meta(p)
+	_clear_timeline_voice_player_meta(p)
 	_free_player_timeline_fx_bus(p)
 
 
@@ -1384,7 +1387,9 @@ func _spawn_timeline_voice(
 	if player == null:
 		_warn("voice pool exhausted while playing timeline clip '%s'" % stream_path)
 		return false
-	# Carry-over from a previous voice on the same pooled player.
+	# Pooled players may still carry lane metas from a prior timeline clip (seek/loop/stop does not
+	# always run through _retire_timeline_lane_voice). Stale restart/clip-end metas mis-route finished.
+	_clear_timeline_voice_player_meta(player)
 	_free_player_timeline_fx_bus(player)
 	var voice_gen: int = _begin_player_voice(player)
 	var send_bus: String = _timeline_send_bus_for_track(
@@ -1484,7 +1489,7 @@ func _finalize_timeline_lane_voice(
 	if voices.get(finished_clip_id, null) == player:
 		voices.erase(finished_clip_id)
 		d["voices"] = voices
-	_clear_timeline_voice_extend_meta(player)
+	_clear_timeline_voice_player_meta(player)
 
 
 func _apply_timeline_seek(
@@ -1526,7 +1531,7 @@ func _stop_timeline_voices_past_clip_end(
 		var pk: int = p.get_instance_id()
 		_timeline_voice_owner.erase(pk)
 		_timeline_voice_playback_gen.erase(pk)
-		_clear_timeline_voice_extend_meta(p)
+		_clear_timeline_voice_player_meta(p)
 		_free_player_timeline_fx_bus(p)
 		stale_keys.append(sound_key)
 	for k in stale_keys:
@@ -1547,6 +1552,7 @@ func _stop_timeline_voices(d: Dictionary, handle: CodaEventHandle = null) -> voi
 		_timeline_voice_playback_gen.erase(pk)
 		if p.playing:
 			p.stop()
+		_clear_timeline_voice_player_meta(p)
 		_free_player_timeline_fx_bus(p)
 	d["voices"] = {}
 	if handle != null:
