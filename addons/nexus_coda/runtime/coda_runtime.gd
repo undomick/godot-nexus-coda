@@ -594,6 +594,7 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 			parallel_entries, parallel_started_indices, queued_after_parallel
 		)
 		_mark_graph_plan_resume(handle)
+		voice_started.emit(handle)
 		return handle
 	handle.params["_coda_plan"] = queued_after_parallel
 	handle.params["_coda_full_plan"] = plan_entries
