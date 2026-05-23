@@ -140,9 +140,9 @@ var _choice_result: int = 0
 
 const UNSAVED_LAYER_NODEPATH := NodePath("UnsavedPromptLayer")
 
-## If EditorFileDialog returns no path (editor bug / signal issue), we still write JSON here so work is not lost.
 var _file_dialog_pick_result: String = ""
 var _file_dialog_pick_complete: bool = false
+var _file_dialog_pick_canceled: bool = false
 var _teardown_done: bool = false
 var _fs_asset_import_boot_attempts: int = 0
 
@@ -1308,6 +1308,7 @@ func _refresh_editor_filesystem_after_save(path: String) -> void:
 func _await_editor_file_path(dlg: EditorFileDialog) -> String:
 	_file_dialog_pick_result = ""
 	_file_dialog_pick_complete = false
+	_file_dialog_pick_canceled = false
 
 	dlg.file_selected.connect(_on_editor_file_dialog_file_selected, CONNECT_ONE_SHOT)
 	dlg.files_selected.connect(_on_editor_file_dialog_files_selected, CONNECT_ONE_SHOT)
@@ -1319,6 +1320,10 @@ func _await_editor_file_path(dlg: EditorFileDialog) -> String:
 
 	if not _file_dialog_pick_result.is_empty():
 		return _file_dialog_pick_result
+	# Do not treat EditorFileDialog.current_path as a pick when the user canceled — browsing to
+	# an existing file then Cancel would otherwise overwrite it on Save As / bank export.
+	if _file_dialog_pick_canceled:
+		return ""
 	var cp: Variant = dlg.get("current_path")
 	if cp != null:
 		var s: String = str(cp).strip_edges()
@@ -1344,6 +1349,7 @@ func _on_editor_file_dialog_files_selected(paths: PackedStringArray) -> void:
 func _on_editor_file_dialog_canceled() -> void:
 	if _file_dialog_pick_complete:
 		return
+	_file_dialog_pick_canceled = true
 	_file_dialog_pick_complete = true
 
 
