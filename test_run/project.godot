@@ -1,0 +1,20 @@
+; Headless test harness. Requires addons junction to ../addons (see scripts below).
+; First run once: godot --headless --path test_run --import
+; Then:
+;   godot --headless --path test_run -s res://addons/nexus_coda/tests/run_game_music_tests.gd
+; Or from repo root (recommended, uses root .godot cache):
+;   godot --headless --path . -s res://addons/nexus_coda/tests/run_game_music_tests.gd
+config_version=5
+
+[application]
+config/name="Nexus Coda Test Harness"
+
+[autoload]
+
+Coda="*res://addons/nexus_coda/runtime/coda_runtime.gd"
+CodaMusic="*res://addons/nexus_coda/runtime/coda_music_director.gd"
+CodaGameBridge="*res://addons/nexus_coda/runtime/coda_game_bridge.gd"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/nexus_coda/plugin.cfg")

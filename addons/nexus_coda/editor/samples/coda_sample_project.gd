@@ -28,6 +28,19 @@ const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/co
 const CodaBusScript := preload("res://addons/nexus_coda/editor/browser/coda_bus.gd")
 const CodaSnapshotScript := preload("res://addons/nexus_coda/editor/browser/coda_snapshot.gd")
 const CodaBankScript := preload("res://addons/nexus_coda/editor/browser/coda_bank.gd")
+const CodaEventTimelineScript := preload(
+	"res://addons/nexus_coda/editor/browser/timeline/coda_event_timeline.gd"
+)
+const CodaTimelineTrackScript := preload(
+	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_track.gd"
+)
+const CodaTimelineClipScript := preload(
+	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
+)
+const CodaTimelineMarkerScript := preload(
+	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_marker.gd"
+)
+const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/editor/browser/coda_game_sync_rule.gd")
 
 
 static func build() -> CodaState:
@@ -37,8 +50,11 @@ static func build() -> CodaState:
 	var ui_event: CodaBrowserNode = _seed_ui_event(state)
 	var amb_event: CodaBrowserNode = _seed_ambience_event(state)
 	var duck_event: CodaBrowserNode = _seed_ducking_event(state)
+	var explore_event: CodaBrowserNode = _seed_music_exploration(state)
+	var combat_event: CodaBrowserNode = _seed_music_combat(state)
+	_seed_game_sync_rules(state)
 	_seed_snapshot(state)
-	_seed_bank(state, [ui_event, amb_event, duck_event])
+	_seed_bank(state, [ui_event, amb_event, duck_event, explore_event, combat_event])
 	return state
 
 
@@ -182,6 +198,85 @@ static func _seed_ducking_event(state: CodaState) -> CodaBrowserNode:
 	if music_bus != null:
 		ev.event_output_bus_id = music_bus.id
 	return ev
+
+
+static func _seed_music_exploration(state: CodaState) -> CodaBrowserNode:
+	var ev: CodaBrowserNode = _ensure_event_under(state, ["music"], "exploration")
+	ev.event_authoring_mode = CodaBrowserNode.AuthoringMode.TIMELINE
+	ev.event_timeline = CodaEventTimelineScript.make_default()
+	var tl: CodaEventTimeline = ev.event_timeline
+	tl.length_seconds = 32.0
+	tl.tempo_bpm = 120.0
+	tl.loop_enabled = true
+	tl.loop_start_seconds = 0.0
+	tl.loop_end_seconds = 32.0
+
+	var music_state := CodaEventParameterScript.new()
+	music_state.param_name = "music_state"
+	music_state.param_type = CodaEventParameterScript.ParamType.INT
+	music_state.default_value = 0
+	music_state.min_value = 0
+	music_state.max_value = 2
+	ev.event_parameters.append(music_state)
+	ev.event_music_segment_param = "music_state"
+
+	var seg_track: CodaTimelineTrack = CodaTimelineTrackScript.new()
+	seg_track.track_name = "Segments"
+	for i in 3:
+		var clip: CodaTimelineClip = CodaTimelineClipScript.new()
+		clip.start_seconds = float(i) * 10.0
+		clip.duration_seconds = 10.0
+		clip.segment_id = ["calm", "tense", "combat"][i]
+		clip.fade_in_seconds = 1.0
+		clip.fade_out_seconds = 1.0
+		seg_track.clips.append(clip)
+	tl.tracks.append(seg_track)
+
+	var marker: CodaTimelineMarker = CodaTimelineMarkerScript.new()
+	marker.marker_name = "ToCombat"
+	marker.time_seconds = 20.0
+	marker.kind = CodaTimelineMarker.Kind.TRANSITION
+	marker.target_segment_id = "combat"
+	tl.markers.append(marker)
+
+	var music_bus: CodaBus = state.bus_root.find_by_name("Music")
+	if music_bus != null:
+		ev.event_output_bus_id = music_bus.id
+	return ev
+
+
+static func _seed_music_combat(state: CodaState) -> CodaBrowserNode:
+	var ev: CodaBrowserNode = _ensure_event_under(state, ["music"], "combat")
+	ev.event_authoring_mode = CodaBrowserNode.AuthoringMode.TIMELINE
+	ev.event_timeline = CodaEventTimelineScript.make_default()
+	var tl: CodaEventTimeline = ev.event_timeline
+	tl.length_seconds = 16.0
+	tl.tempo_bpm = 140.0
+	tl.loop_enabled = true
+	var music_bus: CodaBus = state.bus_root.find_by_name("Music")
+	if music_bus != null:
+		ev.event_output_bus_id = music_bus.id
+	return ev
+
+
+static func _seed_game_sync_rules(state: CodaState) -> void:
+	var zone_rule: CodaGameSyncRule = state.add_game_sync_rule()
+	zone_rule.signal_name = "zone_entered"
+	zone_rule.action = CodaGameSyncRule.Action.SET_MUSIC
+	zone_rule.target_event_path = "music/exploration"
+	zone_rule.fade_ms = 2500
+
+	var combat_rule: CodaGameSyncRule = state.add_game_sync_rule()
+	combat_rule.signal_name = "combat_started"
+	combat_rule.action = CodaGameSyncRule.Action.SET_MUSIC
+	combat_rule.target_event_path = "music/combat"
+	combat_rule.fade_ms = 1500
+
+	var state_rule: CodaGameSyncRule = state.add_game_sync_rule()
+	state_rule.signal_name = "music_intensity_changed"
+	state_rule.action = CodaGameSyncRule.Action.SET_MUSIC_STATE
+	state_rule.target_event_path = "music/exploration"
+	state_rule.parameter_overrides = {"music_state": 1}
 
 
 static func _seed_snapshot(state: CodaState) -> void:

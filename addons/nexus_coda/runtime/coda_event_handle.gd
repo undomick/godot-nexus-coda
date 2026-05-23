@@ -79,7 +79,6 @@ func stop(fade_ms: int = 0) -> void:
 
 
 func _stop_local(_fade_ms: int = 0) -> void:
-	# Phase 4 will add proper fade; for MVP we stop immediately.
 	_alive = false
 	if _player != null and is_instance_valid(_player) and _player.playing:
 		_player.stop()

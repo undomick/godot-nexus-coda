@@ -14,9 +14,13 @@ class_name CodaRuntime
 ##   Coda.is_alive(handle)
 ##   Coda.set_parameter(handle, name, value)
 ##   Coda.set_global_parameter(name, value)
+##   Coda.apply_snapshot(snapshot_id, blend_ms := -1)
+##   Coda.notify_music_state_changed(handle)
 
 signal voice_started(handle: CodaEventHandle)
 signal voice_finished(handle: CodaEventHandle)
+signal marker_reached(handle: CodaEventHandle, marker_id: String)
+signal project_loaded(state: CodaState)
 
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
 const CodaBrowserNodeScript := preload("res://addons/nexus_coda/editor/browser/coda_browser_node.gd")
@@ -32,6 +36,17 @@ const CodaAudioBusMirrorScript := preload("res://addons/nexus_coda/runtime/coda_
 const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_bus_helper.gd")
 const CodaBankExportScript := preload("res://addons/nexus_coda/editor/io/coda_bank_export.gd")
 const CodaBusScript := preload("res://addons/nexus_coda/editor/browser/coda_bus.gd")
+const CodaVoiceFaderScript := preload("res://addons/nexus_coda/runtime/coda_voice_fader.gd")
+const CodaTimelineSegmentDriverScript := preload(
+	"res://addons/nexus_coda/runtime/coda_timeline_segment_driver.gd"
+)
+const CodaSnapshotBlenderScript := preload("res://addons/nexus_coda/runtime/coda_snapshot_blender.gd")
+const CodaTimelineMusicControllerScript := preload(
+	"res://addons/nexus_coda/runtime/coda_timeline_music_controller.gd"
+)
+const CodaMusicTransitionPolicyScript := preload(
+	"res://addons/nexus_coda/runtime/coda_music_transition_policy.gd"
+)
 
 const RUNTIME_LOG_SCOPE := "runtime"
 
@@ -41,6 +56,7 @@ var _project: CodaState = null
 var _pool: CodaVoicePool
 var _active_handles: Dictionary = {}  ## player_instance_id -> CodaEventHandle
 var _global_params: Dictionary = {}
+var _global_params_last: Dictionary = {}
 var _next_handle_id: int = 1
 ## Map of coda_bus_id (String) -> godot_bus_name (String); refreshed on project change.
 var _bus_id_to_godot_name: Dictionary = {}
@@ -69,6 +85,11 @@ var _graph_plan_resume_handles: Array[CodaEventHandle] = []
 ## Graph previews paused via [method pause_graph_preview]. Removed from [code]_active_handles[/code] while
 ## stopped so the pool stays available; [method stop_all] must still finalize these handles.
 var _paused_graph_handles: Array[CodaEventHandle] = []
+var _voice_fader: CodaVoiceFader
+var _segment_driver: CodaTimelineSegmentDriver
+var _snapshot_blender: CodaSnapshotBlender
+var _timeline_music: CodaTimelineMusicController
+var _transition_policy: CodaMusicTransitionPolicy
 
 
 func _ready() -> void:
@@ -78,16 +99,40 @@ func _ready() -> void:
 		add_child(_pool)
 	if not _pool.voice_finished.is_connected(_on_voice_finished):
 		_pool.voice_finished.connect(_on_voice_finished)
+	_voice_fader = CodaVoiceFaderScript.new(self)
+	_segment_driver = CodaTimelineSegmentDriverScript.new()
+	_transition_policy = CodaMusicTransitionPolicyScript.default_policy()
+	_snapshot_blender = CodaSnapshotBlenderScript.new()
+	_snapshot_blender.setup(_project, Callable(self, "_sync_buses"))
+	_timeline_music = CodaTimelineMusicControllerScript.new()
+	_timeline_music.setup(
+		self,
+		_voice_fader,
+		_segment_driver,
+		_transition_policy,
+		Callable(self, "_emit_marker_reached")
+	)
 	set_process(true)
 
 
+func get_transition_policy() -> CodaMusicTransitionPolicy:
+	return _transition_policy
+
+
+func _emit_marker_reached(handle: CodaEventHandle, marker_id: String) -> void:
+	marker_reached.emit(handle, marker_id)
+
+
 func _process(delta: float) -> void:
+	if _snapshot_blender != null:
+		_snapshot_blender.tick(delta)
 	if not _timeline_dispatchers.is_empty():
 		_tick_timeline_dispatchers(delta)
 	if not _graph_plan_resume_handles.is_empty():
 		_resume_pending_graph_plans()
-	if _active_handles.is_empty():
+	if _active_handles.is_empty() and _global_params.is_empty():
 		return
+	_apply_global_parameters()
 	for h in _active_handles.values():
 		var hh: CodaEventHandle = h as CodaEventHandle
 		if hh == null or not hh._alive:
@@ -111,15 +156,22 @@ func set_project(project: Variant) -> void:
 			_project.project_dirty.disconnect(_on_project_dirty_sync_buses)
 	if project == null:
 		_project = null
+		if _snapshot_blender != null:
+			_snapshot_blender.setup(_project, Callable(self, "_sync_buses"))
+			_snapshot_blender.clear()
 		_apply_loaded_bank_buses()
+		project_loaded.emit(null)
 		return
 	_project = project as CodaState
+	if _snapshot_blender != null:
+		_snapshot_blender.setup(_project, Callable(self, "_sync_buses"))
 	_sync_buses()
 	if _project != null:
 		if not _project.structure_changed.is_connected(_on_project_structure_changed):
 			_project.structure_changed.connect(_on_project_structure_changed)
 		if not _project.project_dirty.is_connected(_on_project_dirty_sync_buses):
 			_project.project_dirty.connect(_on_project_dirty_sync_buses)
+	project_loaded.emit(_project)
 
 
 func _on_project_structure_changed() -> void:
@@ -247,14 +299,14 @@ func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	_drop_paused_graph_preview_state(handle)
 	if handle.is_timeline:
 		if _timeline_dispatchers.has(handle):
-			_finalize_timeline_handle(handle)
+			_finalize_timeline_handle(handle, fade_ms)
 		elif handle._alive:
-			handle._stop_local(fade_ms)
+			_fade_out_and_finalize_handle(handle, fade_ms)
 		return
 	var was_alive: bool = handle._alive
 	_unmark_graph_plan_resume(handle)
-	_stop_graph_parallel_siblings(handle)
-	handle._stop_local(fade_ms)
+	_stop_graph_parallel_siblings(handle, fade_ms)
+	_fade_out_and_finalize_handle(handle, fade_ms)
 	if was_alive:
 		voice_finished.emit(handle)
 
@@ -333,18 +385,155 @@ func set_parameter(handle: CodaEventHandle, name_or_id: String, value: Variant) 
 				param_id = p.id
 				break
 	if param_id.is_empty():
-		# Fall back to using the supplied key as-is so users can pre-set values without param defs.
 		handle.param_values[name_or_id] = value
+		_maybe_notify_music_state(handle, name_or_id)
 		return
 	var param: CodaEventParameter = _find_event_param(event, param_id)
 	var clamped: Variant = value if param == null else param.clamp_value(value)
 	handle.param_values[param_id] = clamped
+	var notify_key: String = param.param_name if param != null else name_or_id
+	_maybe_notify_music_state(handle, notify_key)
+
+
+func _maybe_notify_music_state(handle: CodaEventHandle, name_or_id: String) -> void:
+	if _timeline_music == null or handle == null or not handle.is_timeline:
+		return
+	var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
+	if not _timeline_music.should_notify_for_param(event, name_or_id, Callable(self, "_find_event_param")):
+		return
+	notify_music_state_changed(handle)
 
 
 func set_global_parameter(name: String, value: Variant) -> void:
 	if name.is_empty():
 		return
 	_global_params[name] = value
+
+
+func apply_snapshot(snapshot_id: String, blend_ms: int = -1) -> bool:
+	if _project == null or _snapshot_blender == null:
+		return false
+	var snap: CodaSnapshot = _project.find_snapshot_by_id(snapshot_id)
+	if snap == null:
+		return false
+	var ms: int = blend_ms if blend_ms >= 0 else snap.blend_ms
+	return _snapshot_blender.apply(snapshot_id, ms)
+
+
+func notify_music_state_changed(handle: CodaEventHandle) -> void:
+	if _timeline_music == null:
+		return
+	_timeline_music.notify_music_state_changed(
+		handle, _timeline_dispatchers, Callable(self, "_find_event_param")
+	)
+
+
+func spawn_timeline_segment_voice(
+	handle: CodaEventHandle, d: Dictionary, entry: Dictionary, crossfade_ms: int = -1
+) -> bool:
+	if _timeline_music == null:
+		return false
+	return _timeline_music.spawn_segment_voice(
+		handle, d, entry, Callable(self, "_spawn_timeline_voice"), crossfade_ms
+	)
+
+
+func fade_out_timeline_voice(
+	player: AudioStreamPlayer, fade_ms: int, on_complete: Callable = Callable()
+) -> void:
+	if _timeline_music != null:
+		_timeline_music.fade_out_voice(player, fade_ms, on_complete)
+
+
+func retire_timeline_voice(d: Dictionary, clip_id: String) -> void:
+	_retire_timeline_lane_voice(d, clip_id)
+
+
+func _apply_global_parameters() -> void:
+	if _global_params.is_empty():
+		_global_params_last.clear()
+		return
+	if _global_params.hash() == _global_params_last.hash():
+		return
+	_global_params_last = _global_params.duplicate(true)
+	for h in _active_handles.values():
+		var hh: CodaEventHandle = h as CodaEventHandle
+		if hh == null or not hh._alive or hh.is_timeline:
+			continue
+		for gname in _global_params.keys():
+			_apply_parameter_without_segment_notify(hh, String(gname), _global_params[gname])
+	for h in _timeline_dispatchers.keys():
+		var th: CodaEventHandle = h as CodaEventHandle
+		if th == null or not th._alive:
+			continue
+		for gname in _global_params.keys():
+			_apply_parameter_without_segment_notify(th, String(gname), _global_params[gname])
+
+
+func _apply_parameter_without_segment_notify(
+	handle: CodaEventHandle, name_or_id: String, value: Variant
+) -> void:
+	if handle == null:
+		return
+	var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
+	if event == null:
+		handle.param_values[name_or_id] = value
+		return
+	var param_id: String = ""
+	for p in event.event_parameters:
+		if p.id == name_or_id:
+			param_id = p.id
+			break
+	if param_id.is_empty():
+		var lookup: String = name_or_id.to_lower()
+		for p in event.event_parameters:
+			if String(p.param_name).strip_edges().to_lower() == lookup:
+				param_id = p.id
+				break
+	if param_id.is_empty():
+		handle.param_values[name_or_id] = value
+		return
+	var param: CodaEventParameter = _find_event_param(event, param_id)
+	handle.param_values[param_id] = param.clamp_value(value) if param != null else value
+
+
+func _fade_out_and_finalize_handle(handle: CodaEventHandle, fade_ms: int) -> void:
+	if handle == null:
+		return
+	if fade_ms <= 0:
+		handle._stop_local(0)
+		return
+	var players: Array[AudioStreamPlayer] = _collect_handle_players(handle)
+	if players.is_empty():
+		handle._stop_local(0)
+		return
+	var remaining: int = players.size()
+	var on_one_done := func() -> void:
+		remaining -= 1
+		if remaining <= 0:
+			handle._stop_local(0)
+	for p in players:
+		_voice_fader.fade_volume_db(p, -80.0, fade_ms, on_one_done)
+
+
+func _collect_handle_players(handle: CodaEventHandle) -> Array[AudioStreamPlayer]:
+	var out: Array[AudioStreamPlayer] = []
+	if handle == null:
+		return out
+	if handle.is_timeline and _timeline_dispatchers.has(handle):
+		var d: Dictionary = _timeline_dispatchers[handle]
+		for p in d.get("voices", {}).values():
+			var pl: AudioStreamPlayer = p as AudioStreamPlayer
+			if pl != null and is_instance_valid(pl) and pl.playing:
+				out.append(pl)
+	elif handle._player != null and is_instance_valid(handle._player) and handle._player.playing:
+		out.append(handle._player)
+	for sib in handle.graph_parallel_siblings:
+		if sib == null:
+			continue
+		if sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
+			out.append(sib._player)
+	return out
 
 
 func _find_event_param(event: CodaBrowserNode, param_id: String) -> CodaEventParameter:
@@ -719,13 +908,18 @@ func _make_sibling_handle(parent: CodaEventHandle, entry: Dictionary, player: Au
 	return sib
 
 
-func _stop_graph_parallel_siblings(handle: CodaEventHandle) -> void:
+func _stop_graph_parallel_siblings(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	for sib in handle.graph_parallel_siblings:
 		if sib == null:
 			continue
-		sib._alive = false
-		if sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
-			sib._player.stop()
+		if fade_ms > 0 and sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
+			_voice_fader.fade_volume_db(
+				sib._player, -80.0, fade_ms, Callable(sib, "_stop_local").bind(0)
+			)
+		else:
+			sib._alive = false
+			if sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
+				sib._player.stop()
 		if sib._player != null and is_instance_valid(sib._player):
 			_active_handles.erase(sib._player.get_instance_id())
 	handle.graph_parallel_siblings.clear()
@@ -1244,6 +1438,10 @@ func _tick_timeline_dispatchers(delta: float) -> void:
 			prev_cursor = loop_lo
 
 		handle.timeline_cursor_seconds = next_cursor
+		if _timeline_music != null:
+			_timeline_music.check_markers_crossed(
+				handle, timeline, prev_cursor, next_cursor, _timeline_dispatchers
+			)
 		_stop_timeline_voices_past_clip_end(d, handle, next_cursor)
 		_heal_timeline_orphaned_fired_clips(handle, d, timeline, next_cursor)
 		_fire_clips_in_range(handle, d, timeline, prev_cursor, next_cursor)
@@ -1276,7 +1474,9 @@ func _refresh_timeline_voice_output_levels(
 		if tr.mute or (has_solo and not tr.solo):
 			p.volume_db = -80.0
 		else:
-			p.volume_db = float(cl.volume_db + tr.volume_db) + override_db
+			var base_db: float = float(cl.volume_db + tr.volume_db) + override_db
+			base_db += CodaVoiceFaderScript.clip_fade_db_offset(cl, handle.timeline_cursor_seconds)
+			p.volume_db = base_db
 
 
 func _fire_clips_in_range(
@@ -1461,6 +1661,8 @@ func _spawn_timeline_voice(
 	if needs_source_extend and stream_offset > 0.001:
 		player.set_meta(&"_coda_timeline_restart_offset", stream_offset)
 	player.play(maxf(0.0, float(entry.get("stream_offset_seconds", 0.0))))
+	if _timeline_music != null:
+		_timeline_music.apply_music_fade_in(handle, player)
 	if handle._paused:
 		player.stream_paused = true
 	var voices: Dictionary = d.get("voices", {})
@@ -1605,10 +1807,39 @@ func _stop_timeline_voices(d: Dictionary, handle: CodaEventHandle = null) -> voi
 		handle.clear_player_binding()
 
 
-func _finalize_timeline_handle(handle: CodaEventHandle) -> void:
+func _finalize_timeline_handle(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	if not _timeline_dispatchers.has(handle):
 		return
 	var was_alive: bool = handle._alive
+	var d: Dictionary = _timeline_dispatchers[handle]
+	if fade_ms > 0:
+		var voices: Dictionary = d.get("voices", {})
+		var playing_count: int = 0
+		for p in voices.values():
+			var pl: AudioStreamPlayer = p as AudioStreamPlayer
+			if pl != null and is_instance_valid(pl) and pl.playing:
+				playing_count += 1
+		if playing_count > 0:
+			var remaining: Array[int] = [playing_count]
+			var finish := func() -> void:
+				_finish_timeline_teardown(handle, was_alive)
+			var on_done := func() -> void:
+				remaining[0] -= 1
+				if remaining[0] <= 0:
+					finish.call()
+			for p in voices.values():
+				var pl2: AudioStreamPlayer = p as AudioStreamPlayer
+				if pl2 != null and is_instance_valid(pl2) and pl2.playing:
+					_voice_fader.fade_volume_db(pl2, -80.0, fade_ms, on_done)
+				else:
+					on_done.call()
+			return
+	_finish_timeline_teardown(handle, was_alive)
+
+
+func _finish_timeline_teardown(handle: CodaEventHandle, was_alive: bool) -> void:
+	if not _timeline_dispatchers.has(handle):
+		return
 	var d: Dictionary = _timeline_dispatchers[handle]
 	_stop_timeline_voices(d, handle)
 	handle.timeline_runtime = null

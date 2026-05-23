@@ -4,8 +4,12 @@ project/
 references/
 
 # Godot
+.godot/
 .import/
 *.translation
+
+# test_run harness: create locally (mklink /J test_run\addons ..\addons), do not commit
+test_run/addons/
 
 # Build outputs (root / generic)
 build/

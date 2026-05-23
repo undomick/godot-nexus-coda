@@ -17,6 +17,10 @@ const MENU_OPEN_EDITOR := 0
 ## Autoload registered for gameplay code: `Coda.play("events/foo")` etc.
 const AUTOLOAD_NAME := "Coda"
 const AUTOLOAD_PATH := "res://addons/nexus_coda/runtime/coda_runtime.gd"
+const AUTOLOAD_MUSIC_NAME := "CodaMusic"
+const AUTOLOAD_MUSIC_PATH := "res://addons/nexus_coda/runtime/coda_music_director.gd"
+const AUTOLOAD_BRIDGE_NAME := "CodaGameBridge"
+const AUTOLOAD_BRIDGE_PATH := "res://addons/nexus_coda/runtime/coda_game_bridge.gd"
 
 var _tools_menu: PopupMenu
 var _ncoda_import_plugin: EditorImportPlugin
@@ -34,6 +38,10 @@ func _enter_tree() -> void:
 	# settings when the entry is actually missing or stale.
 	if _needs_autoload_register():
 		add_autoload_singleton(AUTOLOAD_NAME, AUTOLOAD_PATH)
+	if _needs_autoload_register_named(AUTOLOAD_MUSIC_NAME, AUTOLOAD_MUSIC_PATH):
+		add_autoload_singleton(AUTOLOAD_MUSIC_NAME, AUTOLOAD_MUSIC_PATH)
+	if _needs_autoload_register_named(AUTOLOAD_BRIDGE_NAME, AUTOLOAD_BRIDGE_PATH):
+		add_autoload_singleton(AUTOLOAD_BRIDGE_NAME, AUTOLOAD_BRIDGE_PATH)
 	_ncoda_import_plugin = NCODA_IMPORT_PLUGIN.new() as EditorImportPlugin
 	add_import_plugin(_ncoda_import_plugin)
 	_filesystem_context_menu_plugin = CodaFilesystemContextMenuScript.new() as EditorContextMenuPlugin
@@ -68,6 +76,8 @@ func _exit_tree() -> void:
 		_tools_menu.queue_free()
 		_tools_menu = null
 	remove_autoload_singleton(AUTOLOAD_NAME)
+	remove_autoload_singleton(AUTOLOAD_MUSIC_NAME)
+	remove_autoload_singleton(AUTOLOAD_BRIDGE_NAME)
 
 
 func get_editor_runtime() -> CodaRuntime:
@@ -95,6 +105,18 @@ func _needs_autoload_register() -> bool:
 				return false
 		# Cannot resolve right now (UID cache not built yet); leave the entry alone — Godot
 		# will fix it on its own and we avoid rewriting the project file at every restart.
+		return false
+	return true
+
+
+func _needs_autoload_register_named(autoload_name: String, autoload_path: String) -> bool:
+	var setting: String = "autoload/%s" % autoload_name
+	if not ProjectSettings.has_setting(setting):
+		return true
+	var current: String = String(ProjectSettings.get_setting(setting, ""))
+	if current.is_empty():
+		return true
+	if current == "*" + autoload_path:
 		return false
 	return true
 

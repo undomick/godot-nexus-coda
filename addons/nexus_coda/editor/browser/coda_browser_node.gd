@@ -35,6 +35,8 @@ var event_timeline: CodaEventTimeline = null
 var event_modulations: Array[CodaModulation] = []
 ## Kind.EVENT: id of the CodaBus this event routes to. Empty = master.
 var event_output_bus_id: String = ""
+## Kind.EVENT: parameter name that drives segment switches on the Segments track. Empty = default list.
+var event_music_segment_param: String = ""
 var children: Array[CodaBrowserNode] = []
 
 
@@ -120,6 +122,8 @@ func to_dictionary() -> Dictionary:
 			func(m: CodaModulation) -> Dictionary: return m.to_dictionary()
 		)
 		d["event_output_bus_id"] = event_output_bus_id
+		if not event_music_segment_param.is_empty():
+			d["event_music_segment_param"] = event_music_segment_param
 	return d
 
 
@@ -177,6 +181,7 @@ static func from_dictionary(data: Dictionary) -> CodaBrowserNode:
 			if md is Dictionary:
 				node.event_modulations.append(CodaModulationScript.from_dictionary(md))
 		node.event_output_bus_id = str(data.get("event_output_bus_id", "")).strip_edges()
+		node.event_music_segment_param = str(data.get("event_music_segment_param", "")).strip_edges()
 		node.event_def_version = max(node.event_def_version, 3)
 	for child_data in data.get("children", []) as Array:
 		if child_data is Dictionary:

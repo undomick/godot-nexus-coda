@@ -3,6 +3,7 @@ extends RefCounted
 
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaEffectCatalogScript := preload("res://addons/nexus_coda/editor/browser/effects/coda_effect_catalog.gd")
+const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/editor/browser/coda_game_sync_rule.gd")
 
 signal structure_changed
 ## Bus volume/mute/bypass and other non-structural edits; marks unsaved state without forcing full UI rebuilds.
@@ -13,6 +14,7 @@ var assets_root: CodaBrowserNode
 var bus_root: CodaBus
 var snapshots: Array[CodaSnapshot] = []
 var banks: Array[CodaBank] = []
+var game_sync_rules: Array[CodaGameSyncRule] = []
 
 ## Project-level appearance metadata. Phase 7: editor window applies these on load.
 ## `theme_mode` is "dark" or "light"; `accent_color` overrides the default Coda accent.
@@ -30,6 +32,7 @@ func clear_to_empty_project() -> void:
 	bus_root = CodaBus.make_default_master()
 	snapshots.clear()
 	banks.clear()
+	game_sync_rules.clear()
 	theme_mode = "dark"
 	accent_color = Color(0.42, 0.74, 1.00, 1.0)
 	structure_changed.emit()
@@ -1047,6 +1050,29 @@ func find_bank_by_id(bank_id: String) -> CodaBank:
 	return null
 
 
+func add_game_sync_rule(rule: CodaGameSyncRule = null) -> CodaGameSyncRule:
+	var r: CodaGameSyncRule = rule if rule != null else CodaGameSyncRuleScript.new()
+	game_sync_rules.append(r)
+	structure_changed.emit()
+	return r
+
+
+func remove_game_sync_rule(rule_id: String) -> bool:
+	for i in range(game_sync_rules.size()):
+		if game_sync_rules[i].id == rule_id:
+			game_sync_rules.remove_at(i)
+			structure_changed.emit()
+			return true
+	return false
+
+
+func find_game_sync_rule(rule_id: String) -> CodaGameSyncRule:
+	for r in game_sync_rules:
+		if r.id == rule_id:
+			return r
+	return null
+
+
 func banks_containing_event(event_id: String) -> Array[CodaBank]:
 	var out: Array[CodaBank] = []
 	for b in banks:
@@ -1345,13 +1371,17 @@ func to_dictionary() -> Dictionary:
 	var banks_arr: Array = []
 	for b in banks:
 		banks_arr.append(b.to_dictionary())
+	var rules_arr: Array = []
+	for r in game_sync_rules:
+		rules_arr.append(r.to_dictionary())
 	return {
-		"version": 4,
+		"version": 5,
 		"events": events_root.to_dictionary(),
 		"assets": assets_root.to_dictionary(),
 		"buses": bus_root.to_dictionary() if bus_root != null else CodaBus.make_default_master().to_dictionary(),
 		"snapshots": snaps_arr,
 		"banks": banks_arr,
+		"game_sync_rules": rules_arr,
 		"appearance": {
 			"theme_mode": theme_mode,
 			"accent_color": [accent_color.r, accent_color.g, accent_color.b, accent_color.a],
@@ -1383,6 +1413,10 @@ func load_from_dictionary(data: Dictionary) -> void:
 	for b_raw in data.get("banks", []) as Array:
 		if b_raw is Dictionary:
 			banks.append(CodaBank.from_dictionary(b_raw))
+	game_sync_rules.clear()
+	for r_raw in data.get("game_sync_rules", []) as Array:
+		if r_raw is Dictionary:
+			game_sync_rules.append(CodaGameSyncRuleScript.from_dictionary(r_raw))
 	theme_mode = "dark"
 	accent_color = Color(0.42, 0.74, 1.00, 1.0)
 	var appearance_raw: Variant = data.get("appearance", null)

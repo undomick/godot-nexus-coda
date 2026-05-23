@@ -1,0 +1,15 @@
+; Headless test harness at repo root (addons/ layout matches shipped game projects).
+config_version=5
+
+[application]
+config/name="Nexus Coda Test Harness"
+
+[autoload]
+
+Coda="*res://addons/nexus_coda/runtime/coda_runtime.gd"
+CodaMusic="*res://addons/nexus_coda/runtime/coda_music_director.gd"
+CodaGameBridge="*res://addons/nexus_coda/runtime/coda_game_bridge.gd"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/nexus_coda/plugin.cfg")

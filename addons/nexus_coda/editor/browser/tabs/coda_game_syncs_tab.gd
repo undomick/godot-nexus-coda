@@ -2,23 +2,20 @@
 class_name CodaGameSyncsTab
 extends CodaBrowserTab
 
-## Game Syncs tab — read-only virtual tree that aggregates per-event Parameters
-## and Modulations across the project. Useful as a "where is this used?" surface
-## that complements the Inspector (where edits happen).
-##
-## Selection emits `selection_emitted(CATEGORY_GAME_SYNC, payload)` with payload =
-## { "event_id": String, "kind": "parameter" | "modulation", "item_id": String }.
-## The host routes that to the Inspector so it can switch to the right event and
-## scroll to the matching section.
+## Game Syncs tab — parameters/modulations overview plus editable game-sync rules.
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
+const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/editor/browser/coda_game_sync_rule.gd")
 
 const KIND_PARAMETER := "parameter"
 const KIND_MODULATION := "modulation"
+const KIND_RULE := "rule"
 
 var _project: CodaState = null
 var _filter_edit: LineEdit
 var _tree: Tree
+var _add_rule_btn: Button
+var _remove_rule_btn: Button
 var _rebuild_queued: bool = false
 
 
@@ -34,12 +31,26 @@ func _ready() -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 
+	var toolbar := HBoxContainer.new()
+	toolbar.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
+	add_child(toolbar)
+
+	_add_rule_btn = Button.new()
+	_add_rule_btn.text = "Add Rule"
+	_add_rule_btn.pressed.connect(_on_add_rule_pressed)
+	toolbar.add_child(_add_rule_btn)
+
+	_remove_rule_btn = Button.new()
+	_remove_rule_btn.text = "Remove Rule"
+	_remove_rule_btn.pressed.connect(_on_remove_rule_pressed)
+	toolbar.add_child(_remove_rule_btn)
+
 	_filter_edit = LineEdit.new()
 	_filter_edit.placeholder_text = "Filter..."
 	_filter_edit.clear_button_enabled = true
 	_filter_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_filter_edit.text_changed.connect(_on_filter_changed)
-	add_child(_filter_edit)
+	toolbar.add_child(_filter_edit)
 
 	_tree = Tree.new()
 	_tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -74,7 +85,33 @@ func pulse_selection_to_editor() -> void:
 	_emit_selection()
 
 
-# ---------- Internals ----------
+func _on_add_rule_pressed() -> void:
+	if _project == null:
+		return
+	var rule: CodaGameSyncRule = _project.add_game_sync_rule()
+	rule.signal_name = "game_event"
+	rule.action = CodaGameSyncRule.Action.SET_MUSIC
+	rule.target_event_path = "music/exploration"
+	_queue_rebuild()
+
+
+func _on_remove_rule_pressed() -> void:
+	if _project == null or _tree == null:
+		return
+	var item: TreeItem = _tree.get_selected()
+	if item == null:
+		return
+	var payload: Variant = item.get_metadata(0)
+	if not (payload is Dictionary):
+		return
+	if str((payload as Dictionary).get("kind", "")) != KIND_RULE:
+		return
+	var rule_id: String = str((payload as Dictionary).get("item_id", ""))
+	if rule_id.is_empty():
+		return
+	_project.remove_game_sync_rule(rule_id)
+	_queue_rebuild()
+
 
 func _on_project_structure_changed() -> void:
 	_queue_rebuild()
@@ -109,21 +146,36 @@ func _rebuild_tree() -> void:
 	var root_item: TreeItem = _tree.create_item()
 	root_item.set_metadata(0, _make_payload("", "", ""))
 
-	var fl: String = _filter_text_lower()
+	var rules_root: TreeItem = _tree.create_item(root_item)
+	rules_root.set_text(0, "Game Sync Rules")
+	rules_root.set_selectable(0, false)
+	for rule in _project.game_sync_rules:
+		if not _matches_filter(rule.signal_name, rule.target_event_path, _filter_text_lower()):
+			continue
+		var leaf: TreeItem = _tree.create_item(rules_root)
+		leaf.set_text(
+			0,
+			"%s → %s (%s)" % [
+				rule.signal_name,
+				CodaGameSyncRule.action_label(rule.action),
+				rule.target_event_path,
+			]
+		)
+		leaf.set_metadata(0, _make_payload("", KIND_RULE, rule.id))
+	if rules_root.get_first_child() == null:
+		rules_root.set_text(0, "Game Sync Rules (none)")
 
 	var params_root: TreeItem = _tree.create_item(root_item)
 	params_root.set_text(0, "Parameters")
 	params_root.set_selectable(0, false)
-	params_root.set_metadata(0, _make_payload("", KIND_PARAMETER, ""))
-	_collect_event_items(_project.events_root, params_root, fl, true)
+	_collect_event_items(_project.events_root, params_root, _filter_text_lower(), true)
 	if params_root.get_first_child() == null:
 		params_root.set_text(0, "Parameters (none)")
 
 	var mods_root: TreeItem = _tree.create_item(root_item)
 	mods_root.set_text(0, "Modulations")
 	mods_root.set_selectable(0, false)
-	mods_root.set_metadata(0, _make_payload("", KIND_MODULATION, ""))
-	_collect_event_items(_project.events_root, mods_root, fl, false)
+	_collect_event_items(_project.events_root, mods_root, _filter_text_lower(), false)
 	if mods_root.get_first_child() == null:
 		mods_root.set_text(0, "Modulations (none)")
 
@@ -151,17 +203,13 @@ func _collect_event_items(
 		var event_item: TreeItem = _tree.create_item(parent_item)
 		event_item.set_text(0, child.name)
 		event_item.set_selectable(0, false)
-		event_item.set_metadata(
-			0, _make_payload(child.id, KIND_PARAMETER if is_parameters else KIND_MODULATION, "")
-		)
 		for entry in visible_entries:
 			var leaf: TreeItem = _tree.create_item(event_item)
 			leaf.set_text(0, _entry_label(entry, is_parameters))
-			var item_id: String = entry.id if is_parameters else entry.id
 			leaf.set_metadata(
 				0,
 				_make_payload(
-					child.id, KIND_PARAMETER if is_parameters else KIND_MODULATION, item_id
+					child.id, KIND_PARAMETER if is_parameters else KIND_MODULATION, entry.id
 				)
 			)
 
@@ -219,8 +267,14 @@ func _emit_selection() -> bool:
 	var payload: Variant = item.get_metadata(0)
 	if not (payload is Dictionary):
 		return false
-	var event_id: String = str((payload as Dictionary).get("event_id", ""))
+	var kind: String = str((payload as Dictionary).get("kind", ""))
 	var item_id: String = str((payload as Dictionary).get("item_id", ""))
+	if kind == KIND_RULE:
+		if item_id.is_empty():
+			return false
+		selection_emitted.emit(CATEGORY_GAME_SYNC, payload)
+		return true
+	var event_id: String = str((payload as Dictionary).get("event_id", ""))
 	if event_id.is_empty() or item_id.is_empty():
 		return false
 	selection_emitted.emit(CATEGORY_GAME_SYNC, payload)

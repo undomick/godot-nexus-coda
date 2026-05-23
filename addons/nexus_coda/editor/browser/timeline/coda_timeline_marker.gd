@@ -11,6 +11,8 @@ var id: String
 var marker_name: String = "Marker"
 var time_seconds: float = 0.0
 var kind: Kind = Kind.GENERIC
+## When set, TRANSITION markers hint the segment driver which segment to enter.
+var target_segment_id: String = ""
 
 
 func _init() -> void:
@@ -27,6 +29,7 @@ func clone_keep_id() -> CodaTimelineMarker:
 	m.marker_name = marker_name
 	m.time_seconds = time_seconds
 	m.kind = kind
+	m.target_segment_id = target_segment_id
 	return m
 
 
@@ -36,6 +39,7 @@ func to_dictionary() -> Dictionary:
 		"name": marker_name,
 		"time": time_seconds,
 		"kind": int(kind),
+		"target_segment_id": target_segment_id,
 	}
 
 
@@ -46,6 +50,7 @@ static func from_dictionary(data: Dictionary) -> CodaTimelineMarker:
 		m.id = sid
 	m.marker_name = str(data.get("name", "Marker"))
 	m.time_seconds = max(0.0, float(data.get("time", 0.0)))
+	m.target_segment_id = str(data.get("target_segment_id", ""))
 	var k: int = int(data.get("kind", 0))
 	match k:
 		Kind.GENERIC, Kind.TRANSITION, Kind.CUE:
