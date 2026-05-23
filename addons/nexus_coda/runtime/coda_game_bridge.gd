@@ -108,7 +108,7 @@ func _connect_node_signals_recursive(node: Node, _root: Node) -> void:
 			continue
 		if not _rules_want_signal(sig_name):
 			continue
-		var cb: Callable = Callable(self, "_on_bound_game_signal").bind(sig_name)
+		var cb: Callable = _make_game_signal_callback(sig_name)
 		if not node.is_connected(sig_name, cb):
 			node.connect(sig_name, cb)
 			_signal_connections.append(
@@ -125,20 +125,17 @@ func _rules_want_signal(signal_name: String) -> bool:
 	return false
 
 
-func _on_bound_game_signal(
-	signal_name: String,
-	arg0: Variant = null,
-	_arg1: Variant = null,
-	_arg2: Variant = null,
-	_arg3: Variant = null,
-	_arg4: Variant = null,
-	_arg5: Variant = null,
-	_arg6: Variant = null,
-	_arg7: Variant = null
-) -> void:
-	var payload: Dictionary = {}
+## Callable.bind() appends bound args after signal args, so the signal name must be captured
+## per connection instead of bound onto a shared handler (otherwise arg0 becomes the name).
+func _make_game_signal_callback(signal_name: String) -> Callable:
+	var captured_name: String = signal_name
+	return func(arg0: Variant = null) -> void:
+		emit_game_signal(captured_name, payload_from_signal_arg(arg0))
+
+
+static func payload_from_signal_arg(arg0: Variant) -> Dictionary:
 	if arg0 is Dictionary:
-		payload = arg0 as Dictionary
-	elif arg0 != null:
-		payload = {"value": arg0}
-	emit_game_signal(signal_name, payload)
+		return arg0 as Dictionary
+	if arg0 != null:
+		return {"value": arg0}
+	return {}
