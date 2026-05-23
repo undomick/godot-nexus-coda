@@ -6,6 +6,7 @@ const CodaGameSyncContextScript := preload("res://addons/nexus_coda/runtime/coda
 const CodaGameSyncDispatcherScript := preload(
 	"res://addons/nexus_coda/runtime/coda_game_sync_dispatcher.gd"
 )
+const CodaGameBridgeScript := preload("res://addons/nexus_coda/runtime/coda_game_bridge.gd")
 const CodaEventHandleScript := preload("res://addons/nexus_coda/runtime/coda_event_handle.gd")
 
 
@@ -14,6 +15,7 @@ static func run() -> int:
 	failed += _test_rule_roundtrip()
 	failed += _test_all_actions()
 	failed += _test_condition_expression()
+	failed += _test_payload_from_signal_arg()
 	return failed
 
 
@@ -114,6 +116,21 @@ static func _test_condition_expression() -> int:
 		return 1
 	if CodaGameSyncDispatcherScript.rule_matches(rule, "zone", {"zone": "desert"}):
 		push_error("condition should fail for non-matching zone")
+		return 1
+	return 0
+
+
+static func _test_payload_from_signal_arg() -> int:
+	var dict_payload: Dictionary = CodaGameBridgeScript.payload_from_signal_arg({"zone": "forest"})
+	if dict_payload.get("zone", "") != "forest":
+		push_error("dictionary signal arg should pass through as payload")
+		return 1
+	var scalar: Dictionary = CodaGameBridgeScript.payload_from_signal_arg(42)
+	if scalar.get("value", null) != 42:
+		push_error("scalar signal arg should wrap as value")
+		return 1
+	if not CodaGameBridgeScript.payload_from_signal_arg(null).is_empty():
+		push_error("null signal arg should yield empty payload")
 		return 1
 	return 0
 
