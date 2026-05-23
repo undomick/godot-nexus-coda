@@ -1320,6 +1320,13 @@ func _collect_timeline_fx_chain(entry: Dictionary) -> Array:
 	return out
 
 
+func _clear_timeline_voice_extend_meta(player: AudioStreamPlayer) -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	if player.has_meta(&"_coda_timeline_restart_offset"):
+		player.remove_meta(&"_coda_timeline_restart_offset")
+
+
 func _retire_timeline_lane_voice(d: Dictionary, clip_id: String) -> void:
 	if clip_id.is_empty():
 		return
@@ -1336,6 +1343,7 @@ func _retire_timeline_lane_voice(d: Dictionary, clip_id: String) -> void:
 	_timeline_voice_playback_gen.erase(pk)
 	if p.playing:
 		p.stop()
+	_clear_timeline_voice_extend_meta(p)
 	_free_player_timeline_fx_bus(p)
 
 
@@ -1354,7 +1362,15 @@ func _spawn_timeline_voice(
 	var stream_offset: float = maxf(0.0, float(entry.get("stream_offset_seconds", 0.0)))
 	var play_duration: float = float(entry.get("duration_seconds", 0.0))
 	var asset_len: float = stream.get_length()
-	if play_duration > 0.0 and asset_len > 0.0 and stream_offset + play_duration > asset_len + 0.001:
+	var needs_source_extend: bool = (
+		play_duration > 0.0
+		and asset_len > 0.0
+		and stream_offset + play_duration > asset_len + 0.001
+	)
+	# When offset is 0, looping the stream from the start fills the clip window. With offset > 0,
+	# AudioStream.loop restarts at 0 and plays the wrong part of the asset until the clip ends.
+	var use_stream_loop_extend: bool = needs_source_extend and stream_offset <= 0.001
+	if use_stream_loop_extend:
 		stream = stream.duplicate()
 		stream.loop = true
 	var clip_id: String = String(entry.get("sound_id", ""))
@@ -1386,6 +1402,8 @@ func _spawn_timeline_voice(
 	var clip_end: float = float(entry.get("timeline_clip_end_seconds", -1.0))
 	if clip_end > 0.0:
 		player.set_meta(&"_coda_clip_timeline_end", clip_end)
+	if needs_source_extend and stream_offset > 0.001:
+		player.set_meta(&"_coda_timeline_restart_offset", stream_offset)
 	player.play(maxf(0.0, float(entry.get("stream_offset_seconds", 0.0))))
 	if handle._paused:
 		player.stream_paused = true
@@ -1410,9 +1428,6 @@ func _on_timeline_voice_finished(player: AudioStreamPlayer, key: int) -> void:
 	var h: CodaEventHandle = _timeline_voice_owner.get(key, null) as CodaEventHandle
 	if h == null:
 		return
-	_free_player_timeline_fx_bus(player)
-	_timeline_voice_owner.erase(key)
-	_timeline_voice_playback_gen.erase(key)
 	if not _timeline_dispatchers.has(h):
 		return
 	var d: Dictionary = _timeline_dispatchers[h]
@@ -1421,9 +1436,7 @@ func _on_timeline_voice_finished(player: AudioStreamPlayer, key: int) -> void:
 	for k in voices.keys():
 		if voices[k] == player:
 			finished_clip_id = str(k)
-			voices.erase(k)
 			break
-	d["voices"] = voices
 	if finished_clip_id.is_empty():
 		return
 	var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
@@ -1435,12 +1448,38 @@ func _on_timeline_voice_finished(player: AudioStreamPlayer, key: int) -> void:
 		return
 	var clip_end: float = cl.start_seconds + cl.duration_seconds
 	if h.timeline_cursor_seconds >= clip_end - 0.001:
+		_finalize_timeline_lane_voice(player, key, h, d, finished_clip_id)
 		return
+	if player.has_meta(&"_coda_timeline_restart_offset"):
+		var restart_at: float = maxf(0.0, float(player.get_meta(&"_coda_timeline_restart_offset", 0.0)))
+		var gen: int = int(player.get_meta(&"_coda_playback_gen", -1))
+		if gen >= 0:
+			_player_pending_finish_gen[key] = gen
+		player.play(restart_at)
+		return
+	_finalize_timeline_lane_voice(player, key, h, d, finished_clip_id)
 	# Source ended before the clip window ends. Keep fired set so we do not respawn every frame;
 	# pool-orphan recovery uses _heal_timeline_orphaned_fired_clips (spent lanes are excluded).
 	var spent: Dictionary = d.get("spent_clip_ids", {})
 	spent[finished_clip_id] = true
 	d["spent_clip_ids"] = spent
+
+
+func _finalize_timeline_lane_voice(
+	player: AudioStreamPlayer,
+	key: int,
+	h: CodaEventHandle,
+	d: Dictionary,
+	finished_clip_id: String,
+) -> void:
+	_free_player_timeline_fx_bus(player)
+	_timeline_voice_owner.erase(key)
+	_timeline_voice_playback_gen.erase(key)
+	var voices: Dictionary = d.get("voices", {})
+	if voices.get(finished_clip_id, null) == player:
+		voices.erase(finished_clip_id)
+		d["voices"] = voices
+	_clear_timeline_voice_extend_meta(player)
 
 
 func _apply_timeline_seek(
@@ -1482,6 +1521,7 @@ func _stop_timeline_voices_past_clip_end(
 		var pk: int = p.get_instance_id()
 		_timeline_voice_owner.erase(pk)
 		_timeline_voice_playback_gen.erase(pk)
+		_clear_timeline_voice_extend_meta(p)
 		_free_player_timeline_fx_bus(p)
 		stale_keys.append(sound_key)
 	for k in stale_keys:
