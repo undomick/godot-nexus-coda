@@ -525,8 +525,11 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 	params["_coda_voice_bus"] = resolve_bus_name_for_event(event)
 	# Resolve the play list. Prefer the v2 graph; fall back to legacy flat list (random pick) if missing.
 	var plan_entries: Array = []
+	var graph_event_loop: bool = false
 	if event.event_graph != null:
-		plan_entries = CodaGraphSchedulerScript.plan(event.event_graph, live_params)
+		var planned: Dictionary = CodaGraphSchedulerScript.plan(event.event_graph, live_params)
+		plan_entries = planned.get("entries", []) as Array
+		graph_event_loop = bool(planned.get("event_loop", false))
 	if plan_entries.is_empty() and event.event_audio_paths.size() > 0:
 		var legacy_path: String = event.event_audio_paths[randi() % event.event_audio_paths.size()]
 		plan_entries = [{
@@ -549,7 +552,7 @@ func _start_event(event: CodaBrowserNode, path: String, params: Dictionary) -> C
 	handle.params = params.duplicate()
 	handle.param_values = live_params
 	handle.param_values_smoothed = live_params.duplicate()
-	handle.loop = bool(params.get("loop", false))
+	handle.loop = bool(params.get("loop", false)) or graph_event_loop
 	handle._bus_name = bus_name
 	handle.timeline_runtime = self
 
@@ -818,6 +821,9 @@ func _start_player_for_entry(entry: Dictionary, params: Dictionary) -> AudioStre
 	if stream == null:
 		_warn("audio resource not an AudioStream: '%s'" % stream_path)
 		return null
+	if bool(entry.get("loop", false)):
+		stream = stream.duplicate()
+		stream.loop = true
 	var player: AudioStreamPlayer = _pool.acquire()
 	if player == null:
 		_warn("voice pool exhausted while playing '%s'" % stream_path)
