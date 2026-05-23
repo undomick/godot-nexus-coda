@@ -842,6 +842,18 @@ func _normalized_bus_name(name: String) -> String:
 	return String(name).strip_edges().to_lower()
 
 
+func _bus_name_used_elsewhere(bus_id: String, name: String) -> bool:
+	if bus_root == null:
+		return false
+	var norm: String = _normalized_bus_name(name)
+	for existing in bus_root.collect_flat():
+		if existing.id == bus_id:
+			continue
+		if _normalized_bus_name(existing.bus_name) == norm:
+			return true
+	return false
+
+
 ## Deep-clones a bus subtree, generating fresh ids for the clone and all descendants.
 func _clone_bus_new_ids(src: CodaBus) -> CodaBus:
 	var id_remap: Dictionary = {}
@@ -917,6 +929,12 @@ func rename_bus(bus_id: String, new_name: String) -> bool:
 	if trimmed.is_empty():
 		trimmed = "Bus"
 	b.bus_name = trimmed
+	if _bus_name_used_elsewhere(bus_id, trimmed):
+		var taken: Dictionary = {}
+		for existing in bus_root.collect_flat():
+			if existing.id != bus_id:
+				taken[_normalized_bus_name(existing.bus_name)] = true
+		_assign_unique_bus_names_recursive(b, taken)
 	structure_changed.emit()
 	return true
 
