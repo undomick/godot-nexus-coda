@@ -120,11 +120,11 @@ func set_project(project: Variant) -> void:
 
 
 func _on_project_structure_changed() -> void:
-	_sync_buses()
+	_apply_loaded_bank_buses()
 
 
 func _on_project_dirty_sync_buses() -> void:
-	_sync_buses()
+	_apply_loaded_bank_buses()
 
 
 func _sync_buses() -> void:
