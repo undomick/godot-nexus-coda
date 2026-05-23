@@ -66,6 +66,9 @@ var _orphaned_finish_gens: Dictionary = {}  ## gen -> true
 var _stop_all_in_progress: bool = false
 ## Graph handles blocked on voice-pool exhaustion (mid-sequence or loop restart). Retried each frame.
 var _graph_plan_resume_handles: Array[CodaEventHandle] = []
+## Graph previews paused via [method pause_graph_preview]. Removed from [code]_active_handles[/code] while
+## stopped so the pool stays available; [method stop_all] must still finalize these handles.
+var _paused_graph_handles: Array[CodaEventHandle] = []
 
 
 func _ready() -> void:
@@ -238,6 +241,7 @@ func play_event_node(node: Variant, params: Dictionary = {}) -> CodaEventHandle:
 func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	if handle == null:
 		return
+	_drop_paused_graph_preview_state(handle)
 	if handle.is_timeline:
 		if _timeline_dispatchers.has(handle):
 			_finalize_timeline_handle(handle)
@@ -253,6 +257,7 @@ func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 
 
 func stop_all() -> void:
+	_finalize_all_paused_graph_previews()
 	# Mirror [_finalize_timeline_handle]: stop lane voices, drop dispatcher refs, then emit the
 	# same handle/runtime signals as a normal timeline end. Otherwise `await handle.finished` and
 	# `voice_finished` subscribers never run for timeline previews stopped via stop_all().
@@ -1609,53 +1614,112 @@ func get_active_timeline_handle_for_event(event_id: String) -> CodaEventHandle:
 	return null
 
 
+func _drop_paused_graph_preview_state(handle: CodaEventHandle) -> void:
+	if handle == null:
+		return
+	var idx: int = _paused_graph_handles.find(handle)
+	if idx >= 0:
+		_paused_graph_handles.remove_at(idx)
+	handle.params.erase("_coda_graph_pause_snapshot")
+
+
+func _finalize_all_paused_graph_previews() -> void:
+	for item in _paused_graph_handles.duplicate():
+		var h: CodaEventHandle = item as CodaEventHandle
+		if h == null:
+			continue
+		_finalize_paused_graph_preview(h)
+	_paused_graph_handles.clear()
+
+
+func _finalize_paused_graph_preview(handle: CodaEventHandle) -> void:
+	if handle == null:
+		return
+	_drop_paused_graph_preview_state(handle)
+	if not handle._paused:
+		return
+	handle._paused = false
+	_unmark_graph_plan_resume(handle)
+	_stop_graph_parallel_siblings(handle)
+	handle.clear_player_binding()
+	var was_alive: bool = handle._alive
+	if was_alive:
+		handle._alive = false
+		handle.finished.emit()
+	voice_finished.emit(handle)
+
+
+func _snapshot_graph_pause_player(
+	voice: CodaEventHandle, snapshot: Dictionary
+) -> void:
+	if voice._player == null or not is_instance_valid(voice._player):
+		return
+	var pk: int = voice._player.get_instance_id()
+	var pos: float = 0.0
+	if voice._player.playing:
+		pos = voice._player.get_playback_position()
+	_active_handles.erase(pk)
+	if voice._player.playing:
+		voice._player.stop()
+	snapshot[str(pk)] = {
+		"position": pos,
+		"gen": int(voice._player.get_meta(&"_coda_playback_gen", -1)),
+	}
+
+
 ## Graph preview: stop pooled players on pause so [code]stream_paused[/code] voices do not pin the pool.
 func pause_graph_preview(handle: CodaEventHandle) -> void:
 	if handle == null or handle.is_timeline:
 		return
-	var positions: Dictionary = {}
-	if handle._player != null and is_instance_valid(handle._player):
-		if handle._player.playing:
-			positions[str(handle._player.get_instance_id())] = handle._player.get_playback_position()
-		var pk: int = handle._player.get_instance_id()
-		_active_handles.erase(pk)
-		if handle._player.playing:
-			handle._player.stop()
+	var snapshot: Dictionary = {}
+	_snapshot_graph_pause_player(handle, snapshot)
 	for sib in handle.graph_parallel_siblings:
-		if sib == null or sib._player == null or not is_instance_valid(sib._player):
+		if sib == null:
 			continue
-		if sib._player.playing:
-			positions[str(sib._player.get_instance_id())] = sib._player.get_playback_position()
-		var sk: int = sib._player.get_instance_id()
-		_active_handles.erase(sk)
-		if sib._player.playing:
-			sib._player.stop()
-	handle.params["_coda_graph_pause_positions"] = positions
+		_snapshot_graph_pause_player(sib, snapshot)
+	handle.params["_coda_graph_pause_snapshot"] = snapshot
+	if not _paused_graph_handles.has(handle):
+		_paused_graph_handles.append(handle)
 
 
 ## Graph preview: resume voices stopped by [method pause_graph_preview].
 func resume_graph_preview(handle: CodaEventHandle) -> void:
 	if handle == null or handle.is_timeline:
 		return
-	var positions: Dictionary = handle.params.get("_coda_graph_pause_positions", {})
-	if positions is Dictionary:
-		_resume_graph_paused_player(handle, handle, positions as Dictionary)
-		for sib in handle.graph_parallel_siblings:
-			if sib == null:
-				continue
-			_resume_graph_paused_player(handle, sib, positions as Dictionary)
-	handle.params.erase("_coda_graph_pause_positions")
+	_drop_paused_graph_preview_state(handle)
+	var snapshot: Variant = handle.params.get("_coda_graph_pause_snapshot", {})
+	handle.params.erase("_coda_graph_pause_snapshot")
+	if typeof(snapshot) != TYPE_DICTIONARY:
+		return
+	var snap: Dictionary = snapshot as Dictionary
+	var any_resumed: bool = false
+	if _resume_graph_paused_player(handle, handle, snap):
+		any_resumed = true
+	for sib in handle.graph_parallel_siblings:
+		if sib == null:
+			continue
+		if _resume_graph_paused_player(handle, sib, snap):
+			any_resumed = true
+	if not any_resumed and handle._alive:
+		stop(handle)
 
 
 func _resume_graph_paused_player(
-	owner: CodaEventHandle, voice: CodaEventHandle, positions: Dictionary
-) -> void:
+	owner: CodaEventHandle, voice: CodaEventHandle, snapshot: Dictionary
+) -> bool:
 	if voice._player == null or not is_instance_valid(voice._player):
-		return
+		return false
 	if voice._player.stream == null:
-		return
+		return false
 	var key: String = str(voice._player.get_instance_id())
-	var at: float = maxf(0.0, float(positions.get(key, 0.0)))
+	var saved: Variant = snapshot.get(key, null)
+	if typeof(saved) != TYPE_DICTIONARY:
+		return false
+	var saved_d: Dictionary = saved as Dictionary
+	var expected_gen: int = int(saved_d.get("gen", -2))
+	if int(voice._player.get_meta(&"_coda_playback_gen", -1)) != expected_gen:
+		return false
+	var at: float = maxf(0.0, float(saved_d.get("position", 0.0)))
 	voice._player.play(at)
 	var gen: int = int(voice._player.get_meta(&"_coda_playback_gen", -1))
 	if voice == owner:
@@ -1664,6 +1728,7 @@ func _resume_graph_paused_player(
 	else:
 		voice.params["_coda_playback_gen"] = gen
 		_active_handles[voice._player.get_instance_id()] = voice
+	return true
 
 
 ## Editor preview: pause every timeline lane voice (handle.pause() routes here when [member CodaEventHandle.is_timeline]).
