@@ -18,6 +18,7 @@ func _init() -> void:
 	var failed: int = 0
 	failed += _test_layout_store()
 	failed += _test_bank_rename_duplicate()
+	failed += _test_event_duplicate_ids()
 	failed += _test_marker_ui()
 	if failed > 0:
 		push_error("Editor shell tests failed (%d)" % failed)
@@ -60,6 +61,53 @@ static func _test_bank_rename_duplicate() -> int:
 		return 1
 	if state.banks.size() < 2:
 		push_error("duplicate_bank insert")
+		return 1
+	return 0
+
+
+static func _test_event_duplicate_ids() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var parent: CodaBrowserNode = state.events_root
+	var ev: CodaBrowserNode = state.add_events_event(parent.id, "Footsteps")
+	if ev == null:
+		push_error("add_events_event failed")
+		return 1
+	var param := CodaEventParameter.new()
+	param.param_name = "Intensity"
+	ev.event_parameters.append(param)
+	var sound: CodaEventGraphNodeData = CodaEventGraphNodeData.new(CodaEventGraphNodeData.Kind.SOUND)
+	ev.event_graph.nodes.append(sound)
+	ev.event_graph.edges.append(CodaEventGraphEdge.new(ev.event_graph.nodes[0].id, sound.id))
+	var mod := CodaModulation.new()
+	mod.source_param_id = param.id
+	mod.target_node_id = sound.id
+	ev.event_modulations.append(mod)
+	var copy: CodaBrowserNode = state.duplicate_events_node(ev.id)
+	if copy == null:
+		push_error("duplicate_events_node failed")
+		return 1
+	if copy.id == ev.id:
+		push_error("duplicate_events_node reused event id")
+		return 1
+	if copy.event_parameters.is_empty() or copy.event_parameters[0].id == param.id:
+		push_error("duplicate_events_node reused parameter id")
+		return 1
+	if copy.event_modulations.is_empty():
+		push_error("duplicate_events_node dropped modulations")
+		return 1
+	var mod_copy: CodaModulation = copy.event_modulations[0]
+	if mod_copy.source_param_id != copy.event_parameters[0].id:
+		push_error("duplicate_events_node modulation param remap")
+		return 1
+	if mod_copy.target_node_id == sound.id:
+		push_error("duplicate_events_node modulation node remap")
+		return 1
+	if copy.event_graph == null or copy.event_graph.edges.is_empty():
+		push_error("duplicate_events_node graph edges missing")
+		return 1
+	var edge: CodaEventGraphEdge = copy.event_graph.edges[0]
+	if edge.from_node_id == ev.event_graph.nodes[0].id or edge.to_node_id == sound.id:
+		push_error("duplicate_events_node graph edge remap")
 		return 1
 	return 0
 
