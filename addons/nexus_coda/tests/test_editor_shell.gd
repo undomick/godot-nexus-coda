@@ -18,6 +18,7 @@ func _init() -> void:
 	var failed: int = 0
 	failed += _test_layout_store()
 	failed += _test_bank_rename_duplicate()
+	failed += _test_event_duplicate_id()
 	failed += _test_marker_ui()
 	if failed > 0:
 		push_error("Editor shell tests failed (%d)" % failed)
@@ -60,6 +61,22 @@ static func _test_bank_rename_duplicate() -> int:
 		return 1
 	if state.banks.size() < 2:
 		push_error("duplicate_bank insert")
+		return 1
+	return 0
+
+
+static func _test_event_duplicate_id() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var ev: CodaBrowserNode = state.add_events_event(state.events_root.id, "Footstep")
+	if ev == null:
+		push_error("add_events_event failed")
+		return 1
+	var copy: CodaBrowserNode = state.duplicate_events_node(ev.id)
+	if copy == null or copy.id.is_empty() or copy.id == ev.id:
+		push_error("duplicate_events_node id collision")
+		return 1
+	if state.events_root.find_by_id(copy.id) != copy:
+		push_error("duplicate_events_node find_by_id")
 		return 1
 	return 0
 

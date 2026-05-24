@@ -107,6 +107,8 @@ func duplicate_events_node(node_id: String) -> CodaBrowserNode:
 	if parent == null:
 		return null
 	var data: Dictionary = node.to_dictionary()
+	# from_dictionary preserves stored ids; a duplicate must get a fresh event id.
+	data.erase("id")
 	var copy: CodaBrowserNode = CodaBrowserNode.from_dictionary(data)
 	copy.name = _suggest_duplicate_name(parent, node.name)
 	parent.insert_child_sorted(copy)
