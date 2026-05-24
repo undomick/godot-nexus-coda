@@ -139,6 +139,12 @@ func tick_dispatchers(delta: float) -> void:
 		if wrapped:
 			var wrap_target: float = loop_end if loop_end > 0.0 else timeline.length_seconds
 			var cursor_at_frame_start: float = prev_cursor
+			# Markers between the pre-wrap cursor and loop end are skipped if we only
+			# check [loop_lo, next_cursor] after the wrap.
+			if _timeline_music != null:
+				_timeline_music.check_markers_crossed(
+					handle, timeline, cursor_at_frame_start, wrap_target, dispatchers
+				)
 			_fire_clips_in_range(handle, d, timeline, cursor_at_frame_start, wrap_target)
 			d["fired_clip_ids"] = {}
 			d["spent_clip_ids"] = {}
@@ -182,6 +188,9 @@ func finalize_handle(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	var was_alive: bool = handle._alive
 	var d: Dictionary = dispatchers[handle]
 	if fade_ms > 0:
+		# Keep the dispatcher entry until fades finish, but do not advance the cursor or
+		# fire new clips while outgoing music is crossfading away.
+		handle._paused = true
 		var voices: Dictionary = d.get("voices", {})
 		var playing_count: int = 0
 		for p in voices.values():

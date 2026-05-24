@@ -223,10 +223,23 @@ func _deferred_rebuild() -> void:
 	_rebuild_tree()
 	if not prev_sel.is_empty():
 		_suppress_tree_selection_emit = true
-		_select_tree_item_by_node_id(prev_sel)
+		var root_item: TreeItem = _tree.get_root() if _tree != null else null
+		var found: TreeItem = null
+		if root_item != null:
+			found = CodaBrowserTreeModel.find_tree_item_by_node_id(root_item, prev_sel)
+		if found != null:
+			found.select(0)
+			_tree.scroll_to_item(found)
+		else:
+			if _tree != null:
+				_tree.deselect_all()
+			# Deleted/moved nodes are gone from the tree — clear authoring panels so edits
+			# are not applied to orphaned CodaBrowserNode refs (lost on save).
+			selection_emitted.emit(_selection_category(), null)
 		_suppress_tree_selection_emit = false
-	# Do not re-emit selection here — structure-only edits (e.g. FX add) would pulse
-	# event_selection_changed and knock the Inspector out of timeline track/clip context.
+	# Do not re-emit selection here when the node still exists — structure-only edits
+	# (e.g. FX add) would pulse event_selection_changed and knock the Inspector out of
+	# timeline track/clip context.
 
 
 func _rebuild_tree() -> void:
