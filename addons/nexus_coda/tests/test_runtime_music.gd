@@ -10,6 +10,7 @@ static func run() -> int:
 	var failed: int = 0
 	failed += _test_set_parameter_segment_notify()
 	failed += _test_notify_music_state_changed()
+	failed += _test_stop_all_finalizes_plan_resume_handles()
 	return failed
 
 
@@ -58,6 +59,30 @@ static func _test_notify_music_state_changed() -> int:
 	runtime.notify_music_state_changed(handle)
 	if str(d.get("active_segment_id", "")) != "tense":
 		push_error("notify_music_state_changed should apply segment for music_state=1")
+		runtime.queue_free()
+		return 1
+	runtime.queue_free()
+	return 0
+
+
+static func _test_stop_all_finalizes_plan_resume_handles() -> int:
+	var runtime: CodaRuntime = _make_runtime()
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle._alive = true
+	runtime.get_graph_plan_resume_handles().append(handle)
+	var finished_count: Array = [0]
+	handle.finished.connect(func() -> void: finished_count[0] = int(finished_count[0]) + 1)
+	runtime.stop_all()
+	if runtime.is_alive(handle):
+		push_error("stop_all should clear plan-resume handles (is_alive still true)")
+		runtime.queue_free()
+		return 1
+	if int(finished_count[0]) != 1:
+		push_error("stop_all should emit finished for plan-resume handles")
+		runtime.queue_free()
+		return 1
+	if not runtime.get_graph_plan_resume_handles().is_empty():
+		push_error("stop_all should clear plan-resume handle list")
 		runtime.queue_free()
 		return 1
 	runtime.queue_free()
