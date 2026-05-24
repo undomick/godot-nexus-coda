@@ -13,6 +13,7 @@ const SCHEMA_VERSION := 1
 
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.gd")
+const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
 const CodaEventResolverScript := preload("res://addons/nexus_coda/runtime/coda_event_resolver.gd")
 const NodeData := preload("res://addons/nexus_coda/editor/browser/coda_event_graph_node_data.gd")
 
@@ -90,7 +91,7 @@ static func write_to_path(state: CodaState, bank: CodaBank, path: String) -> Str
 	if state == null or bank == null:
 		return "Internal error: missing project or bank."
 	var manifest: Dictionary = build_manifest(state, bank)
-	var text: String = JSON.stringify(manifest, "  ")
+	var text: String = CodaJsonUtilScript.stringify(manifest, "  ")
 	var abs_path: String = CodaProjectIo.to_physical_path(path)
 	if abs_path.is_empty():
 		return "Invalid bank path."

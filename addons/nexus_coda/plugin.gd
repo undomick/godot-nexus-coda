@@ -8,7 +8,6 @@ const NCODA_IMPORT_PLUGIN := preload("res://addons/nexus_coda/editor/import/nexu
 const CodaFilesystemContextMenuScript := preload(
 	"res://addons/nexus_coda/editor/coda_filesystem_context_menu_plugin.gd"
 )
-const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
 
 const TOOLS_SUBMENU_NAME := "Nexus Coda"
 ## Menu item id (same as index for the single entry — matches Nexus Resonance tool menu pattern).
@@ -27,8 +26,6 @@ var _ncoda_import_plugin: EditorImportPlugin
 var _filesystem_context_menu_plugin: EditorContextMenuPlugin
 ## All open Nexus Coda editor windows (multiple instances supported).
 var _editor_windows: Array[Window] = []
-## Editor-side runtime used for preview from inside the Nexus Coda window.
-var _editor_runtime: CodaRuntime
 
 
 func _enter_tree() -> void:
@@ -47,7 +44,6 @@ func _enter_tree() -> void:
 	_filesystem_context_menu_plugin = CodaFilesystemContextMenuScript.new() as EditorContextMenuPlugin
 	_filesystem_context_menu_plugin.attach_plugin(self)
 	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM, _filesystem_context_menu_plugin)
-	_install_editor_runtime()
 	_tools_menu = PopupMenu.new()
 	_tools_menu.name = "NexusCodaToolsMenu"
 	_tools_menu.add_item("Open Editor", MENU_OPEN_EDITOR)
@@ -70,7 +66,9 @@ func _exit_tree() -> void:
 		if is_instance_valid(w):
 			w.queue_free()
 	_editor_windows.clear()
-	_uninstall_editor_runtime()
+	if _tools_menu != null:
+		if _tools_menu.id_pressed.is_connected(_on_tools_menu_id_pressed):
+			_tools_menu.id_pressed.disconnect(_on_tools_menu_id_pressed)
 	remove_tool_menu_item(TOOLS_SUBMENU_NAME)
 	if _tools_menu != null and is_instance_valid(_tools_menu):
 		_tools_menu.queue_free()
@@ -81,7 +79,8 @@ func _exit_tree() -> void:
 
 
 func get_editor_runtime() -> CodaRuntime:
-	return _editor_runtime
+	# Each editor window owns its preview runtime; kept for legacy callers.
+	return null
 
 
 ## Returns [code]true[/code] only when the autoload entry is missing or points to a different
@@ -141,21 +140,6 @@ func _deferred_send_fs_selection_to_coda_assets_after_panel(paths: PackedStringA
 	var w: Window = _editor_windows[_editor_windows.size() - 1]
 	if w.has_method(&"import_fs_paths_into_assets"):
 		w.call(&"import_fs_paths_into_assets", paths)
-
-
-func _install_editor_runtime() -> void:
-	_editor_runtime = CodaRuntimeScript.new() as CodaRuntime
-	_editor_runtime.name = "NexusCodaEditorRuntime"
-	# Parent it under the editor base control so it lives as long as the plugin and gets a SceneTree.
-	var base: Control = get_editor_interface().get_base_control()
-	base.add_child(_editor_runtime)
-
-
-func _uninstall_editor_runtime() -> void:
-	if _editor_runtime != null and is_instance_valid(_editor_runtime):
-		_editor_runtime.stop_all()
-		_editor_runtime.queue_free()
-	_editor_runtime = null
 
 
 ## Mirrors Nexus Resonance `_register_tool_shortcuts`: global shortcut on the Project → Tools entry.

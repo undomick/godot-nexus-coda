@@ -47,6 +47,15 @@ const CodaTimelineMusicControllerScript := preload(
 const CodaMusicTransitionPolicyScript := preload(
 	"res://addons/nexus_coda/runtime/coda_music_transition_policy.gd"
 )
+const CodaRuntimeGraphPlaybackScript := preload(
+	"res://addons/nexus_coda/runtime/coda_runtime_graph_playback.gd"
+)
+const CodaRuntimeTimelineLayoutScript := preload(
+	"res://addons/nexus_coda/runtime/coda_runtime_timeline_layout.gd"
+)
+const CodaRuntimeTimelineDispatchScript := preload(
+	"res://addons/nexus_coda/runtime/coda_runtime_timeline_dispatch.gd"
+)
 
 const RUNTIME_LOG_SCOPE := "runtime"
 
@@ -845,43 +854,15 @@ func _start_event(
 
 
 func _split_parallel_entries(entries: Array) -> Array:
-	# Treat consecutive entries with blend_weight < 1.0 at the front of the plan as parallel siblings
-	# (this is what a BLEND container produces). BLEND crossfades also stamp blend_parallel_step so
-	# interleaved SEQUENCE children only mix within the same step. Sequence/Random produce
-	# blend_weight == 1.0 so they stay sequential.
-	var out: Array = []
-	var first_step: int = -1
-	for i in entries.size():
-		var entry: Dictionary = entries[i] as Dictionary
-		var w: float = float(entry.get("blend_weight", 1.0))
-		if w >= 1.0:
-			if out.is_empty():
-				out.append(entries[i])
-			break
-		var step: int = int(entry.get("blend_parallel_step", 0))
-		if out.is_empty():
-			first_step = step
-			out.append(entries[i])
-		elif step == first_step:
-			out.append(entries[i])
-		else:
-			break
-	if out.is_empty() and not entries.is_empty():
-		out.append(entries[0])
-	return out
+	return CodaRuntimeGraphPlaybackScript.split_parallel_entries(entries)
 
 
-## Remaining parallel legs plus the rest of the plan. Used when the voice pool starts only part
-## of a BLEND step so finished legs are not replayed from the beginning.
 func _graph_plan_after_incomplete_parallel_step(
 	parallel_entries: Array, started_indices: Dictionary, rest: Array
 ) -> Array:
-	var out: Array = []
-	for i in parallel_entries.size():
-		if not started_indices.has(i):
-			out.append(parallel_entries[i])
-	out.append_array(rest)
-	return out
+	return CodaRuntimeGraphPlaybackScript.plan_after_incomplete_parallel_step(
+		parallel_entries, started_indices, rest
+	)
 
 
 func _make_sibling_handle(parent: CodaEventHandle, entry: Dictionary, player: AudioStreamPlayer) -> CodaEventHandle:
@@ -1869,7 +1850,7 @@ func resync_timeline_preview_for_event(event_id: String) -> void:
 	# Always follow the event's current timeline object (undo/redo replaces the ref).
 	d["timeline"] = timeline
 	handle.timeline_length_seconds = timeline.length_seconds
-	var sig: String = _timeline_layout_signature(timeline)
+	var sig: String = CodaRuntimeTimelineLayoutScript.layout_signature(timeline)
 	if String(d.get("layout_sig", "")) == sig:
 		return
 	d["layout_sig"] = sig
@@ -1880,61 +1861,17 @@ func resync_timeline_preview_for_event(event_id: String) -> void:
 
 
 static func _timeline_layout_signature(timeline: CodaEventTimeline) -> String:
-	if timeline == null:
-		return ""
-	var parts: PackedStringArray = PackedStringArray()
-	for tr in timeline.tracks:
-		var bus_id: String = String(tr.output_bus_id)
-		var track_fx: String = _timeline_fx_chain_signature(tr.effects)
-		for clip in tr.clips:
-			parts.append(
-				"%s|%s|%s|%.6f|%.6f|%s|fx:%s|tfx:%s"
-				% [
-					clip.id,
-					tr.id,
-					clip.audio_path,
-					clip.start_seconds,
-					clip.duration_seconds,
-					bus_id,
-					_timeline_fx_chain_signature(clip.effects),
-					track_fx,
-				]
-			)
-	parts.sort()
-	return "%.6f|%s" % [timeline.length_seconds, "|".join(parts)]
+	return CodaRuntimeTimelineLayoutScript.layout_signature(timeline)
 
 
 static func _timeline_fx_chain_signature(effects: Array) -> String:
-	if effects.is_empty():
-		return ""
-	var fx_parts: PackedStringArray = PackedStringArray()
-	for eff in effects:
-		if eff is CodaTrackEffect:
-			var e: CodaTrackEffect = eff as CodaTrackEffect
-			fx_parts.append(
-				"%s|%d|%s|%s"
-				% [e.id, int(e.type), str(e.bypass), JSON.stringify(e.params)]
-			)
-	fx_parts.sort()
-	return ",".join(fx_parts)
+	return CodaRuntimeTimelineLayoutScript.fx_chain_signature(effects)
 
 
-## Returns the active timeline handle for the given event id, or null. Used by the timeline
-## panel to keep its visual cursor in sync with the player panel without leaking dispatcher
-## internals.
 func get_active_timeline_handle_for_event(event_id: String) -> CodaEventHandle:
-	if event_id.is_empty():
-		return null
-	for h in _timeline_dispatchers.keys():
-		var handle: CodaEventHandle = h as CodaEventHandle
-		if handle == null or not handle._alive:
-			continue
-		var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
-		if event == null:
-			continue
-		if event.id == event_id:
-			return handle
-	return null
+	return CodaRuntimeTimelineDispatchScript.active_handle_for_event(
+		_timeline_dispatchers, event_id
+	)
 
 
 func _drop_paused_graph_preview_state(handle: CodaEventHandle) -> void:

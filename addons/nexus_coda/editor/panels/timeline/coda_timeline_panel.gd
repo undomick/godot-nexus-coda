@@ -122,8 +122,14 @@ func get_selected_clip_id() -> String:
 func _on_runtime_voice_finished(handle: CodaEventHandle) -> void:
 	if _live_handle == handle:
 		_live_handle = null
-		if _view != null:
-			_view.set_playhead(0.0)
+		if _view != null and handle.is_timeline:
+			_view.set_playhead(handle.timeline_cursor_seconds)
+
+
+func stop_all_previews() -> void:
+	if _runtime != null:
+		_runtime.stop_all()
+	_live_handle = null
 
 
 func _process(_delta: float) -> void:

@@ -4,6 +4,12 @@ extends RefCounted
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaEffectCatalogScript := preload("res://addons/nexus_coda/editor/browser/effects/coda_effect_catalog.gd")
 const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/editor/browser/coda_game_sync_rule.gd")
+const CodaProjectSerializerScript := preload(
+	"res://addons/nexus_coda/editor/browser/coda_project_serializer.gd"
+)
+const CodaBrowserTreeDropScript := preload(
+	"res://addons/nexus_coda/editor/browser/coda_browser_tree_drop.gd"
+)
 
 signal structure_changed
 ## Bus volume/mute/bypass and other non-structural edits; marks unsaved state without forcing full UI rebuilds.
@@ -16,7 +22,7 @@ var snapshots: Array[CodaSnapshot] = []
 var banks: Array[CodaBank] = []
 var game_sync_rules: Array[CodaGameSyncRule] = []
 
-## Project-level appearance metadata. Phase 7: editor window applies these on load.
+## Project-level appearance metadata; the editor window applies these on load.
 ## `theme_mode` is "dark" or "light"; `accent_color` overrides the default Coda accent.
 var theme_mode: String = "dark"
 var accent_color: Color = Color(0.42, 0.74, 1.00, 1.0)
@@ -429,7 +435,7 @@ func set_event_authoring_data(
 	return ""
 
 
-## Replaces the parameter list of an event without touching the graph. Phase 4 will use this from the inspector.
+## Replaces the parameter list of an event without touching the graph.
 func set_event_parameters(event_id: String, parameters: Array[CodaEventParameter]) -> String:
 	var err_msg: String = CodaEventParameter.validate_list(parameters)
 	if not err_msg.is_empty():
@@ -619,155 +625,41 @@ func _events_insert_at_visual_index(parent: CodaBrowserNode, moving: CodaBrowser
 
 
 func move_events_drop(moving_id: String, target_id: String, section: int) -> bool:
-	if moving_id == events_root.id:
-		return false
-	var moving_node: CodaBrowserNode = events_root.find_by_id(moving_id)
-	if moving_node == null:
-		return false
-	if target_id.is_empty():
-		if not _validate_events_move_into(moving_node, events_root):
-			return false
-		var taken_root: CodaBrowserNode = events_root.take_child_by_id(moving_id)
-		if taken_root == null:
-			return false
-		var v_end: int = _events_visual_list(events_root).size()
-		_events_insert_at_visual_index(events_root, taken_root, v_end)
+	if CodaBrowserTreeDropScript.move_drop(
+		events_root,
+		events_root.id,
+		moving_id,
+		target_id,
+		section,
+		Callable(self, &"events_parent_of"),
+		Callable(self, &"_validate_events_move_into"),
+		Callable(self, &"_events_visual_list"),
+		Callable(self, &"_events_insert_at_visual_index"),
+		Callable(self, &"_events_into_folder_insert_index"),
+		Callable(self, &"_events_child_visual_index")
+	):
 		structure_changed.emit()
 		return true
-	var target_node: CodaBrowserNode = events_root.find_by_id(target_id)
-	if target_node == null:
-		return false
-	if moving_id == target_id:
-		return false
-	var dest_parent_id: String = ""
-	var mode: String = ""
-	if (section == 0 or section == 2) and target_node.is_folder():
-		dest_parent_id = target_node.id
-		mode = "into_folder"
-	elif section == 0 and not target_node.is_folder():
-		var p: CodaBrowserNode = events_parent_of(target_id)
-		if p == null:
-			return false
-		dest_parent_id = p.id
-		mode = "before_child"
-	elif section == -1:
-		var p2: CodaBrowserNode = events_parent_of(target_id)
-		if p2 == null:
-			return false
-		dest_parent_id = p2.id
-		mode = "before_child"
-	elif section == 1:
-		var p3: CodaBrowserNode = events_parent_of(target_id)
-		if p3 == null:
-			return false
-		dest_parent_id = p3.id
-		mode = "after_child"
-	else:
-		return false
-	var dest_parent_chk: CodaBrowserNode = events_root.find_by_id(dest_parent_id)
-	if dest_parent_chk == null or not dest_parent_chk.is_folder():
-		return false
-	if not _validate_events_move_into(moving_node, dest_parent_chk):
-		return false
-	var taken: CodaBrowserNode = events_root.take_child_by_id(moving_id)
-	if taken == null:
-		return false
-	var dest_for_insert: CodaBrowserNode
-	if mode == "into_folder":
-		dest_for_insert = target_node
-	else:
-		dest_for_insert = events_root.find_by_id(dest_parent_id)
-		if dest_for_insert == null:
-			return false
-	var vidx: int = 0
-	match mode:
-		"into_folder":
-			vidx = _events_into_folder_insert_index(dest_for_insert, taken)
-		"before_child":
-			vidx = _events_child_visual_index(dest_for_insert, target_id)
-		"after_child":
-			vidx = _events_child_visual_index(dest_for_insert, target_id) + 1
-		_:
-			return false
-	_events_insert_at_visual_index(dest_for_insert, taken, vidx)
-	structure_changed.emit()
-	return true
+	return false
 
 
 func move_assets_drop(moving_id: String, target_id: String, section: int) -> bool:
-	if moving_id == assets_root.id:
-		return false
-	var moving_node_a: CodaBrowserNode = assets_root.find_by_id(moving_id)
-	if moving_node_a == null:
-		return false
-	if target_id.is_empty():
-		if not _validate_events_move_into(moving_node_a, assets_root):
-			return false
-		var taken_ar: CodaBrowserNode = assets_root.take_child_by_id(moving_id)
-		if taken_ar == null:
-			return false
-		var v_end_a: int = _events_visual_list(assets_root).size()
-		_events_insert_at_visual_index(assets_root, taken_ar, v_end_a)
+	if CodaBrowserTreeDropScript.move_drop(
+		assets_root,
+		assets_root.id,
+		moving_id,
+		target_id,
+		section,
+		Callable(self, &"assets_parent_of"),
+		Callable(self, &"_validate_events_move_into"),
+		Callable(self, &"_events_visual_list"),
+		Callable(self, &"_events_insert_at_visual_index"),
+		Callable(self, &"_events_into_folder_insert_index"),
+		Callable(self, &"_events_child_visual_index")
+	):
 		structure_changed.emit()
 		return true
-	var target_node_a: CodaBrowserNode = assets_root.find_by_id(target_id)
-	if target_node_a == null:
-		return false
-	if moving_id == target_id:
-		return false
-	var dest_parent_id_a: String = ""
-	var mode_a: String = ""
-	if (section == 0 or section == 2) and target_node_a.is_folder():
-		dest_parent_id_a = target_node_a.id
-		mode_a = "into_folder"
-	elif section == 0 and not target_node_a.is_folder():
-		var pa: CodaBrowserNode = assets_parent_of(target_id)
-		if pa == null:
-			return false
-		dest_parent_id_a = pa.id
-		mode_a = "before_child"
-	elif section == -1:
-		var pa2: CodaBrowserNode = assets_parent_of(target_id)
-		if pa2 == null:
-			return false
-		dest_parent_id_a = pa2.id
-		mode_a = "before_child"
-	elif section == 1:
-		var pa3: CodaBrowserNode = assets_parent_of(target_id)
-		if pa3 == null:
-			return false
-		dest_parent_id_a = pa3.id
-		mode_a = "after_child"
-	else:
-		return false
-	var dest_parent_chk_a: CodaBrowserNode = assets_root.find_by_id(dest_parent_id_a)
-	if dest_parent_chk_a == null or not dest_parent_chk_a.is_folder():
-		return false
-	if not _validate_events_move_into(moving_node_a, dest_parent_chk_a):
-		return false
-	var taken_a: CodaBrowserNode = assets_root.take_child_by_id(moving_id)
-	if taken_a == null:
-		return false
-	var dest_for_insert_a: CodaBrowserNode
-	if mode_a == "into_folder":
-		dest_for_insert_a = target_node_a
-	else:
-		dest_for_insert_a = assets_root.find_by_id(dest_parent_id_a)
-		if dest_for_insert_a == null:
-			return false
-	var vidx_a: int = 0
-	match mode_a:
-		"into_folder":
-			vidx_a = _events_into_folder_insert_index(dest_for_insert_a, taken_a)
-		"before_child":
-			vidx_a = _events_child_visual_index(dest_for_insert_a, target_id)
-		"after_child":
-			vidx_a = _events_child_visual_index(dest_for_insert_a, target_id) + 1
-		_:
-			return false
-	_events_insert_at_visual_index(dest_for_insert_a, taken_a, vidx_a)
-	structure_changed.emit()
-	return true
+	return false
 
 
 ## Bus mutation API.
@@ -1154,7 +1046,7 @@ func find_snapshot_by_name(p_name: String) -> CodaSnapshot:
 
 
 ## Apply a snapshot to the live bus tree (overwrites volume_db/mute for listed buses).
-## Phase 5 MVP: instant. Returns true on success.
+## Applies snapshot bus overrides instantly. Returns true on success.
 func apply_snapshot(snapshot_id: String) -> bool:
 	var s: CodaSnapshot = find_snapshot_by_id(snapshot_id)
 	if s == null:
@@ -1539,73 +1431,8 @@ func set_bus_effect_bypass(bus_id: String, effect_id: String, on: bool) -> void:
 
 
 func to_dictionary() -> Dictionary:
-	var snaps_arr: Array = []
-	for s in snapshots:
-		snaps_arr.append(s.to_dictionary())
-	var banks_arr: Array = []
-	for b in banks:
-		banks_arr.append(b.to_dictionary())
-	var rules_arr: Array = []
-	for r in game_sync_rules:
-		rules_arr.append(r.to_dictionary())
-	return {
-		"version": 5,
-		"events": events_root.to_dictionary(),
-		"assets": assets_root.to_dictionary(),
-		"buses": bus_root.to_dictionary() if bus_root != null else CodaBus.make_default_master().to_dictionary(),
-		"snapshots": snaps_arr,
-		"banks": banks_arr,
-		"game_sync_rules": rules_arr,
-		"appearance": {
-			"theme_mode": theme_mode,
-			"accent_color": [accent_color.r, accent_color.g, accent_color.b, accent_color.a],
-		},
-	}
+	return CodaProjectSerializerScript.to_dictionary(self)
 
 
 func load_from_dictionary(data: Dictionary) -> void:
-	var ev: Variant = data.get("events", {})
-	if ev is Dictionary:
-		events_root = CodaBrowserNode.from_dictionary(ev)
-	else:
-		events_root = CodaBrowserNode.new("Events", CodaBrowserNode.Kind.FOLDER)
-	var as_: Variant = data.get("assets", {})
-	if as_ is Dictionary:
-		assets_root = CodaBrowserNode.from_dictionary(as_)
-	else:
-		assets_root = CodaBrowserNode.new("Assets", CodaBrowserNode.Kind.FOLDER)
-	var buses_raw: Variant = data.get("buses", null)
-	if buses_raw is Dictionary:
-		bus_root = CodaBus.from_dictionary(buses_raw)
-	else:
-		bus_root = CodaBus.make_default_master()
-	snapshots.clear()
-	for s_raw in data.get("snapshots", []) as Array:
-		if s_raw is Dictionary:
-			snapshots.append(CodaSnapshot.from_dictionary(s_raw))
-	banks.clear()
-	for b_raw in data.get("banks", []) as Array:
-		if b_raw is Dictionary:
-			banks.append(CodaBank.from_dictionary(b_raw))
-	game_sync_rules.clear()
-	for r_raw in data.get("game_sync_rules", []) as Array:
-		if r_raw is Dictionary:
-			game_sync_rules.append(CodaGameSyncRuleScript.from_dictionary(r_raw))
-	theme_mode = "dark"
-	accent_color = Color(0.42, 0.74, 1.00, 1.0)
-	var appearance_raw: Variant = data.get("appearance", null)
-	if appearance_raw is Dictionary:
-		var ap: Dictionary = appearance_raw
-		var mode_raw: String = str(ap.get("theme_mode", "dark")).to_lower()
-		if mode_raw == "light" or mode_raw == "dark":
-			theme_mode = mode_raw
-		var ac_raw: Variant = ap.get("accent_color", null)
-		if ac_raw is Array and (ac_raw as Array).size() >= 3:
-			var ac_arr: Array = ac_raw
-			accent_color = Color(
-				float(ac_arr[0]),
-				float(ac_arr[1]),
-				float(ac_arr[2]),
-				float(ac_arr[3]) if ac_arr.size() >= 4 else 1.0
-			)
-	structure_changed.emit()
+	CodaProjectSerializerScript.load_from_dictionary(self, data)

@@ -14,6 +14,8 @@ const RECENT_MAX := 12
 const RECENT_SUBDIR := "nexus_coda"
 const RECENT_FILENAME := "recent_projects.json"
 
+const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
+
 
 ## EditorFileDialog may pass res:// or absolute paths; FileAccess in the editor is most reliable on a globalized path.
 static func to_physical_path(path: String) -> String:
@@ -38,7 +40,7 @@ static func save_to_path(state: CodaState, path: String) -> String:
 	if state == null:
 		return "Internal error: no project state."
 	var data: Dictionary = state.to_dictionary()
-	var text: String = JSON.stringify(data, "  ")
+	var text: String = CodaJsonUtilScript.stringify(data, "  ")
 	if text.is_empty() and not data.is_empty():
 		return "Failed to serialize project data."
 	var abs_path: String = to_physical_path(path)

@@ -12,6 +12,13 @@ const CodaEventTimelineScript := preload(
 const CodaTimelineMarkerScript := preload(
 	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_marker.gd"
 )
+const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
+const CodaProjectSerializerScript := preload(
+	"res://addons/nexus_coda/editor/browser/coda_project_serializer.gd"
+)
+const CodaRuntimeGraphPlaybackScript := preload(
+	"res://addons/nexus_coda/runtime/coda_runtime_graph_playback.gd"
+)
 
 
 func _init() -> void:
@@ -21,6 +28,9 @@ func _init() -> void:
 	failed += _test_event_duplicate_ids()
 	failed += _test_delete_event_clears_banks()
 	failed += _test_marker_ui()
+	failed += _test_nan_json_save()
+	failed += _test_project_serializer_roundtrip()
+	failed += _test_graph_parallel_split()
 	if failed > 0:
 		push_error("Editor shell tests failed (%d)" % failed)
 		quit(1)
@@ -152,5 +162,46 @@ static func _test_marker_ui() -> int:
 		return 1
 	if not tl.markers.is_empty():
 		push_error("delete_marker left marker")
+		return 1
+	return 0
+
+
+static func _test_nan_json_save() -> int:
+	var payload: Dictionary = {"value": NAN, "nested": {"x": INF}}
+	var text: String = CodaJsonUtilScript.stringify(payload, "  ")
+	if text.is_empty():
+		push_error("CodaJsonUtil.stringify returned empty for NaN payload")
+		return 1
+	if text.find("NaN") >= 0 or text.find("Infinity") >= 0:
+		push_error("CodaJsonUtil.stringify left non-finite literals")
+		return 1
+	return 0
+
+
+static func _test_project_serializer_roundtrip() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var ev: CodaBrowserNode = state.add_events_event(state.events_root.id, "Roundtrip")
+	if ev == null:
+		push_error("serializer setup event failed")
+		return 1
+	var data: Dictionary = CodaProjectSerializerScript.to_dictionary(state)
+	var loaded: CodaState = CodaStateScript.new()
+	CodaProjectSerializerScript.load_from_dictionary(loaded, data)
+	var found: CodaBrowserNode = loaded.events_root.find_by_id(ev.id)
+	if found == null or found.name != "Roundtrip":
+		push_error("serializer roundtrip lost event")
+		return 1
+	return 0
+
+
+static func _test_graph_parallel_split() -> int:
+	var entries: Array = [
+		{"blend_weight": 0.5, "blend_parallel_step": 0},
+		{"blend_weight": 0.5, "blend_parallel_step": 0},
+		{"blend_weight": 1.0, "blend_parallel_step": 1},
+	]
+	var split: Array = CodaRuntimeGraphPlaybackScript.split_parallel_entries(entries)
+	if split.size() != 2:
+		push_error("graph parallel split size")
 		return 1
 	return 0

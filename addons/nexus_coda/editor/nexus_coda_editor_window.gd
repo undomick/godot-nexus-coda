@@ -65,6 +65,7 @@ const CodaEditorTransportScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_editor_transport.gd"
 )
 const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
+const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
 
 const PANEL_BROWSER := &"browser"
 const PANEL_GRAPH := &"graph"
@@ -164,6 +165,8 @@ var _fs_asset_import_boot_attempts: int = 0
 var _selection_router: CodaEditorSelectionRouter
 var _authoring_focus: CodaEditorAuthoringFocus
 var _editor_transport: CodaEditorTransport
+var _editor_runtime: CodaRuntime
+var _playhead_sync_slot: Callable = Callable()
 var _layout_autosave_queued: bool = false
 var _focused_panel_id: StringName = &""
 
@@ -480,9 +483,8 @@ func _focus_panel(panel_id: StringName) -> void:
 
 
 func _wire_runtime_to_panels() -> void:
-	if _plugin == null or not _plugin.has_method(&"get_editor_runtime"):
-		return
-	var rt: CodaRuntime = _plugin.get_editor_runtime() as CodaRuntime
+	_ensure_editor_runtime()
+	var rt: CodaRuntime = _editor_runtime
 	if rt == null:
 		return
 	if _graph_panel != null:
@@ -490,9 +492,9 @@ func _wire_runtime_to_panels() -> void:
 	if _player_panel != null:
 		_player_panel.attach_runtime(rt)
 		if _player_panel.has_signal(&"playhead_changed") and _editor_transport != null:
-			var ph_slot := Callable(_editor_transport, &"sync_playhead_seconds")
-			if not _player_panel.playhead_changed.is_connected(ph_slot):
-				_player_panel.playhead_changed.connect(ph_slot)
+			_playhead_sync_slot = Callable(_editor_transport, &"sync_playhead_seconds")
+			if not _player_panel.playhead_changed.is_connected(_playhead_sync_slot):
+				_player_panel.playhead_changed.connect(_playhead_sync_slot)
 	if _timeline_panel != null and _timeline_panel.has_method(&"attach_runtime"):
 		_timeline_panel.attach_runtime(rt)
 	if _mixer_panel != null:
@@ -501,6 +503,39 @@ func _wire_runtime_to_panels() -> void:
 			Callable(self, &"pick_audio_bus_layout_export_path_async"),
 			Callable(self, &"complete_audio_bus_layout_export")
 		)
+
+
+func _ensure_editor_runtime() -> void:
+	if _editor_runtime != null and is_instance_valid(_editor_runtime):
+		return
+	_editor_runtime = CodaRuntimeScript.new() as CodaRuntime
+	_editor_runtime.name = "CodaEditorRuntime"
+	add_child(_editor_runtime)
+
+
+func _dispose_editor_runtime() -> void:
+	if _editor_runtime != null and is_instance_valid(_editor_runtime):
+		_editor_runtime.stop_all()
+		_editor_runtime.queue_free()
+	_editor_runtime = null
+
+
+func _unwire_runtime_from_panels() -> void:
+	if (
+		_player_panel != null
+		and is_instance_valid(_player_panel)
+		and _playhead_sync_slot.is_valid()
+		and _player_panel.playhead_changed.is_connected(_playhead_sync_slot)
+	):
+		_player_panel.playhead_changed.disconnect(_playhead_sync_slot)
+	_playhead_sync_slot = Callable()
+	if _timeline_panel != null and _timeline_panel.has_method(&"stop_all_previews"):
+		_timeline_panel.call(&"stop_all_previews")
+	if _player_panel != null and _player_panel.has_method(&"stop_current_voice"):
+		_player_panel.stop_current_voice()
+	if _editor_runtime != null and is_instance_valid(_editor_runtime):
+		_editor_runtime.stop_all()
+	_bind_project_signals(null)
 
 
 func _initial_bind() -> void:
@@ -534,11 +569,9 @@ func _initial_bind() -> void:
 
 
 func _push_project_to_runtime(state: Variant) -> void:
-	if _plugin == null or not _plugin.has_method(&"get_editor_runtime"):
-		return
-	var rt: CodaRuntime = _plugin.get_editor_runtime() as CodaRuntime
-	if rt != null:
-		rt.set_project(state)
+	_ensure_editor_runtime()
+	if _editor_runtime != null:
+		_editor_runtime.set_project(state)
 
 
 func _build_menus() -> void:
@@ -1109,7 +1142,7 @@ func _set_preferred_layout(pref: String) -> void:
 		"version": 1,
 		CUSTOM_LAYOUT_PREFS_KEY: pref,
 	}
-	var text: String = JSON.stringify(payload, "  ")
+	var text: String = CodaJsonUtilScript.stringify(payload, "  ")
 	var f: FileAccess = FileAccess.open(p, FileAccess.WRITE)
 	if f == null:
 		return
@@ -1631,6 +1664,8 @@ func _teardown_before_close() -> void:
 		return
 	_teardown_done = true
 
+	_unwire_runtime_from_panels()
+
 	# Detach docked panels so their controls don't keep references alive through TabContainer internals.
 	if _dock_host != null and _dock_host.dock_manager != null:
 		var dm: CodaDockManager = _dock_host.dock_manager
@@ -1668,7 +1703,6 @@ func _teardown_before_close() -> void:
 		_inspector_panel.queue_free()
 	_inspector_panel = null
 	if _player_panel != null and is_instance_valid(_player_panel):
-		_player_panel.stop_current_voice()
 		_player_panel.queue_free()
 	_player_panel = null
 	if _timeline_panel != null and is_instance_valid(_timeline_panel):
@@ -1680,3 +1714,4 @@ func _teardown_before_close() -> void:
 	if _log_panel != null and is_instance_valid(_log_panel):
 		_log_panel.queue_free()
 	_log_panel = null
+	_dispose_editor_runtime()
