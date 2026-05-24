@@ -633,9 +633,10 @@ func runtime_report_pool_exhausted(context: Dictionary) -> void:
 	var msg: String = String(context.get("detail", "voice pool exhausted"))
 	var rate_key: String = "%s|%s" % [str(context.get("mode", "")), msg]
 	var now_ms: int = Time.get_ticks_msec()
-	var last_ms: int = int(_pool_warn_last_ms.get(rate_key, 0))
-	if now_ms - last_ms < 1000:
-		return
+	if _pool_warn_last_ms.has(rate_key):
+		var last_ms: int = int(_pool_warn_last_ms[rate_key])
+		if now_ms - last_ms < 1000:
+			return
 	_pool_warn_last_ms[rate_key] = now_ms
 	push_warning("Coda: %s" % msg)
 	voice_pool_exhausted.emit(context)
