@@ -307,6 +307,13 @@ func stop_all() -> void:
 		if gh != null and not graph_seen.has(gh):
 			graph_seen[gh] = true
 			graph_handles.append(gh)
+	# Plan-resume handles (pool-exhausted graph steps) are removed from _active_handles while
+	# waiting for a free voice; stop_all must still finalize them like unload_bank/stop() do.
+	for h in _graph_plan_resume_handles:
+		var rh: CodaEventHandle = h as CodaEventHandle
+		if rh != null and not graph_seen.has(rh):
+			graph_seen[rh] = true
+			graph_handles.append(rh)
 	_stop_all_in_progress = true
 	if _pool != null:
 		_pool.stop_all()
