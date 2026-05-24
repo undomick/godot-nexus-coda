@@ -22,6 +22,9 @@ const CodaRuntimeGraphPlaybackScript := preload(
 const CodaAudioBusSyncGateScript := preload(
 	"res://addons/nexus_coda/runtime/coda_audio_bus_sync_gate.gd"
 )
+const CodaControlSizeCompatScript := preload(
+	"res://addons/nexus_coda/editor/coda_control_size_compat.gd"
+)
 const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
 const CodaEffectsChainBindingScript := preload(
 	"res://addons/nexus_coda/editor/panels/effects/coda_effects_chain_binding.gd"
@@ -54,6 +57,7 @@ func _init() -> void:
 	failed += _test_delete_event_clears_banks()
 	failed += _test_marker_ui()
 	failed += _test_nan_json_save()
+	failed += _test_control_max_size_compat()
 	failed += _test_project_serializer_roundtrip()
 	failed += _test_graph_parallel_split()
 	failed += _test_bus_sync_gate_editor_blocks_autoload()
@@ -200,6 +204,17 @@ static func _test_marker_ui() -> int:
 	return 0
 
 
+static func _test_control_max_size_compat() -> int:
+	var btn := Button.new()
+	CodaControlSizeCompatScript.set_custom_maximum_size(btn, Vector2(64, 32))
+	if int(Engine.get_version_info().get("hex", 0)) >= 0x040700:
+		var got: Variant = btn.get(&"custom_maximum_size")
+		if got is Vector2 and not (got as Vector2).is_equal_approx(Vector2(64, 32)):
+			push_error("custom_maximum_size setter did not apply on supported engine")
+			return 1
+	return 0
+
+
 static func _test_nan_json_save() -> int:
 	var payload: Dictionary = {"value": NAN, "nested": {"x": INF}}
 	var text: String = CodaJsonUtilScript.stringify(payload, "  ")
@@ -273,8 +288,8 @@ static func _test_bus_sync_gate_gameplay_wins() -> int:
 
 static func _test_voice_pool_exhausted_signal() -> int:
 	var rt: CodaRuntime = CodaRuntimeScript.new()
-	var fired: bool = false
-	rt.voice_pool_exhausted.connect(func(_ctx: Dictionary) -> void: fired = true)
+	var fired: Array = [false]
+	rt.voice_pool_exhausted.connect(func(_ctx: Dictionary) -> void: fired[0] = true)
 	rt.is_editor_preview = true
 	rt.runtime_report_pool_exhausted({
 		"mode": "test",
@@ -282,7 +297,7 @@ static func _test_voice_pool_exhausted_signal() -> int:
 		"active": 2,
 		"pool_size": 2,
 	})
-	if not fired:
+	if not bool(fired[0]):
 		push_error("voice_pool_exhausted signal not emitted")
 		return 1
 	return 0
