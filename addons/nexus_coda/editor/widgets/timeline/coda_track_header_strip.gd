@@ -114,7 +114,6 @@ func build_ui(
 		c.queue_free()
 
 	custom_minimum_size = Vector2(0, row_height)
-	custom_maximum_size = Vector2(4000, row_height)
 
 	_row = HBoxContainer.new()
 	_row.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
@@ -176,7 +175,6 @@ func build_ui(
 	_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_name_edit.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_name_edit.custom_minimum_size = Vector2(0, 22)
-	_name_edit.custom_maximum_size = Vector2(100000, 30)
 	_name_edit.clip_contents = true
 	_name_edit.placeholder_text = "Track name"
 	_name_edit.text_submitted.connect(_on_name_submitted)
