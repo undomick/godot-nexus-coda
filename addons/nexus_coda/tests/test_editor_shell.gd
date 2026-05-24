@@ -55,6 +55,7 @@ func _init() -> void:
 	failed += _test_bank_rename_duplicate()
 	failed += _test_event_duplicate_ids()
 	failed += _test_delete_event_clears_banks()
+	failed += _test_orphaned_event_edits_not_serialized()
 	failed += _test_marker_ui()
 	failed += _test_nan_json_save()
 	failed += _test_control_max_size_compat()
@@ -184,6 +185,36 @@ static func _test_delete_event_clears_banks() -> int:
 		push_error("bank still references deleted event")
 		return 1
 	return 0
+
+
+static func _test_orphaned_event_edits_not_serialized() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var ev: CodaBrowserNode = state.add_events_event(state.events_root.id, "Orphan")
+	if ev == null:
+		push_error("orphan test setup failed")
+		return 1
+	if ev.event_timeline == null:
+		ev.event_timeline = CodaEventTimelineScript.make_default()
+	var ev_id: String = ev.id
+	var timeline: CodaEventTimeline = ev.event_timeline
+	if not state.delete_node(ev_id):
+		push_error("delete_node failed in orphan test")
+		return 1
+	timeline.length_seconds = 99.0
+	var data: Dictionary = CodaProjectSerializerScript.to_dictionary(state)
+	if _dict_tree_contains_event_id(data.get("events", {}) as Dictionary, ev_id):
+		push_error("deleted event still present in serialized project")
+		return 1
+	return 0
+
+
+static func _dict_tree_contains_event_id(node_d: Dictionary, event_id: String) -> bool:
+	if str(node_d.get("id", "")) == event_id:
+		return true
+	for child_raw in node_d.get("children", []) as Array:
+		if child_raw is Dictionary and _dict_tree_contains_event_id(child_raw as Dictionary, event_id):
+			return true
+	return false
 
 
 static func _test_marker_ui() -> int:

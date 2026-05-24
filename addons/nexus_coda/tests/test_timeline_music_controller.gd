@@ -9,11 +9,15 @@ const CodaTimelineSegmentDriverScript := preload(
 )
 const CodaTestRuntimeScript := preload("res://addons/nexus_coda/tests/helpers/coda_test_runtime.gd")
 const CodaEventHandleScript := preload("res://addons/nexus_coda/runtime/coda_event_handle.gd")
+const CodaTimelineMarkerScript := preload(
+	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_marker.gd"
+)
 
 
 static func run() -> int:
 	var failed: int = 0
 	failed += _test_marker_crossed_once()
+	failed += _test_marker_in_loop_wrap_tail()
 	failed += _test_should_notify_for_param()
 	return failed
 
@@ -38,6 +42,38 @@ static func _test_marker_crossed_once() -> int:
 	ctrl.check_markers_crossed(handle, ev.event_timeline, 10.5, 11.0, dispatchers)
 	if markers.size() != 1:
 		push_error("marker should not fire again")
+		return 1
+	return 0
+
+
+static func _test_marker_in_loop_wrap_tail() -> int:
+	var markers: Array[String] = []
+	var ctrl := CodaTimelineMusicControllerScript.new()
+	ctrl.setup(null, null, CodaTimelineSegmentDriverScript.new(), null, func(_h: CodaEventHandle, mid: String) -> void:
+		markers.append(mid)
+	)
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var timeline = ev.event_timeline
+	timeline.loop_enabled = true
+	timeline.loop_start_seconds = 0.0
+	timeline.loop_end_seconds = 10.0
+	timeline.markers.clear()
+	var tail_marker := CodaTimelineMarkerScript.new()
+	tail_marker.time_seconds = 9.95
+	timeline.markers.append(tail_marker)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle.event_node = ev
+	var dispatchers: Dictionary = {handle: {"timeline": timeline}}
+	ctrl.check_markers_crossed(handle, timeline, 9.9, 10.0, dispatchers)
+	if markers.size() != 1 or markers[0] != tail_marker.id:
+		push_error("loop-wrap tail marker should fire when checking pre-wrap range")
+		return 1
+	markers.clear()
+	ctrl.check_markers_crossed(handle, timeline, 0.0, 0.1, dispatchers)
+	if not markers.is_empty():
+		push_error("post-wrap-only range must not fire tail marker")
 		return 1
 	return 0
 
