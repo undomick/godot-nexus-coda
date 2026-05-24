@@ -19,6 +19,7 @@ func _init() -> void:
 	failed += _test_layout_store()
 	failed += _test_bank_rename_duplicate()
 	failed += _test_event_duplicate_ids()
+	failed += _test_delete_event_clears_banks()
 	failed += _test_marker_ui()
 	if failed > 0:
 		push_error("Editor shell tests failed (%d)" % failed)
@@ -108,6 +109,31 @@ static func _test_event_duplicate_ids() -> int:
 	var edge: CodaEventGraphEdge = copy.event_graph.edges[0]
 	if edge.from_node_id == ev.event_graph.nodes[0].id or edge.to_node_id == sound.id:
 		push_error("duplicate_events_node graph edge remap")
+		return 1
+	return 0
+
+
+static func _test_delete_event_clears_banks() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var ev: CodaBrowserNode = state.add_events_event(state.events_root.id, "Gone")
+	if ev == null:
+		push_error("add_events_event failed")
+		return 1
+	var bank: CodaBank = state.add_bank("Test")
+	if bank == null:
+		push_error("add_bank failed")
+		return 1
+	if not state.add_event_to_bank(bank.id, ev.id):
+		push_error("add_event_to_bank failed")
+		return 1
+	if not state.delete_node(ev.id):
+		push_error("delete_node failed")
+		return 1
+	if state.events_root.find_by_id(ev.id) != null:
+		push_error("deleted event still in tree")
+		return 1
+	if bank.contains_event(ev.id):
+		push_error("bank still references deleted event")
 		return 1
 	return 0
 

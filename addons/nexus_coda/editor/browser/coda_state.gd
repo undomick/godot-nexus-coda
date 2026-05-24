@@ -527,13 +527,38 @@ func rename_node(target_id: String, new_name: String) -> bool:
 
 
 func delete_node(target_id: String) -> bool:
+	var purge_event_ids: PackedStringArray = PackedStringArray()
+	var events_node: CodaBrowserNode = events_root.find_by_id(target_id)
+	if events_node != null:
+		purge_event_ids = _collect_event_ids_in_subtree(events_node)
 	if events_root.remove_child_by_id(target_id):
+		_purge_event_ids_from_banks(purge_event_ids)
 		structure_changed.emit()
 		return true
 	if assets_root.remove_child_by_id(target_id):
 		structure_changed.emit()
 		return true
 	return false
+
+
+func _collect_event_ids_in_subtree(node: CodaBrowserNode) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	if node == null:
+		return out
+	if node.kind == CodaBrowserNode.Kind.EVENT:
+		out.append(node.id)
+	for child in node.children:
+		for eid in _collect_event_ids_in_subtree(child):
+			out.append(eid)
+	return out
+
+
+func _purge_event_ids_from_banks(event_ids: PackedStringArray) -> void:
+	if event_ids.is_empty():
+		return
+	for b in banks:
+		for eid in event_ids:
+			b.remove_event_id(eid)
 
 
 func _events_visual_list(parent: CodaBrowserNode) -> Array[CodaBrowserNode]:
