@@ -52,6 +52,7 @@ var _meter_value_label: Label
 var _params_header: CodaSectionHeader
 var _params_host: VBoxContainer
 var _params_empty_label: Label
+var _last_playhead_broadcast: float = NAN
 
 
 func _ready() -> void:
@@ -523,7 +524,15 @@ func _update_time_display() -> void:
 		else:
 			_seek_slider.max_value = 1.0
 			_seek_slider.set_value_no_signal(0.0)
-	playhead_changed.emit(pos)
+	# Without an active preview handle, do not broadcast 0 every frame — that would
+	# overwrite the timeline's authoring playhead before the first audition.
+	if r != null:
+		var should_broadcast: bool = not r.is_paused() or not is_equal_approx(pos, _last_playhead_broadcast)
+		if should_broadcast:
+			_last_playhead_broadcast = pos
+			playhead_changed.emit(pos)
+	else:
+		_last_playhead_broadcast = NAN
 
 
 func _update_meter() -> void:
