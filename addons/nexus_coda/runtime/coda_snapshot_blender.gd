@@ -86,3 +86,4 @@ func _begin_blend(snapshot_id: String, blend_ms: int) -> void:
 		"duration": maxf(0.001, float(blend_ms) / 1000.0),
 		"from_volumes": from_volumes,
 	}
+	_project.project_dirty.emit()

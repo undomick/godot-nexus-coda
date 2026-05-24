@@ -9,6 +9,7 @@ static func run() -> int:
 	var failed: int = 0
 	failed += _test_instant_apply()
 	failed += _test_blend_lerp()
+	failed += _test_blend_marks_project_dirty()
 	return failed
 
 
@@ -25,6 +26,22 @@ static func _test_instant_apply() -> int:
 		return 1
 	if abs(bus.volume_db - (-12.0)) > 0.001:
 		push_error("instant snapshot should set target volume")
+		return 1
+	return 0
+
+
+static func _test_blend_marks_project_dirty() -> int:
+	var state: CodaState = CodaTestRuntimeScript.build_snapshot_state()
+	var snap: CodaSnapshot = state.snapshots[0]
+	var dirty_count: Array[int] = [0]
+	state.project_dirty.connect(func() -> void: dirty_count[0] = int(dirty_count[0]) + 1)
+	var blender := CodaSnapshotBlenderScript.new()
+	blender.setup(state, Callable())
+	if not blender.apply(snap.id, 500):
+		push_error("blend apply failed for dirty test")
+		return 1
+	if int(dirty_count[0]) != 1:
+		push_error("blended snapshot recall should mark project dirty once at start")
 		return 1
 	return 0
 
