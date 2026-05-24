@@ -185,6 +185,21 @@ static func from_dictionary(data: Dictionary) -> CodaEventGraph:
 	return g
 
 
+## Assign fresh node ids and rewire edges. Returns old→new node id map (for modulation remaps).
+func regenerate_node_ids() -> Dictionary:
+	var remap: Dictionary = {}
+	for n in nodes:
+		var old_id: String = n.id
+		n.id = CodaEventGraphNodeDataScript._generate_id()
+		remap[old_id] = n.id
+	for e in edges:
+		if remap.has(e.from_node_id):
+			e.from_node_id = remap[e.from_node_id]
+		if remap.has(e.to_node_id):
+			e.to_node_id = remap[e.to_node_id]
+	return remap
+
+
 ## Builds the canonical default graph for a freshly-converted event with N audio paths.
 ## Layout: TRIGGER → RANDOM → SOUND[0..N-1] (single SOUND if only one path).
 static func from_legacy_audio_paths(audio_paths: PackedStringArray) -> CodaEventGraph:

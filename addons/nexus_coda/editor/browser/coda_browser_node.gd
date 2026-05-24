@@ -12,6 +12,9 @@ const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/co
 const CodaEventTimelineScript := preload(
 	"res://addons/nexus_coda/editor/browser/timeline/coda_event_timeline.gd"
 )
+const CodaEventParameterScript := preload(
+	"res://addons/nexus_coda/editor/browser/coda_event_parameter.gd"
+)
 
 var id: String
 var name: String
@@ -51,6 +54,29 @@ func _init(p_name: String = "Node", p_kind: Kind = Kind.FOLDER) -> void:
 
 static func _generate_id() -> String:
 	return "%s_%d_%d" % [str(Time.get_ticks_usec()), randi(), randi()]
+
+
+## Deep-copied events must not reuse ids (banks, runtime, and find_by_id assume uniqueness).
+func assign_fresh_ids_for_duplicate() -> void:
+	if kind != Kind.EVENT:
+		return
+	id = _generate_id()
+	var param_remap: Dictionary = {}
+	for p in event_parameters:
+		var old_param_id: String = p.id
+		p.id = CodaEventParameterScript._generate_id()
+		param_remap[old_param_id] = p.id
+	var graph_remap: Dictionary = {}
+	if event_graph != null:
+		graph_remap = event_graph.regenerate_node_ids()
+	if event_timeline != null:
+		event_timeline.regenerate_owned_ids()
+	for m in event_modulations:
+		m.id = CodaModulationScript._generate_id()
+		if param_remap.has(m.source_param_id):
+			m.source_param_id = param_remap[m.source_param_id]
+		if graph_remap.has(m.target_node_id):
+			m.target_node_id = graph_remap[m.target_node_id]
 
 
 func is_folder() -> bool:

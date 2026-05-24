@@ -242,6 +242,20 @@ func to_dictionary() -> Dictionary:
 	}
 
 
+## Assign fresh track, clip, marker, and effect ids (used after deep-copying an event).
+func regenerate_owned_ids() -> void:
+	for tr in tracks:
+		tr.id = CodaTimelineTrackScript._generate_id()
+		for i in range(tr.effects.size()):
+			tr.effects[i] = tr.effects[i].clone_new_id()
+		for c in tr.clips:
+			c.id = CodaTimelineClipScript._generate_id()
+			for j in range(c.effects.size()):
+				c.effects[j] = c.effects[j].clone_new_id()
+	for m in markers:
+		m.id = CodaTimelineMarkerScript._generate_id()
+
+
 static func from_dictionary(data: Dictionary) -> CodaEventTimeline:
 	var t := CodaEventTimeline.new()
 	t.length_seconds = max(0.001, float(data.get("length", DEFAULT_LENGTH_SECONDS)))
