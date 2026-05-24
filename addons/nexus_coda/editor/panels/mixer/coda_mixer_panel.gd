@@ -6,6 +6,7 @@ extends VBoxContainer
 ## All edits go through CodaState's bus mutation API so save flow marks dirty.
 
 signal bus_selection_changed(bus_id: String)
+signal bus_user_selected(bus_id: String)
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
@@ -14,6 +15,9 @@ const CodaBusStripScript := preload("res://addons/nexus_coda/editor/panels/mixer
 const CodaMixerStripRowScript := preload("res://addons/nexus_coda/editor/panels/mixer/coda_mixer_strip_row.gd")
 const CodaMixerAddBusSlotScript := preload("res://addons/nexus_coda/editor/panels/mixer/coda_mixer_add_bus_slot.gd")
 const CodaAudioBusMirrorScript := preload("res://addons/nexus_coda/runtime/coda_audio_bus_mirror.gd")
+const CodaAudioBusSyncGateScript := preload(
+	"res://addons/nexus_coda/runtime/coda_audio_bus_sync_gate.gd"
+)
 
 const METER_REFRESH_HZ := 30.0
 
@@ -148,6 +152,16 @@ func attach_bus_layout_export(pick_path: Callable, on_complete: Callable) -> voi
 	_complete_bus_layout_export = on_complete
 
 
+func _mirror_project_buses(prune_unclaimed: bool) -> Dictionary:
+	if _project == null or _project.bus_root == null:
+		return {}
+	if not CodaAudioBusSyncGateScript.may_sync_to_audio_server(
+		CodaAudioBusSyncGateScript.SyncCaller.EditorMixer, prune_unclaimed
+	):
+		return {}
+	return CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root, prune_unclaimed)
+
+
 func _on_mixer_structure_changed() -> void:
 	# Defer so callers (controls, snapshots, etc.) are never mid–child-list mutation when we rebuild.
 	# Do NOT coalesce drops: multiple emits before the deferred run must all converge into one rebuild
@@ -190,7 +204,7 @@ func _rebuild_strips() -> void:
 	# Make sure Godot's audio server has the matching buses (also returns id->name mapping).
 	# Do not prune non-Coda Godot buses during normal mixer editing (would delete the game's
 	# native AudioServer layout). Pruning runs only before explicit bus-layout export.
-	var name_map: Dictionary = CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root, false)
+	var name_map: Dictionary = _mirror_project_buses(false)
 	for b in flat:
 		var strip := CodaBusStripScript.new()
 		_strip_row.add_child(strip)
@@ -245,6 +259,7 @@ func _on_bus_strip_selected(bus_id: String) -> void:
 	_selected_bus_id = bus_id
 	_apply_bus_selection_visual()
 	bus_selection_changed.emit(bus_id)
+	bus_user_selected.emit(bus_id)
 
 
 func _refresh_snapshot_picker() -> void:
@@ -293,7 +308,7 @@ func _on_strip_solo_toggled(bus_id: String, solo: bool) -> void:
 		return
 	_project.update_bus_solo(bus_id, solo)
 	# Solo is implemented as muting siblings; let mirror sync rebuild the truth.
-	CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root, false)
+	_mirror_project_buses(false)
 
 
 func _on_strip_bypass_toggled(bus_id: String, bypass: bool) -> void:
@@ -331,7 +346,7 @@ func _on_strip_send_target_changed(bus_id: String, target_bus_id: String) -> voi
 	if _project == null:
 		return
 	_project.update_bus_send_target(bus_id, target_bus_id)
-	CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root, false)
+	_mirror_project_buses(false)
 
 
 func on_bus_strip_drop_at_flat_index(drag_bus_id: String, insert_before_flat: int) -> void:
@@ -422,7 +437,7 @@ func _on_recall_pressed() -> void:
 	# so Godot's live bus layout updates even if coalescing or ordering would skip a rebuild.
 	# Do not prune non-Coda Godot buses during normal mixer editing (would delete the game's
 	# native AudioServer layout). Pruning runs only before explicit bus-layout export.
-	var name_map: Dictionary = CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root, false)
+	var name_map: Dictionary = _mirror_project_buses(false)
 	_sync_strip_ui_from_project(name_map)
 	NexusCodaLog.info("mixer", 'Applied snapshot "%s"' % s.snapshot_name)
 
@@ -480,7 +495,7 @@ func _on_export_bus_layout_pressed() -> void:
 	if _project == null or _project.bus_root == null:
 		NexusCodaLog.warn("mixer", "Open a project with buses before exporting the bus layout.")
 		return
-	CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root, true)
+	_mirror_project_buses(true)
 	var picked: Variant = await _pick_bus_layout_path.call()
 	var raw_path: String = str(picked).strip_edges()
 	if raw_path.is_empty():

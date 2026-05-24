@@ -19,6 +19,31 @@ const CodaProjectSerializerScript := preload(
 const CodaRuntimeGraphPlaybackScript := preload(
 	"res://addons/nexus_coda/runtime/coda_runtime_graph_playback.gd"
 )
+const CodaAudioBusSyncGateScript := preload(
+	"res://addons/nexus_coda/runtime/coda_audio_bus_sync_gate.gd"
+)
+const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
+const CodaEffectsChainBindingScript := preload(
+	"res://addons/nexus_coda/editor/panels/effects/coda_effects_chain_binding.gd"
+)
+const CodaTimelineClipScript := preload(
+	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
+)
+const CodaInspectorEffectsSectionScript := preload(
+	"res://addons/nexus_coda/editor/panels/inspector/coda_inspector_effects_section.gd"
+)
+const CodaInspectorSelectionScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_inspector_selection.gd"
+)
+const CodaEffectCatalogScript := preload(
+	"res://addons/nexus_coda/editor/browser/effects/coda_effect_catalog.gd"
+)
+const CodaTrackEffectScript := preload(
+	"res://addons/nexus_coda/editor/browser/effects/coda_track_effect.gd"
+)
+const InspectorSelectionFlowTests := preload(
+	"res://addons/nexus_coda/tests/test_inspector_selection_flow.gd"
+)
 
 
 func _init() -> void:
@@ -31,6 +56,15 @@ func _init() -> void:
 	failed += _test_nan_json_save()
 	failed += _test_project_serializer_roundtrip()
 	failed += _test_graph_parallel_split()
+	failed += _test_bus_sync_gate_editor_blocks_autoload()
+	failed += _test_bus_sync_gate_gameplay_wins()
+	failed += _test_voice_pool_exhausted_signal()
+	failed += _test_effects_chain_binding()
+	failed += _test_inspector_fx_scope_exclusive()
+	failed += _test_inspector_selection_view_state()
+	failed += _test_inspector_fx_stable_on_structure_changed()
+	failed += InspectorSelectionFlowTests.run_all()
+	failed += _test_reverb_damping_build()
 	if failed > 0:
 		push_error("Editor shell tests failed (%d)" % failed)
 		quit(1)
@@ -203,5 +237,203 @@ static func _test_graph_parallel_split() -> int:
 	var split: Array = CodaRuntimeGraphPlaybackScript.split_parallel_entries(entries)
 	if split.size() != 2:
 		push_error("graph parallel split size")
+		return 1
+	return 0
+
+
+static func _test_bus_sync_gate_editor_blocks_autoload() -> int:
+	CodaAudioBusSyncGateScript.reset_for_tests()
+	CodaAudioBusSyncGateScript.register_editor_preview(42)
+	if CodaAudioBusSyncGateScript.may_sync_to_audio_server(
+		CodaAudioBusSyncGateScript.SyncCaller.GameplayAutoload
+	):
+		push_error("autoload sync should be blocked while editor preview is registered")
+		return 1
+	CodaAudioBusSyncGateScript.unregister_editor_preview(42)
+	return 0
+
+
+static func _test_bus_sync_gate_gameplay_wins() -> int:
+	CodaAudioBusSyncGateScript.reset_for_tests()
+	CodaAudioBusSyncGateScript.register_editor_preview(7)
+	CodaAudioBusSyncGateScript.set_gameplay_active(true)
+	if not CodaAudioBusSyncGateScript.may_sync_to_audio_server(
+		CodaAudioBusSyncGateScript.SyncCaller.GameplayAutoload
+	):
+		push_error("gameplay sync should be allowed during play")
+		return 1
+	if CodaAudioBusSyncGateScript.may_sync_to_audio_server(
+		CodaAudioBusSyncGateScript.SyncCaller.EditorPreview
+	):
+		push_error("editor preview sync should be blocked during play")
+		return 1
+	CodaAudioBusSyncGateScript.reset_for_tests()
+	return 0
+
+
+static func _test_voice_pool_exhausted_signal() -> int:
+	var rt: CodaRuntime = CodaRuntimeScript.new()
+	var fired: bool = false
+	rt.voice_pool_exhausted.connect(func(_ctx: Dictionary) -> void: fired = true)
+	rt.is_editor_preview = true
+	rt.runtime_report_pool_exhausted({
+		"mode": "test",
+		"detail": "voice pool exhausted (test)",
+		"active": 2,
+		"pool_size": 2,
+	})
+	if not fired:
+		push_error("voice_pool_exhausted signal not emitted")
+		return 1
+	return 0
+
+
+static func _test_effects_chain_binding() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var ev := CodaBrowserNode.new("fx_test", CodaBrowserNode.Kind.EVENT)
+	ev.event_authoring_mode = CodaBrowserNode.AuthoringMode.TIMELINE
+	ev.event_timeline = CodaEventTimelineScript.make_default()
+	var track: CodaTimelineTrack = ev.event_timeline.tracks[0]
+	var clip: CodaTimelineClip = CodaTimelineClipScript.new()
+	track.clips.append(clip)
+	state.events_root.children.append(ev)
+
+	var tr: CodaTimelineTrack = CodaEffectsChainBindingScript.resolve_track(
+		state, ev.id, track.id
+	)
+	if tr == null or tr.id != track.id:
+		push_error("resolve_track")
+		return 1
+	var cl: CodaTimelineClip = CodaEffectsChainBindingScript.resolve_clip(
+		state, ev.id, clip.id
+	)
+	if cl == null or cl.id != clip.id:
+		push_error("resolve_clip")
+		return 1
+	var bus: CodaBus = CodaEffectsChainBindingScript.resolve_bus(state, state.bus_root.id)
+	if bus == null:
+		push_error("resolve_bus")
+		return 1
+	var err: String = state.add_track_effect(
+		ev.id, track.id, CodaTrackEffect.Type.GAIN
+	)
+	if not err.is_empty() or track.effects.is_empty():
+		push_error("add_track_effect mutation")
+		return 1
+	return 0
+
+
+static func _test_inspector_fx_scope_exclusive() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var ev := CodaBrowserNode.new("scope_test", CodaBrowserNode.Kind.EVENT)
+	ev.event_authoring_mode = CodaBrowserNode.AuthoringMode.TIMELINE
+	ev.event_timeline = CodaEventTimelineScript.make_default()
+	var track: CodaTimelineTrack = ev.event_timeline.tracks[0]
+	var clip: CodaTimelineClip = CodaTimelineClipScript.new()
+	track.clips.append(clip)
+	state.events_root.children.append(ev)
+
+	var section = CodaInspectorEffectsSectionScript.new()
+	section.set_fx_scope(
+		CodaInspectorEffectsSectionScript.FxScope.TIMELINE_CLIP,
+		{"event_id": ev.id, "clip_id": clip.id}
+	)
+	if section.get_active_scope() != CodaInspectorEffectsSectionScript.FxScope.TIMELINE_CLIP:
+		push_error("fx scope clip active")
+		return 1
+	section.set_fx_scope(CodaInspectorEffectsSectionScript.FxScope.TIMELINE_TRACK, {
+		"event_id": ev.id,
+		"track_id": track.id,
+	})
+	if section.get_active_scope() != CodaInspectorEffectsSectionScript.FxScope.TIMELINE_TRACK:
+		push_error("fx scope track active")
+		return 1
+	section.set_fx_scope(CodaInspectorEffectsSectionScript.FxScope.NONE)
+	if section.get_active_scope() != CodaInspectorEffectsSectionScript.FxScope.NONE:
+		push_error("fx scope none")
+		return 1
+	return 0
+
+
+static func _test_inspector_selection_view_state() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var ev := CodaBrowserNode.new("sel_test", CodaBrowserNode.Kind.EVENT)
+	ev.event_authoring_mode = CodaBrowserNode.AuthoringMode.TIMELINE
+	ev.event_timeline = CodaEventTimelineScript.make_default()
+	var track: CodaTimelineTrack = ev.event_timeline.tracks[0]
+	state.events_root.children.append(ev)
+
+	var sel := CodaInspectorSelectionScript.new()
+	sel.project = state
+	var event_state: Dictionary = sel.apply(
+		CodaInspectorSelectionScript.Subject.BROWSER_EVENT, {"node": ev}
+	)
+	if not bool(event_state.get("show_event_stack", false)):
+		push_error("browser event should show event stack")
+		return 1
+	if bool(event_state.get("show_context_banner", false)):
+		push_error("browser event should not show context banner")
+		return 1
+
+	var track_state: Dictionary = sel.apply(
+		CodaInspectorSelectionScript.Subject.TIMELINE_TRACK,
+		{"event_id": ev.id, "track_id": track.id}
+	)
+	if bool(track_state.get("show_event_stack", false)):
+		push_error("timeline track should hide event stack")
+		return 1
+	if not bool(track_state.get("show_context_banner", false)):
+		push_error("timeline track should show context banner")
+		return 1
+	if int(track_state.get("fx_scope", 0)) != CodaInspectorEffectsSectionScript.FxScope.TIMELINE_TRACK:
+		push_error("timeline track fx scope")
+		return 1
+	return 0
+
+
+static func _test_inspector_fx_stable_on_structure_changed() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var ev := CodaBrowserNode.new("fx_stable", CodaBrowserNode.Kind.EVENT)
+	ev.event_authoring_mode = CodaBrowserNode.AuthoringMode.TIMELINE
+	ev.event_timeline = CodaEventTimelineScript.make_default()
+	var track: CodaTimelineTrack = ev.event_timeline.tracks[0]
+	state.events_root.children.append(ev)
+
+	var section = CodaInspectorEffectsSectionScript.new()
+	section._ready()
+	section.attach_project(state)
+	section.set_fx_scope(
+		CodaInspectorEffectsSectionScript.FxScope.TIMELINE_TRACK,
+		{"event_id": ev.id, "track_id": track.id}
+	)
+	if not section.visible:
+		push_error("fx section should be visible with track scope")
+		return 1
+	state.add_track_effect(ev.id, track.id, CodaTrackEffect.Type.GAIN)
+	state.structure_changed.emit()
+	if not section.visible:
+		push_error("fx section should stay visible after structure_changed")
+		return 1
+	if not section.is_scope_panel_visible(CodaInspectorEffectsSectionScript.FxScope.TIMELINE_TRACK):
+		push_error("track fx panel should stay visible after structure_changed")
+		return 1
+	section.set_fx_scope(CodaInspectorEffectsSectionScript.FxScope.NONE)
+	if section.visible:
+		push_error("fx section should hide when scope cleared")
+		return 1
+	return 0
+
+
+static func _test_reverb_damping_build() -> int:
+	var eff: CodaTrackEffect = CodaTrackEffectScript.new()
+	eff.type = CodaTrackEffect.Type.REVERB
+	eff.params = {"damp": 0.35, "room_size": 0.6}
+	var ae: AudioEffect = CodaEffectCatalogScript.build_audio_effect_from_slot(eff)
+	if ae == null or not (ae is AudioEffectReverb):
+		push_error("reverb build failed")
+		return 1
+	var rev := ae as AudioEffectReverb
+	if not is_equal_approx(rev.damping, 0.35):
+		push_error("reverb damping alias")
 		return 1
 	return 0

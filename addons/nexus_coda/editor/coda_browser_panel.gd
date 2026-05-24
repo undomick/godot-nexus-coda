@@ -59,6 +59,21 @@ func _ready() -> void:
 	_register_default_tabs()
 	for tab in _all_tabs():
 		tab.attach_state(_project)
+	if _tabs != null and not _tabs.tab_changed.is_connected(_on_browser_tab_changed):
+		_tabs.tab_changed.connect(_on_browser_tab_changed)
+
+
+func pulse_active_tab_selection_to_editor() -> void:
+	var active: CodaBrowserTab = _active_browser_tab()
+	if active != null:
+		active.pulse_selection_to_editor()
+		return
+	event_selection_changed.emit(null)
+	asset_selection_changed.emit(null)
+
+
+func _on_browser_tab_changed(_tab_index: int) -> void:
+	pulse_active_tab_selection_to_editor()
 
 
 func set_editor_plugin(plugin: EditorPlugin) -> void:

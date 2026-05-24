@@ -34,12 +34,22 @@ const CodaGameSyncInspectorSectionScript := preload(
 const CodaBankInspectorSectionScript := preload(
 	"res://addons/nexus_coda/editor/panels/inspector/coda_bank_inspector_section.gd"
 )
+const CodaInspectorEffectsSectionScript := preload(
+	"res://addons/nexus_coda/editor/panels/inspector/coda_inspector_effects_section.gd"
+)
+const CodaInspectorContextBannerScript := preload(
+	"res://addons/nexus_coda/editor/panels/inspector/coda_inspector_context_banner.gd"
+)
+const CodaInspectorSelectionScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_inspector_selection.gd"
+)
 
 var _browser_panel: Control = null
 var _project: CodaState = null
 var _empty_state: CodaEmptyState
 var _scroll: ScrollContainer
 var _content: VBoxContainer
+var _context_banner: CodaInspectorContextBanner
 var _header: CodaSectionHeader
 var _event_stack: VBoxContainer
 var _authoring_mode_row: HBoxContainer
@@ -52,6 +62,7 @@ var _output_bus_picker: OptionButton
 var _asset_section: CodaAssetInspectorSection
 var _game_sync_section: CodaGameSyncInspectorSection
 var _bank_section: CodaBankInspectorSection
+var _fx_section: CodaInspectorEffectsSection
 var _selected_node: CodaBrowserNode = null
 var _suppress_authoring_mode_writeback: bool = false
 
@@ -64,7 +75,9 @@ func _ready() -> void:
 
 	_empty_state = CodaEmptyStateScript.new()
 	_empty_state.title_text = "No selection"
-	_empty_state.body_text = "Pick an event or an asset in the Browser to see its properties."
+	_empty_state.body_text = (
+		"Pick an event, asset, timeline clip or track, or mixer bus to see its properties."
+	)
 	_empty_state.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_empty_state)
 
@@ -87,6 +100,9 @@ func _ready() -> void:
 	_content.add_theme_constant_override(&"separation", Tokens.SPACING_MD)
 	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.add_child(_content)
+
+	_context_banner = CodaInspectorContextBannerScript.new()
+	_content.add_child(_context_banner)
 
 	_header = CodaSectionHeaderScript.new()
 	_header.heading = "Event"
@@ -147,6 +163,10 @@ func _ready() -> void:
 	_output_bus_picker.item_selected.connect(_on_output_bus_picked)
 	_event_stack.add_child(_output_bus_picker)
 
+	_fx_section = CodaInspectorEffectsSectionScript.new()
+	_fx_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.add_child(_fx_section)
+
 	_asset_section = CodaAssetInspectorSectionScript.new()
 	_asset_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_asset_section.visible = false
@@ -183,49 +203,137 @@ func attach_project(project: CodaState) -> void:
 		_game_sync_section.attach_project(project)
 	if _bank_section != null:
 		_bank_section.attach_project(project)
+	if _fx_section != null:
+		_fx_section.attach_project(project)
 
 
-func show_game_sync_rule(payload: Dictionary) -> void:
-	_show_game_sync(payload)
-
-
-func show_bank(bank_id: String) -> void:
-	_show_bank(bank_id)
-
-
-func on_browser_event_selected(node: Variant) -> void:
-	var bn := node as CodaBrowserNode
-	if bn == null or bn.kind != CodaBrowserNode.Kind.EVENT:
-		_selected_node = null
+func apply_view_state(state: Dictionary) -> void:
+	var subject: int = int(state.get("subject", CodaInspectorSelectionScript.Subject.EMPTY))
+	if subject == CodaInspectorSelectionScript.Subject.EMPTY:
 		_show_empty()
+		return
+
+	_empty_state.visible = false
+	_scroll.visible = true
+
+	var show_banner: bool = bool(state.get("show_context_banner", false))
+	if _context_banner != null:
+		_context_banner.set_context(
+			str(state.get("title", "")),
+			str(state.get("subtitle", "")),
+			show_banner
+		)
+
+	var show_event_stack: bool = bool(state.get("show_event_stack", false))
+	var show_asset: bool = bool(state.get("show_asset", false))
+	var show_bank: bool = bool(state.get("show_bank", false))
+	var show_game_sync: bool = bool(state.get("show_game_sync", false))
+
+	_header.visible = show_event_stack or show_asset
+	if show_event_stack or show_asset:
+		_header.heading = str(state.get("title", ""))
+
+	if _event_stack != null:
+		_event_stack.visible = show_event_stack
+	if show_event_stack:
+		var bn: CodaBrowserNode = state.get("browser_node") as CodaBrowserNode
+		_selected_node = bn
+		_sync_authoring_mode_picker(bn)
+		_refresh_output_bus_picker(bn)
+		if _parameters_section != null:
+			_parameters_section.set_event(bn)
+		if _modulation_section != null:
+			_modulation_section.set_event(bn)
+		if _banks_section != null:
+			_banks_section.set_event(bn)
+	else:
 		if _parameters_section != null:
 			_parameters_section.set_event(null)
 		if _modulation_section != null:
 			_modulation_section.set_event(null)
 		if _banks_section != null:
 			_banks_section.set_event(null)
+
+	if _asset_section != null:
+		_asset_section.visible = show_asset
+		if show_asset:
+			_selected_node = state.get("browser_node") as CodaBrowserNode
+			_asset_section.set_node(_selected_node)
+
+	if _bank_section != null:
+		_bank_section.visible = show_bank
+		if show_bank:
+			_bank_section.set_bank(str(state.get("bank_id", "")))
+
+	if _game_sync_section != null:
+		_game_sync_section.visible = show_game_sync
+		if show_game_sync:
+			_game_sync_section.set_rule_payload(
+				(state.get("game_sync_payload", {}) as Dictionary).duplicate(true)
+			)
+
+	var fx_scope: int = int(
+		state.get("fx_scope", CodaInspectorEffectsSection.FxScope.NONE)
+	)
+	var fx_ids: Dictionary = {
+		"event_id": str(state.get("event_id", "")),
+		"track_id": str(state.get("track_id", "")),
+		"clip_id": str(state.get("clip_id", "")),
+		"bus_id": str(state.get("bus_id", "")),
+	}
+	set_fx_scope(fx_scope as CodaInspectorEffectsSection.FxScope, fx_ids)
+
+
+func show_game_sync_rule(payload: Dictionary) -> void:
+	var sel := CodaInspectorSelectionScript.new()
+	sel.project = _project
+	apply_view_state(sel.apply(CodaInspectorSelectionScript.Subject.BROWSER_GAME_SYNC, {"payload": payload}))
+
+
+func show_bank(bank_id: String) -> void:
+	var sel := CodaInspectorSelectionScript.new()
+	sel.project = _project
+	apply_view_state(sel.apply(CodaInspectorSelectionScript.Subject.BROWSER_BANK, {"bank_id": bank_id}))
+
+
+func set_fx_scope(scope: CodaInspectorEffectsSection.FxScope, ids: Dictionary = {}) -> void:
+	if _fx_section == null:
 		return
-	_selected_node = bn
-	_header.heading = bn.name
-	_show_event()
-	_sync_authoring_mode_picker(bn)
-	_refresh_output_bus_picker(bn)
-	if _parameters_section != null:
-		_parameters_section.set_event(bn)
-	if _modulation_section != null:
-		_modulation_section.set_event(bn)
-	if _banks_section != null:
-		_banks_section.set_event(bn)
+	_fx_section.set_fx_scope(scope, ids)
+
+
+func get_selected_event() -> CodaBrowserNode:
+	if _selected_node == null or _selected_node.kind != CodaBrowserNode.Kind.EVENT:
+		return null
+	return _selected_node
+
+
+func scroll_to_track_effects() -> void:
+	if _scroll == null or _fx_section == null:
+		return
+	var chain: Control = _fx_section.get_active_chain_control()
+	if chain != null and chain.visible:
+		_scroll.ensure_control_visible(chain)
+
+
+func on_browser_event_selected(node: Variant) -> void:
+	var bn := node as CodaBrowserNode
+	if bn == null or bn.kind != CodaBrowserNode.Kind.EVENT:
+		apply_view_state({"subject": CodaInspectorSelectionScript.Subject.EMPTY})
+		return
+	var sel := CodaInspectorSelectionScript.new()
+	sel.project = _project
+	apply_view_state(sel.apply(CodaInspectorSelectionScript.Subject.BROWSER_EVENT, {"node": bn}))
 
 
 func on_browser_asset_selected(node: Variant) -> void:
 	var bn := node as CodaBrowserNode
 	if bn == null:
-		_show_empty()
+		apply_view_state({"subject": CodaInspectorSelectionScript.Subject.EMPTY})
 		return
-	_selected_node = bn
-	_header.heading = bn.name
-	_show_asset(bn)
+	var sel := CodaInspectorSelectionScript.new()
+	sel.project = _project
+	apply_view_state(sel.apply(CodaInspectorSelectionScript.Subject.BROWSER_ASSET, {"node": bn}))
 
 
 func _sync_authoring_mode_picker(node: CodaBrowserNode) -> void:
@@ -277,44 +385,10 @@ func _on_output_bus_picked(idx: int) -> void:
 	_project.project_dirty.emit()
 
 
-func _show_game_sync(payload: Dictionary) -> void:
-	if _empty_state != null:
-		_empty_state.visible = false
-	if _scroll != null:
-		_scroll.visible = true
-	if _event_stack != null:
-		_event_stack.visible = false
-	if _asset_section != null:
-		_asset_section.visible = false
-	if _bank_section != null:
-		_bank_section.visible = false
-	if _game_sync_section != null:
-		_game_sync_section.visible = true
-		_game_sync_section.set_rule_payload(payload)
-
-
-func _show_bank(bank_id: String) -> void:
-	if _empty_state != null:
-		_empty_state.visible = false
-	if _scroll != null:
-		_scroll.visible = true
-	if _event_stack != null:
-		_event_stack.visible = false
-	if _asset_section != null:
-		_asset_section.visible = false
-	if _game_sync_section != null:
-		_game_sync_section.visible = false
-	if _bank_section != null:
-		_bank_section.visible = true
-		_bank_section.set_bank(bank_id)
-
-
 func _show_empty() -> void:
 	_selected_node = null
-	if _empty_state != null:
-		_empty_state.visible = true
-	if _scroll != null:
-		_scroll.visible = false
+	if _context_banner != null:
+		_context_banner.set_context("", "", false)
 	if _event_stack != null:
 		_event_stack.visible = false
 	if _asset_section != null:
@@ -323,32 +397,16 @@ func _show_empty() -> void:
 		_game_sync_section.visible = false
 	if _bank_section != null:
 		_bank_section.visible = false
-
-
-func _show_event() -> void:
-	if _empty_state != null:
-		_empty_state.visible = false
-	if _scroll != null:
-		_scroll.visible = true
-	if _event_stack != null:
-		_event_stack.visible = true
-	if _asset_section != null:
-		_asset_section.visible = false
-
-
-func _show_asset(node: CodaBrowserNode) -> void:
-	if _empty_state != null:
-		_empty_state.visible = false
-	if _scroll != null:
-		_scroll.visible = true
-	if _event_stack != null:
-		_event_stack.visible = false
+	if _header != null:
+		_header.visible = false
+	set_fx_scope(CodaInspectorEffectsSection.FxScope.NONE)
 	if _parameters_section != null:
 		_parameters_section.set_event(null)
 	if _modulation_section != null:
 		_modulation_section.set_event(null)
 	if _banks_section != null:
 		_banks_section.set_event(null)
-	if _asset_section != null:
-		_asset_section.visible = true
-		_asset_section.set_node(node)
+	if _empty_state != null:
+		_empty_state.visible = true
+	if _scroll != null:
+		_scroll.visible = false

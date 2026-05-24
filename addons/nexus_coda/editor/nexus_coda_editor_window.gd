@@ -1,14 +1,10 @@
-@tool
+﻿@tool
 extends Window
 
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
 const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.gd")
-const CodaBankExportScript := preload("res://addons/nexus_coda/editor/io/coda_bank_export.gd")
 const CodaDesignTokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
-const CodaSampleProjectScript := preload(
-	"res://addons/nexus_coda/editor/samples/coda_sample_project.gd"
-)
 const CodaCommandPaletteScript := preload(
 	"res://addons/nexus_coda/editor/panels/palette/coda_command_palette.gd"
 )
@@ -40,20 +36,14 @@ const PlayerPanelScript := preload(
 const TimelinePanelScript := preload(
 	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_panel.gd"
 )
-const TrackEffectsPanelScript := preload(
-	"res://addons/nexus_coda/editor/panels/effects/coda_track_effects_panel.gd"
-)
-const ClipEffectsPanelScript := preload(
-	"res://addons/nexus_coda/editor/panels/effects/coda_clip_effects_panel.gd"
-)
-const BusEffectsPanelScript := preload(
-	"res://addons/nexus_coda/editor/panels/effects/coda_bus_effects_panel.gd"
-)
 const CodaEditorShortcutsScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_editor_shortcuts.gd"
 )
 const CodaEditorSelectionRouterScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_editor_selection_router.gd"
+)
+const CodaInspectorSelectionScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_inspector_selection.gd"
 )
 const CodaEditorAuthoringFocusScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_editor_authoring_focus.gd"
@@ -64,8 +54,22 @@ const CodaEditorLayoutStoreScript := preload(
 const CodaEditorTransportScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_editor_transport.gd"
 )
-const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
+const CodaEditorFileDialogsScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_file_dialogs.gd"
+)
+const CodaEditorProjectSessionScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_project_session.gd"
+)
+const CodaEditorMenuActionsScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_menu_actions.gd"
+)
+const CodaEditorLayoutPersistenceScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_layout_persistence.gd"
+)
 const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
+const CodaAudioBusSyncGateScript := preload(
+	"res://addons/nexus_coda/runtime/coda_audio_bus_sync_gate.gd"
+)
 
 const PANEL_BROWSER := &"browser"
 const PANEL_GRAPH := &"graph"
@@ -74,9 +78,6 @@ const PANEL_MIXER := &"mixer"
 const PANEL_LOG := &"log"
 const PANEL_PLAYER := &"player"
 const PANEL_TIMELINE := &"timeline"
-const PANEL_TRACK_EFFECTS := &"track_effects"
-const PANEL_CLIP_EFFECTS := &"clip_effects"
-const PANEL_BUS_EFFECTS := &"bus_effects"
 
 const MID_NEW := 1
 const MID_OPEN := 2
@@ -95,9 +96,6 @@ const VID_TOGGLE_MIXER := 113
 const VID_TOGGLE_LOG := 114
 const VID_TOGGLE_PLAYER := 115
 const VID_TOGGLE_TIMELINE := 116
-const VID_TOGGLE_TRACK_FX := 117
-const VID_TOGGLE_CLIP_FX := 118
-const VID_TOGGLE_BUS_FX := 119
 
 const BID_NEW_BANK := 200
 const BID_VALIDATE_BANKS := 201
@@ -110,13 +108,6 @@ const HID_PICK_ACCENT := 403
 const HID_COMMAND_PALETTE := 404
 
 const RECENT_ID_BASE := 1000
-
-const CUSTOM_LAYOUT_SUBDIR := "nexus_coda"
-const CUSTOM_LAYOUT_FILENAME := "custom_layout.json"
-const CUSTOM_LAYOUT_PREFS_FILENAME := "layout_prefs.json"
-const CUSTOM_LAYOUT_PREFS_KEY := "preferred_layout"
-const CUSTOM_LAYOUT_PREF_FACTORY := "factory"
-const CUSTOM_LAYOUT_PREF_CUSTOM := "custom"
 
 @onready var _menu_bar: MenuBar = $RootVBox/MenuBar
 @onready var _dock_host: CodaDockHost = $RootVBox/RootMargin/DockHost
@@ -132,7 +123,6 @@ var _recent_menu: PopupMenu
 var _command_palette: CodaCommandPalette
 var _shortcut_sheet: CodaShortcutSheet
 var _status_bar: CodaStatusBar
-var _color_picker_dialog: AcceptDialog
 var _project_theme: Theme
 
 var _browser_panel: Control
@@ -142,32 +132,24 @@ var _mixer_panel: CodaMixerPanel
 var _log_panel: CodaLogPanel
 var _player_panel: CodaPlayerPanel
 var _timeline_panel: CodaTimelinePanel
-var _track_effects_panel: CodaTrackEffectsPanel
-var _clip_effects_panel: CodaClipEffectsPanel
-var _bus_effects_panel: CodaBusEffectsPanel
+var _inspector_selection: CodaInspectorSelection
+var _inspector_subject_locked_by: StringName = &""
 
-var _current_path: String = ""
-var _dirty: bool = false
-var _suppress_dirty: bool = false
-var _project_signal_source: CodaState = null
-
-var _recent_paths_snapshot: PackedStringArray = []
-
-var _choice_result: int = 0
+var _file_dialogs: CodaEditorFileDialogs
+var _project_session: CodaEditorProjectSession
+var _menu_actions: CodaEditorMenuActions
+var _layout_persistence: CodaEditorLayoutPersistence
 
 const UNSAVED_LAYER_NODEPATH := NodePath("UnsavedPromptLayer")
 
-var _file_dialog_pick_result: String = ""
-var _file_dialog_pick_complete: bool = false
-var _file_dialog_user_canceled: bool = false
 var _teardown_done: bool = false
 var _fs_asset_import_boot_attempts: int = 0
 var _selection_router: CodaEditorSelectionRouter
 var _authoring_focus: CodaEditorAuthoringFocus
 var _editor_transport: CodaEditorTransport
 var _editor_runtime: CodaRuntime
+var _pool_exhausted_slot: Callable = Callable()
 var _playhead_sync_slot: Callable = Callable()
-var _layout_autosave_queued: bool = false
 var _focused_panel_id: StringName = &""
 
 
@@ -248,16 +230,16 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		CodaEditorShortcutsScript.Action.NEW_PROJECT:
 			get_viewport().set_input_as_handled()
-			call_deferred(&"_action_new_async")
+			call_deferred(&"_session_new_async")
 		CodaEditorShortcutsScript.Action.OPEN_PROJECT:
 			get_viewport().set_input_as_handled()
-			call_deferred(&"_action_open_async")
+			call_deferred(&"_session_open_async")
 		CodaEditorShortcutsScript.Action.SAVE_PROJECT:
 			get_viewport().set_input_as_handled()
-			call_deferred(&"_action_save_async")
+			call_deferred(&"_session_save_async")
 		CodaEditorShortcutsScript.Action.SAVE_PROJECT_AS:
 			get_viewport().set_input_as_handled()
-			call_deferred(&"_action_save_as_async")
+			call_deferred(&"_session_save_as_async")
 		CodaEditorShortcutsScript.Action.BROWSER_RENAME:
 			if _browser_panel != null and _browser_panel.has_method(&"request_browser_rename"):
 				if _browser_panel.request_browser_rename():
@@ -301,9 +283,6 @@ func _register_panels() -> void:
 	_log_panel = LogPanelScript.new()
 	_player_panel = PlayerPanelScript.new()
 	_timeline_panel = TimelinePanelScript.new()
-	_track_effects_panel = TrackEffectsPanelScript.new()
-	_clip_effects_panel = ClipEffectsPanelScript.new()
-	_bus_effects_panel = BusEffectsPanelScript.new()
 
 	dm.register_panel(CodaDockPanelInfoScript.make(
 		PANEL_BROWSER, "Browser", CodaDockHostScript.ZONE_LEFT, _browser_panel
@@ -324,15 +303,6 @@ func _register_panels() -> void:
 		PANEL_MIXER, "Mixer", CodaDockHostScript.ZONE_BOTTOM, _mixer_panel
 	))
 	dm.register_panel(CodaDockPanelInfoScript.make(
-		PANEL_BUS_EFFECTS, "Bus FX", CodaDockHostScript.ZONE_BOTTOM, _bus_effects_panel
-	))
-	dm.register_panel(CodaDockPanelInfoScript.make(
-		PANEL_CLIP_EFFECTS, "Clip FX", CodaDockHostScript.ZONE_BOTTOM, _clip_effects_panel
-	))
-	dm.register_panel(CodaDockPanelInfoScript.make(
-		PANEL_TRACK_EFFECTS, "Track FX", CodaDockHostScript.ZONE_BOTTOM, _track_effects_panel
-	))
-	dm.register_panel(CodaDockPanelInfoScript.make(
 		PANEL_LOG, "Log", CodaDockHostScript.ZONE_BOTTOM, _log_panel, null, false
 	))
 
@@ -343,7 +313,9 @@ func _register_panels() -> void:
 	_selection_router.dock_manager = dm
 	_selection_router.browser_panel = _browser_panel
 	_selection_router.mixer_panel = _mixer_panel
-	_selection_router.inspector_panel = _inspector_panel
+	_selection_router.on_inspector_selection = Callable(self, &"_on_router_inspector_selection")
+
+	_inspector_selection = CodaInspectorSelectionScript.new()
 
 	_editor_transport = CodaEditorTransportScript.new()
 	_editor_transport.player_panel = _player_panel
@@ -354,23 +326,143 @@ func _register_panels() -> void:
 	_authoring_focus.graph_panel = _graph_panel
 	_authoring_focus.timeline_panel = _timeline_panel
 
+	_setup_shell_helpers()
+
 	_wire_browser_to_others()
-	_wire_effects_panels()
+	_wire_inspector_selection()
 	_wire_runtime_to_panels()
-	call_deferred(&"_initial_bind")
-	call_deferred(&"_load_custom_layout_if_present")
+	call_deferred(&"_session_initial_bind")
+	call_deferred(&"_layout_load_if_present")
+
+
+func _setup_shell_helpers() -> void:
+	_file_dialogs = CodaEditorFileDialogsScript.new()
+	_file_dialogs.setup(self, _plugin)
+
+	_project_session = CodaEditorProjectSessionScript.new()
+	_project_session.plugin = _plugin
+	_project_session.file_dialogs = _file_dialogs
+	_project_session.browser_panel = _browser_panel
+	_project_session.graph_panel = _graph_panel
+	_project_session.inspector_panel = _inspector_panel
+	_project_session.player_panel = _player_panel
+	_project_session.timeline_panel = _timeline_panel
+	_project_session.mixer_panel = _mixer_panel
+	_project_session.inspector_selection = _inspector_selection
+	_project_session.on_apply_theme = Callable(self, &"_apply_theme_appearance")
+	_project_session.on_push_runtime = Callable(self, &"_push_project_to_runtime")
+	_project_session.on_apply_inspector = Callable(self, &"_apply_inspector_selection")
+	_project_session.on_update_title = Callable(self, &"_on_session_title_changed")
+	_project_session.on_notify = Callable(self, &"_editor_notify")
+	_project_session.on_spawn_new_window = Callable(_plugin, &"spawn_new_coda_editor_window") if _plugin != null else Callable()
+	_project_session.on_request_close = Callable(self, &"queue_free")
+	_project_session.on_refresh_filesystem = Callable(self, &"_refresh_editor_filesystem_after_save")
+
+	_layout_persistence = CodaEditorLayoutPersistenceScript.new()
+	_layout_persistence.setup(self, _plugin, _dock_host)
+
+	_menu_actions = CodaEditorMenuActionsScript.new()
+	_menu_actions.session = _project_session
+	_menu_actions.plugin = _plugin
+	_menu_actions.file_dialogs = _file_dialogs
+	_menu_actions.host = self
+	_menu_actions.dock_host = _dock_host
+	_menu_actions.player_panel = _player_panel
+	_menu_actions.browser_panel = _browser_panel
+	_menu_actions.on_apply_theme = Callable(self, &"_apply_root_theme")
+	_menu_actions.on_notify = Callable(self, &"_editor_notify")
+	_menu_actions.on_open_command_palette = Callable(self, &"_open_command_palette")
+	_menu_actions.on_open_shortcut_sheet = Callable(self, &"_open_shortcut_sheet")
+	_menu_actions.on_layout_save = Callable(_layout_persistence, &"save_custom_layout")
+	_menu_actions.on_layout_load = Callable(_layout_persistence, &"load_custom_layout")
+	_menu_actions.on_layout_clear = Callable(_layout_persistence, &"clear_custom_layout")
+	_menu_actions.on_layout_reset = Callable(_layout_persistence, &"reset_to_factory_layout")
+	_menu_actions.on_select_event = Callable(self, &"_select_event_by_id")
+
+
+func _on_build_menu_about_to_popup() -> void:
+	if _menu_actions != null:
+		_menu_actions.rebuild_build_menu(_build_menu)
+
+
+func _on_help_menu_about_to_popup() -> void:
+	if _menu_actions != null:
+		_menu_actions.rebuild_help_menu(_help_menu)
+
+
+func _on_recent_menu_about_to_popup() -> void:
+	if _project_session != null and _recent_menu != null:
+		_project_session.fill_recent_menu(_recent_menu)
+
+
+func _session_initial_bind() -> void:
+	if _project_session != null:
+		_project_session.initial_bind()
+	_refresh_view_menu_check_marks()
+
+
+func _session_new_async() -> void:
+	if _project_session != null:
+		await _project_session.action_new_async()
+
+
+func _session_open_async() -> void:
+	if _project_session != null:
+		await _project_session.action_open_async()
+
+
+func _session_save_async() -> void:
+	if _project_session != null:
+		await _project_session.action_save_async()
+
+
+func _session_save_as_async() -> void:
+	if _project_session != null:
+		await _project_session.action_save_as_async()
+
+
+func _session_close_async() -> void:
+	if _project_session != null:
+		await _project_session.action_close_window_async()
+
+
+func _on_session_title_changed(path: String, dirty: bool) -> void:
+	var doc_name: String = "Untitled"
+	if not path.is_empty():
+		doc_name = path.get_file()
+	title = "Nexus Coda â€” %s%s" % [doc_name, " *" if dirty else ""]
+	if _status_bar != null:
+		_status_bar.set_project_state(path, dirty)
+
+
+func _apply_root_theme(theme: Theme) -> void:
+	_project_theme = theme
+	var root: Control = $RootVBox
+	if root != null:
+		root.theme = _project_theme
+
+
+func _layout_load_if_present() -> void:
+	if _layout_persistence != null:
+		_layout_persistence.load_custom_layout_if_present()
+
+
+func _current_state() -> Variant:
+	if _project_session != null:
+		return _project_session.get_state()
+	return null
 
 
 func _wire_browser_to_others() -> void:
 	if _browser_panel == null:
 		return
 	if _browser_panel.has_signal(&"event_selection_changed"):
-		var inspector_slot := Callable(_inspector_panel, &"on_browser_event_selected")
+		var inspector_event_slot := Callable(self, &"_on_browser_event_selection_for_inspector")
+		if not _browser_panel.event_selection_changed.is_connected(inspector_event_slot):
+			_browser_panel.event_selection_changed.connect(inspector_event_slot)
 		var graph_slot := Callable(_graph_panel, &"on_browser_event_selected")
 		var player_slot := Callable(_player_panel, &"on_browser_event_selected")
 		var timeline_slot := Callable(_timeline_panel, &"on_browser_event_selected")
-		if not _browser_panel.event_selection_changed.is_connected(inspector_slot):
-			_browser_panel.event_selection_changed.connect(inspector_slot)
 		if not _browser_panel.event_selection_changed.is_connected(graph_slot):
 			_browser_panel.event_selection_changed.connect(graph_slot)
 		if not _browser_panel.event_selection_changed.is_connected(player_slot):
@@ -378,9 +470,9 @@ func _wire_browser_to_others() -> void:
 		if not _browser_panel.event_selection_changed.is_connected(timeline_slot):
 			_browser_panel.event_selection_changed.connect(timeline_slot)
 	if _browser_panel.has_signal(&"asset_selection_changed"):
-		var asset_inspector_slot := Callable(_inspector_panel, &"on_browser_asset_selected")
-		if not _browser_panel.asset_selection_changed.is_connected(asset_inspector_slot):
-			_browser_panel.asset_selection_changed.connect(asset_inspector_slot)
+		var inspector_asset_slot := Callable(self, &"_on_browser_asset_selection_for_inspector")
+		if not _browser_panel.asset_selection_changed.is_connected(inspector_asset_slot):
+			_browser_panel.asset_selection_changed.connect(inspector_asset_slot)
 	if _browser_panel.has_signal(&"external_selection_requested"):
 		var route_slot := Callable(self, &"_on_browser_external_selection_requested")
 		if not _browser_panel.external_selection_requested.is_connected(route_slot):
@@ -400,24 +492,179 @@ func _wire_browser_to_others() -> void:
 		_graph_panel.attach_project(_browser_panel.get_project())
 
 
-func _wire_effects_panels() -> void:
-	if _track_effects_panel == null or _clip_effects_panel == null or _bus_effects_panel == null:
-		return
-	_track_effects_panel.attach_timeline_panel(_timeline_panel)
-	_clip_effects_panel.attach_timeline_panel(_timeline_panel)
-	_bus_effects_panel.attach_mixer_panel(_mixer_panel)
-	if _timeline_panel != null and _timeline_panel.has_signal(&"track_effects_focus_requested"):
-		if not _timeline_panel.track_effects_focus_requested.is_connected(_on_track_effects_focus_requested):
+func _wire_inspector_selection() -> void:
+	if _timeline_panel != null:
+		if not _timeline_panel.track_selection_changed.is_connected(
+				_on_timeline_track_selection_for_inspector
+		):
+			_timeline_panel.track_selection_changed.connect(
+				_on_timeline_track_selection_for_inspector
+			)
+		if not _timeline_panel.clip_selection_changed.is_connected(
+				_on_timeline_clip_selection_for_inspector
+		):
+			_timeline_panel.clip_selection_changed.connect(
+				_on_timeline_clip_selection_for_inspector
+			)
+		if not _timeline_panel.track_effects_focus_requested.is_connected(
+				_on_track_effects_focus_requested
+		):
 			_timeline_panel.track_effects_focus_requested.connect(_on_track_effects_focus_requested)
+	if _mixer_panel != null:
+		if not _mixer_panel.bus_user_selected.is_connected(_on_mixer_bus_selection_for_inspector):
+			_mixer_panel.bus_user_selected.connect(_on_mixer_bus_selection_for_inspector)
+
+
+func _inspector_project() -> CodaState:
+	if _browser_panel != null and _browser_panel.has_method(&"get_project"):
+		return _browser_panel.get_project() as CodaState
+	return null
+
+
+func _on_router_inspector_selection(
+	subject: CodaInspectorSelection.Subject, payload: Dictionary = {}
+) -> void:
+	var lock_source: StringName = &"browser"
+	match subject:
+		CodaInspectorSelection.Subject.MIXER_BUS:
+			lock_source = &"mixer"
+		CodaInspectorSelection.Subject.TIMELINE_TRACK, CodaInspectorSelection.Subject.TIMELINE_CLIP:
+			lock_source = &"timeline"
+	_apply_inspector_selection(subject, payload, lock_source)
+
+
+func _apply_inspector_selection(
+	subject: CodaInspectorSelection.Subject,
+	payload: Dictionary = {},
+	lock_source: StringName = &""
+) -> void:
+	if _inspector_selection == null or _inspector_panel == null:
+		return
+	if lock_source != &"":
+		_inspector_subject_locked_by = lock_source
+	_inspector_selection.project = _inspector_project()
+	var view_state: Dictionary = _inspector_selection.apply(subject, payload)
+	_inspector_panel.apply_view_state(view_state)
+
+
+func _on_browser_event_selection_for_inspector(node: Variant) -> void:
+	var bn := node as CodaBrowserNode
+	if bn != null and bn.kind == CodaBrowserNode.Kind.EVENT:
+		_inspector_subject_locked_by = &"browser"
+	call_deferred(&"_finish_browser_event_inspector", node)
+
+
+func _finish_browser_event_inspector(node: Variant) -> void:
+	var bn := node as CodaBrowserNode
+	if bn == null or bn.kind != CodaBrowserNode.Kind.EVENT:
+		_inspector_subject_locked_by = &""
+		_apply_inspector_selection(CodaInspectorSelection.Subject.EMPTY)
+		return
+	_apply_inspector_selection(
+		CodaInspectorSelection.Subject.BROWSER_EVENT, {"node": bn}, &"browser"
+	)
+
+
+func _apply_timeline_inspector_subselection(event_id: String) -> void:
+	if _timeline_panel == null or event_id.is_empty():
+		return
+	var clip_id: String = _timeline_panel.get_selected_clip_id()
+	if not clip_id.is_empty():
+		_apply_inspector_selection(
+			CodaInspectorSelection.Subject.TIMELINE_CLIP,
+			{
+				"event_id": event_id,
+				"clip_id": clip_id,
+				"track_id": _timeline_panel.get_selected_track_id(),
+			},
+			&"timeline"
+		)
+		return
+	var track_id: String = _timeline_panel.get_selected_track_id()
+	if not track_id.is_empty():
+		_apply_inspector_selection(
+			CodaInspectorSelection.Subject.TIMELINE_TRACK,
+			{"event_id": event_id, "track_id": track_id},
+			&"timeline"
+		)
+
+
+func _on_browser_asset_selection_for_inspector(node: Variant) -> void:
+	var bn := node as CodaBrowserNode
+	if bn == null:
+		_inspector_subject_locked_by = &""
+		_apply_inspector_selection(CodaInspectorSelection.Subject.EMPTY)
+		return
+	_inspector_subject_locked_by = &"browser"
+	_apply_inspector_selection(CodaInspectorSelection.Subject.BROWSER_ASSET, {"node": bn})
+
+
+func _fallback_timeline_inspector(event_id: String) -> void:
+	if _inspector_subject_locked_by == &"browser":
+		if _browser_panel != null and _browser_panel.has_method(&"get_project"):
+			var st: CodaState = _browser_panel.get_project() as CodaState
+			if st != null and not event_id.is_empty():
+				var ev: CodaBrowserNode = st.events_root.find_by_id(event_id)
+				if ev != null:
+					_apply_inspector_selection(
+						CodaInspectorSelection.Subject.BROWSER_EVENT, {"node": ev}
+					)
+					return
+		_apply_inspector_selection(CodaInspectorSelection.Subject.EMPTY)
+		return
+	if _timeline_panel != null:
+		var track_id: String = _timeline_panel.get_selected_track_id()
+		if not track_id.is_empty() and not event_id.is_empty():
+			_apply_inspector_selection(
+				CodaInspectorSelection.Subject.TIMELINE_TRACK,
+				{"event_id": event_id, "track_id": track_id},
+				&"timeline"
+			)
+			return
+	_apply_inspector_selection(CodaInspectorSelection.Subject.EMPTY)
+
+
+func _on_timeline_track_selection_for_inspector(event_id: String, track_id: String) -> void:
+	if track_id.is_empty():
+		_fallback_timeline_inspector(event_id)
+		return
+	_apply_inspector_selection(
+		CodaInspectorSelection.Subject.TIMELINE_TRACK,
+		{"event_id": event_id, "track_id": track_id},
+		&"timeline"
+	)
+
+
+func _on_timeline_clip_selection_for_inspector(event_id: String, clip_id: String) -> void:
+	if clip_id.is_empty():
+		_fallback_timeline_inspector(event_id)
+		return
+	var track_id: String = ""
+	if _timeline_panel != null:
+		track_id = _timeline_panel.get_selected_track_id()
+	_apply_inspector_selection(
+		CodaInspectorSelection.Subject.TIMELINE_CLIP,
+		{"event_id": event_id, "clip_id": clip_id, "track_id": track_id},
+		&"timeline"
+	)
+
+
+func _on_mixer_bus_selection_for_inspector(bus_id: String) -> void:
+	if bus_id.is_empty():
+		_apply_inspector_selection(CodaInspectorSelection.Subject.EMPTY)
+		return
+	_apply_inspector_selection(
+		CodaInspectorSelection.Subject.MIXER_BUS, {"bus_id": bus_id}, &"mixer"
+	)
 
 
 func _on_track_effects_focus_requested(_track_id: String) -> void:
 	if _dock_host == null or _dock_host.dock_manager == null:
 		return
 	var dm: CodaDockManager = _dock_host.dock_manager
-	dm.show_panel(PANEL_TRACK_EFFECTS)
-	if _track_effects_panel != null and _track_effects_panel.has_method(&"focus_current_track"):
-		_track_effects_panel.focus_current_track()
+	dm.show_panel(PANEL_INSPECTOR)
+	if _inspector_panel != null and _inspector_panel.has_method(&"scroll_to_track_effects"):
+		_inspector_panel.scroll_to_track_effects()
 
 
 func _on_browser_external_selection_requested(
@@ -503,6 +750,14 @@ func _wire_runtime_to_panels() -> void:
 			Callable(self, &"pick_audio_bus_layout_export_path_async"),
 			Callable(self, &"complete_audio_bus_layout_export")
 		)
+	if not _pool_exhausted_slot.is_valid():
+		_pool_exhausted_slot = Callable(self, &"_on_runtime_voice_pool_exhausted")
+	if not rt.voice_pool_exhausted.is_connected(_pool_exhausted_slot):
+		rt.voice_pool_exhausted.connect(_pool_exhausted_slot)
+
+
+func _on_runtime_voice_pool_exhausted(_context: Dictionary) -> void:
+	pass
 
 
 func _ensure_editor_runtime() -> void:
@@ -510,14 +765,35 @@ func _ensure_editor_runtime() -> void:
 		return
 	_editor_runtime = CodaRuntimeScript.new() as CodaRuntime
 	_editor_runtime.name = "CodaEditorRuntime"
+	_editor_runtime.is_editor_preview = true
 	add_child(_editor_runtime)
+	CodaAudioBusSyncGateScript.register_editor_preview(_editor_runtime.get_instance_id())
 
 
 func _dispose_editor_runtime() -> void:
 	if _editor_runtime != null and is_instance_valid(_editor_runtime):
+		if (
+			_pool_exhausted_slot.is_valid()
+			and _editor_runtime.voice_pool_exhausted.is_connected(_pool_exhausted_slot)
+		):
+			_editor_runtime.voice_pool_exhausted.disconnect(_pool_exhausted_slot)
+		CodaAudioBusSyncGateScript.unregister_editor_preview(_editor_runtime.get_instance_id())
 		_editor_runtime.stop_all()
 		_editor_runtime.queue_free()
 	_editor_runtime = null
+
+
+func on_gameplay_play_started() -> void:
+	if _timeline_panel != null and _timeline_panel.has_method(&"stop_all_previews"):
+		_timeline_panel.call(&"stop_all_previews")
+	if _player_panel != null and _player_panel.has_method(&"stop_current_voice"):
+		_player_panel.stop_current_voice()
+	if _editor_runtime != null and is_instance_valid(_editor_runtime):
+		_editor_runtime.stop_all()
+
+
+func on_gameplay_play_stopped() -> void:
+	_push_project_to_runtime(_current_state())
 
 
 func _unwire_runtime_from_panels() -> void:
@@ -535,37 +811,8 @@ func _unwire_runtime_from_panels() -> void:
 		_player_panel.stop_current_voice()
 	if _editor_runtime != null and is_instance_valid(_editor_runtime):
 		_editor_runtime.stop_all()
-	_bind_project_signals(null)
-
-
-func _initial_bind() -> void:
-	if _browser_panel != null and _browser_panel.has_method(&"get_project"):
-		var st: Variant = _browser_panel.get_project()
-		_bind_project_signals(st)
-		_push_project_to_runtime(st)
-		if _graph_panel != null and st is CodaState:
-			_graph_panel.attach_project(st as CodaState)
-		if _inspector_panel != null and st is CodaState:
-			_inspector_panel.attach_project(st as CodaState)
-		if _mixer_panel != null and st is CodaState:
-			_mixer_panel.attach_project(st as CodaState)
-		if _player_panel != null and st is CodaState:
-			_player_panel.attach_project(st as CodaState)
-		if _timeline_panel != null and st is CodaState:
-			_timeline_panel.attach_project(st as CodaState)
-		if _track_effects_panel != null and st is CodaState:
-			_track_effects_panel.attach_project(st as CodaState)
-		if _clip_effects_panel != null and st is CodaState:
-			_clip_effects_panel.attach_project(st as CodaState)
-		if _bus_effects_panel != null and st is CodaState:
-			_bus_effects_panel.attach_project(st as CodaState)
-	if _browser_panel != null and _browser_panel.has_method(&"pulse_events_selection_to_editor"):
-		_browser_panel.pulse_events_selection_to_editor()
-	_update_title()
-	_refresh_view_menu_check_marks()
-	var st0: CodaState = _current_state() as CodaState
-	if st0 != null:
-		_apply_theme_appearance(st0.theme_mode, st0.accent_color)
+	if _project_session != null:
+		_project_session.bind_project_signals(null)
 
 
 func _push_project_to_runtime(state: Variant) -> void:
@@ -597,17 +844,17 @@ func _build_menus() -> void:
 
 	_rebuild_file_menu_items()
 	_rebuild_view_menu_items()
-	_rebuild_help_menu_items()
+	_help_menu.add_item("Command Palette…", HID_COMMAND_PALETTE)
+	_help_menu.add_item("Keyboard Shortcuts…", HID_SHORTCUTS)
 	_file_menu.id_pressed.connect(_on_file_id_pressed)
 	_view_menu.id_pressed.connect(_on_view_id_pressed)
 	_view_menu.about_to_popup.connect(_refresh_view_menu_check_marks)
 	_build_menu.id_pressed.connect(_on_build_id_pressed)
-	_build_menu.about_to_popup.connect(_rebuild_build_menu_items)
+	_build_menu.about_to_popup.connect(_on_build_menu_about_to_popup)
 	_help_menu.id_pressed.connect(_on_help_id_pressed)
-	_help_menu.about_to_popup.connect(_rebuild_help_menu_items)
+	_help_menu.about_to_popup.connect(_on_help_menu_about_to_popup)
 	_recent_menu.id_pressed.connect(_on_recent_id_pressed)
-	_recent_menu.about_to_popup.connect(_fill_recent_menu)
-	_rebuild_build_menu_items()
+	_recent_menu.about_to_popup.connect(_on_recent_menu_about_to_popup)
 
 
 func _rebuild_file_menu_items() -> void:
@@ -631,9 +878,6 @@ func _rebuild_view_menu_items() -> void:
 	_view_menu.add_check_item("Show Inspector", VID_TOGGLE_INSPECTOR)
 	_view_menu.add_check_item("Show Player", VID_TOGGLE_PLAYER)
 	_view_menu.add_check_item("Show Mixer", VID_TOGGLE_MIXER)
-	_view_menu.add_check_item("Show Track FX", VID_TOGGLE_TRACK_FX)
-	_view_menu.add_check_item("Show Clip FX", VID_TOGGLE_CLIP_FX)
-	_view_menu.add_check_item("Show Bus FX", VID_TOGGLE_BUS_FX)
 	_view_menu.add_check_item("Show Log", VID_TOGGLE_LOG)
 	_view_menu.add_separator()
 	_view_menu.add_item("Save Layout", VID_SAVE_LAYOUT)
@@ -653,9 +897,6 @@ func _refresh_view_menu_check_marks() -> void:
 	_set_check(VID_TOGGLE_INSPECTOR, dm.is_panel_visible(PANEL_INSPECTOR))
 	_set_check(VID_TOGGLE_PLAYER, dm.is_panel_visible(PANEL_PLAYER))
 	_set_check(VID_TOGGLE_MIXER, dm.is_panel_visible(PANEL_MIXER))
-	_set_check(VID_TOGGLE_TRACK_FX, dm.is_panel_visible(PANEL_TRACK_EFFECTS))
-	_set_check(VID_TOGGLE_CLIP_FX, dm.is_panel_visible(PANEL_CLIP_EFFECTS))
-	_set_check(VID_TOGGLE_BUS_FX, dm.is_panel_visible(PANEL_BUS_EFFECTS))
 	_set_check(VID_TOGGLE_LOG, dm.is_panel_visible(PANEL_LOG))
 
 
@@ -665,246 +906,38 @@ func _set_check(item_id: int, checked: bool) -> void:
 		_view_menu.set_item_checked(idx, checked)
 
 
-func _rebuild_build_menu_items() -> void:
-	if _build_menu == null:
-		return
-	_build_menu.clear()
-	_build_menu.add_item("New Bank…", BID_NEW_BANK)
-	_build_menu.add_item("Validate All Banks", BID_VALIDATE_BANKS)
-	_build_menu.add_separator()
-	var st: Variant = _current_state()
-	if st == null or (st as CodaState).banks.is_empty():
-		_build_menu.add_item("(no banks defined)", -1)
-		_build_menu.set_item_disabled(_build_menu.item_count - 1, true)
-		return
-	var state: CodaState = st as CodaState
-	for i in state.banks.size():
-		_build_menu.add_item("Export “%s”…" % state.banks[i].bank_name, BID_EXPORT_BANK_BASE + i)
-
-
-func _current_state() -> Variant:
-	if _browser_panel != null and _browser_panel.has_method(&"get_project"):
-		return _browser_panel.get_project()
-	return null
-
-
 func _on_build_id_pressed(id: int) -> void:
-	match id:
-		BID_NEW_BANK:
-			_action_new_bank()
-		BID_VALIDATE_BANKS:
-			_action_validate_banks()
-		_:
-			if id >= BID_EXPORT_BANK_BASE:
-				await _action_export_bank_async(id - BID_EXPORT_BANK_BASE)
+	if _menu_actions != null:
+		await _menu_actions.on_build_id_pressed(id)
 
 
-func _action_new_bank() -> void:
-	var st: Variant = _current_state()
-	if st == null:
-		return
-	var state: CodaState = st as CodaState
-	var b: CodaBank = state.add_bank("Bank %d" % (state.banks.size() + 1))
-	NexusCodaLog.info("bank", 'Created bank "%s"' % b.bank_name)
-
-
-func _action_validate_banks() -> void:
-	var st: Variant = _current_state()
-	if st == null:
-		return
-	var state: CodaState = st as CodaState
-	if state.banks.is_empty():
-		_editor_notify("No banks defined.", false)
-		return
-	var problems_total: int = 0
-	for b in state.banks:
-		var problems: PackedStringArray = CodaBankExportScript.validate_bank(state, b)
-		if problems.is_empty():
-			NexusCodaLog.info("bank", '"%s" passes validation.' % b.bank_name)
-			continue
-		problems_total += problems.size()
-		for p in problems:
-			NexusCodaLog.warn("bank", '"%s": %s' % [b.bank_name, p])
-	_editor_notify(
-		"Validation finished: %d issue(s) — see Log panel." % problems_total,
-		problems_total > 0
-	)
-
-
-func _action_export_bank_async(bank_index: int) -> void:
-	var st: Variant = _current_state()
-	if st == null:
-		return
-	var state: CodaState = st as CodaState
-	if bank_index < 0 or bank_index >= state.banks.size():
-		return
-	var bank: CodaBank = state.banks[bank_index]
-	var problems: PackedStringArray = CodaBankExportScript.validate_bank(state, bank)
-	if not problems.is_empty():
-		for p in problems:
-			NexusCodaLog.warn("bank_export", '"%s": %s' % [bank.bank_name, p])
-		_editor_notify(
-			'Bank "%s" has %d validation issue(s) — fix in Log panel before exporting.'
-			% [bank.bank_name, problems.size()],
-			true
-		)
-		return
-	var p: String = await _pick_bank_save_path(bank.bank_name)
-	if p.is_empty():
-		return
-	if p.get_extension().to_lower() != CodaBankExportScript.FORMAT_EXTENSION:
-		p = "%s.%s" % [p, CodaBankExportScript.FORMAT_EXTENSION]
-	var err: String = CodaBankExportScript.write_to_path(state, bank, p)
-	if not err.is_empty():
-		_editor_notify(err, true)
-		return
-	_editor_notify('Exported bank "%s" to %s' % [bank.bank_name, p], false)
-
-
-func _pick_bank_save_path(suggest_name: String) -> String:
-	if _plugin == null:
-		return ""
-	var base: Control = _plugin.get_editor_interface().get_base_control()
-	var dlg := EditorFileDialog.new()
-	dlg.use_native_dialog = false
-	dlg.access = EditorFileDialog.ACCESS_RESOURCES
-	dlg.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
-	dlg.title = "Export Nexus Coda Bank"
-	dlg.clear_filters()
-	dlg.add_filter(CodaBankExportScript.FORMAT_FILTER)
-	dlg.current_dir = "res://"
-	dlg.current_file = "%s.%s" % [
-		suggest_name.strip_edges().replace(" ", "_").to_lower(),
-		CodaBankExportScript.FORMAT_EXTENSION,
-	]
-	base.add_child(dlg)
-	var path: String = await _await_editor_file_path(dlg)
-	dlg.queue_free()
-	return path
-
-
-## Save dialog for [AudioBusLayout] — user picks filename and folder (not tied to [code]default_bus_layout.tres[/code]).
 func pick_audio_bus_layout_export_path_async() -> String:
-	if _plugin == null:
-		return ""
-	var base: Control = _plugin.get_editor_interface().get_base_control()
-	var dlg := EditorFileDialog.new()
-	dlg.use_native_dialog = false
-	dlg.access = EditorFileDialog.ACCESS_RESOURCES
-	dlg.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
-	dlg.title = "Export Audio Bus Layout"
-	dlg.clear_filters()
-	dlg.add_filter("*.tres ; Godot AudioBusLayout")
-	dlg.current_dir = "res://"
-	dlg.current_file = "bus_layout.tres"
-	base.add_child(dlg)
-	var path: String = await _await_editor_file_path(dlg)
-	dlg.queue_free()
-	return path
+	if _menu_actions != null:
+		return await _menu_actions.pick_audio_bus_layout_export_path_async()
+	return ""
 
 
 func complete_audio_bus_layout_export(saved_path: String, err: Error) -> void:
-	if err != OK:
-		_editor_notify("Could not export bus layout (%s)." % error_string(err), true)
-		return
-	if saved_path.is_empty():
-		_editor_notify("Bus layout export finished without a path.", true)
-		return
-	_editor_notify('Exported bus layout to "%s"' % saved_path, false)
-	_refresh_editor_filesystem_after_save(saved_path)
-
-
-func _rebuild_help_menu_items() -> void:
-	if _help_menu == null:
-		return
-	_help_menu.clear()
-	_help_menu.add_item("Command Palette…", HID_COMMAND_PALETTE)
-	_help_menu.add_item("Keyboard Shortcuts…", HID_SHORTCUTS)
-	_help_menu.add_separator()
-	_help_menu.add_item("Open Sample Project", HID_OPEN_SAMPLE)
-	_help_menu.add_separator()
-	var st: CodaState = _current_state() as CodaState
-	var mode_label: String = "Switch to Light Theme"
-	if st != null and st.theme_mode == "light":
-		mode_label = "Switch to Dark Theme"
-	_help_menu.add_item(mode_label, HID_TOGGLE_THEME_MODE)
-	_help_menu.add_item("Pick Accent Color…", HID_PICK_ACCENT)
+	if _menu_actions != null:
+		_menu_actions.complete_audio_bus_layout_export(saved_path, err)
 
 
 func _on_help_id_pressed(id: int) -> void:
-	match id:
-		HID_COMMAND_PALETTE:
-			_open_command_palette()
-		HID_SHORTCUTS:
-			_open_shortcut_sheet()
-		HID_OPEN_SAMPLE:
-			await _action_open_sample_async()
-		HID_TOGGLE_THEME_MODE:
-			_action_toggle_theme_mode()
-		HID_PICK_ACCENT:
-			_action_pick_accent_color()
-		_:
-			pass
-
-
-func _action_open_sample_async() -> void:
-	var ok: bool = await _confirm_unsaved_async()
-	if not ok:
-		return
-	var sample: CodaState = CodaSampleProjectScript.build()
-	_apply_loaded_state(sample)
-	_current_path = ""
-	_dirty = true
-	_update_title()
-	_apply_theme_appearance(sample.theme_mode, sample.accent_color)
-	NexusCodaLog.info(
-		"sample",
-		"Opened onboarding sample. Drag your own audio onto the SOUND nodes to hear it."
-	)
-
-
-func _action_toggle_theme_mode() -> void:
-	var st: CodaState = _current_state() as CodaState
-	if st == null:
-		return
-	var next_mode: String = "light" if st.theme_mode == "dark" else "dark"
-	st.set_theme_appearance(next_mode, st.accent_color)
-	_apply_theme_appearance(st.theme_mode, st.accent_color)
-
-
-func _action_pick_accent_color() -> void:
-	var st: CodaState = _current_state() as CodaState
-	if st == null:
-		return
-	if _color_picker_dialog != null and is_instance_valid(_color_picker_dialog):
-		_color_picker_dialog.queue_free()
-	_color_picker_dialog = AcceptDialog.new()
-	_color_picker_dialog.title = "Pick Accent Color"
-	add_child(_color_picker_dialog)
-	var picker := ColorPicker.new()
-	picker.color = st.accent_color
-	picker.edit_alpha = false
-	_color_picker_dialog.add_child(picker)
-	picker.color_changed.connect(
-		func(c: Color) -> void:
-			st.set_theme_appearance(st.theme_mode, c)
-			_apply_theme_appearance(st.theme_mode, c)
-	)
-	_color_picker_dialog.popup_centered_ratio(0.4)
+	if _menu_actions != null:
+		await _menu_actions.on_help_id_pressed(id)
 
 
 func _apply_theme_appearance(theme_mode: String, accent: Color) -> void:
-	_project_theme = CodaDesignTokens.make_project_theme(theme_mode, accent)
-	# Window inherits Theme via the root control.
-	var root: Control = $RootVBox
-	if root != null:
-		root.theme = _project_theme
+	if _menu_actions != null:
+		_menu_actions.apply_theme_appearance(theme_mode, accent)
+	_apply_root_theme(_menu_actions.get_project_theme() if _menu_actions != null else null)
 
 
 func _open_command_palette() -> void:
 	if _command_palette == null:
 		return
-	_command_palette.set_entries(_collect_palette_entries())
+	if _menu_actions != null:
+		_command_palette.set_entries(_menu_actions.collect_palette_entries())
 	_command_palette.open()
 
 
@@ -912,104 +945,6 @@ func _open_shortcut_sheet() -> void:
 	if _shortcut_sheet == null:
 		return
 	_shortcut_sheet.open()
-
-
-func _collect_palette_entries() -> Array[Dictionary]:
-	var out: Array[Dictionary] = []
-	var dm: CodaDockManager = _dock_host.dock_manager if _dock_host != null else null
-
-	# File actions.
-	out.append({"title": "New Project", "subtitle": "Ctrl+N", "category": "File",
-		"callable": Callable(self, "_action_new_async")})
-	out.append({"title": "Open Project…", "subtitle": "Ctrl+O", "category": "File",
-		"callable": Callable(self, "_action_open_async")})
-	out.append({"title": "Save", "subtitle": "Ctrl+S", "category": "File",
-		"callable": Callable(self, "_action_save_async")})
-	out.append({"title": "Save As…", "subtitle": "Ctrl+Shift+S", "category": "File",
-		"callable": Callable(self, "_action_save_as_async")})
-	out.append({"title": "Close Window", "subtitle": "", "category": "File",
-		"callable": Callable(self, "_action_close_window_async")})
-
-	# View toggles.
-	if dm != null:
-		var panels: Array = [
-			[PANEL_BROWSER, "Toggle Browser Panel"],
-			[PANEL_GRAPH, "Toggle Graph Panel"],
-			[PANEL_TIMELINE, "Toggle Timeline Panel"],
-			[PANEL_INSPECTOR, "Toggle Inspector Panel"],
-			[PANEL_PLAYER, "Toggle Player Panel"],
-			[PANEL_MIXER, "Toggle Mixer Panel"],
-			[PANEL_TRACK_EFFECTS, "Toggle Track FX Panel"],
-			[PANEL_CLIP_EFFECTS, "Toggle Clip FX Panel"],
-			[PANEL_BUS_EFFECTS, "Toggle Bus FX Panel"],
-			[PANEL_LOG, "Toggle Log Panel"],
-		]
-		for entry_v in panels:
-			var arr: Array = entry_v as Array
-			var pid: StringName = arr[0]
-			var title: String = arr[1]
-			out.append({"title": title, "subtitle": "", "category": "View",
-				"callable": Callable(dm, "toggle_panel").bind(pid)})
-		out.append({"title": "Save Layout", "subtitle": "", "category": "View",
-			"callable": Callable(self, "_save_custom_layout")})
-		out.append({"title": "Load Saved Layout", "subtitle": "", "category": "View",
-			"callable": Callable(self, "_load_custom_layout")})
-		out.append({"title": "Clear Saved Layout", "subtitle": "", "category": "View",
-			"callable": Callable(self, "_clear_custom_layout")})
-		out.append({"title": "Reset Layout", "subtitle": "", "category": "View",
-			"callable": Callable(self, "_reset_to_factory_layout")})
-
-	# Player transport.
-	if _player_panel != null:
-		out.append({"title": "Player: Play Selection", "subtitle": "", "category": "Player",
-			"callable": Callable(_player_panel, "play_current_selection")})
-		out.append({"title": "Player: Stop", "subtitle": "", "category": "Player",
-			"callable": Callable(_player_panel, "stop_current_voice")})
-		out.append({"title": "Player: Pin / Unpin Selection", "subtitle": "", "category": "Player",
-			"callable": Callable(_player_panel, "toggle_pin")})
-
-	# Build/banks.
-	out.append({"title": "Create New Bank", "subtitle": "", "category": "Build",
-		"callable": Callable(self, "_action_new_bank")})
-	out.append({"title": "Validate All Banks", "subtitle": "", "category": "Build",
-		"callable": Callable(self, "_action_validate_banks")})
-
-	# Help / theme.
-	out.append({"title": "Open Sample Project", "subtitle": "", "category": "Help",
-		"callable": Callable(self, "_action_open_sample_async")})
-	out.append({"title": "Keyboard Shortcuts", "subtitle": "F1", "category": "Help",
-		"callable": Callable(self, "_open_shortcut_sheet")})
-	out.append({"title": "Toggle Theme Mode", "subtitle": "Light/Dark", "category": "Theme",
-		"callable": Callable(self, "_action_toggle_theme_mode")})
-	out.append({"title": "Pick Accent Color…", "subtitle": "", "category": "Theme",
-		"callable": Callable(self, "_action_pick_accent_color")})
-
-	# Event navigation: jump to event in browser/graph.
-	var st: CodaState = _current_state() as CodaState
-	if st != null and _browser_panel != null:
-		var paths: Array[Dictionary] = []
-		_collect_event_paths(st.events_root, "", paths)
-		for p in paths:
-			var event_id: String = str(p.get("id", ""))
-			var path: String = str(p.get("path", ""))
-			if event_id.is_empty():
-				continue
-			out.append({
-				"title": path,
-				"subtitle": "Open in browser",
-				"category": "Event",
-				"callable": Callable(self, "_select_event_by_id").bind(event_id),
-			})
-	return out
-
-
-func _collect_event_paths(folder: CodaBrowserNode, prefix: String, out: Array[Dictionary]) -> void:
-	for child in folder.children:
-		var path: String = "%s/%s" % [prefix, child.name] if not prefix.is_empty() else child.name
-		if child.kind == CodaBrowserNode.Kind.EVENT:
-			out.append({"id": child.id, "path": path})
-		elif child.is_folder():
-			_collect_event_paths(child, path, out)
 
 
 func _select_event_by_id(event_id: String) -> void:
@@ -1020,7 +955,7 @@ func _select_event_by_id(event_id: String) -> void:
 	elif _browser_panel.has_method(&"focus_event"):
 		_browser_panel.focus_event(event_id)
 	else:
-		NexusCodaLog.info("palette", "Event id=%s — open the Browser to select it." % event_id)
+		NexusCodaLog.info("palette", "Event id=%s â€” open the Browser to select it." % event_id)
 
 
 func _on_view_id_pressed(id: int) -> void:
@@ -1029,7 +964,8 @@ func _on_view_id_pressed(id: int) -> void:
 	var dm: CodaDockManager = _dock_host.dock_manager
 	match id:
 		VID_SAVE_LAYOUT:
-			_save_custom_layout()
+			if _layout_persistence != null:
+				_layout_persistence.save_custom_layout()
 		VID_TOGGLE_BROWSER:
 			dm.toggle_panel(PANEL_BROWSER)
 		VID_TOGGLE_GRAPH:
@@ -1042,492 +978,59 @@ func _on_view_id_pressed(id: int) -> void:
 			dm.toggle_panel(PANEL_PLAYER)
 		VID_TOGGLE_MIXER:
 			dm.toggle_panel(PANEL_MIXER)
-		VID_TOGGLE_TRACK_FX:
-			dm.toggle_panel(PANEL_TRACK_EFFECTS)
-		VID_TOGGLE_CLIP_FX:
-			dm.toggle_panel(PANEL_CLIP_EFFECTS)
-		VID_TOGGLE_BUS_FX:
-			dm.toggle_panel(PANEL_BUS_EFFECTS)
 		VID_TOGGLE_LOG:
 			dm.toggle_panel(PANEL_LOG)
 		VID_LOAD_LAYOUT:
-			_load_custom_layout()
+			if _layout_persistence != null:
+				_layout_persistence.load_custom_layout()
 		VID_CLEAR_SAVED_LAYOUT:
-			_clear_custom_layout()
+			if _layout_persistence != null:
+				_layout_persistence.clear_custom_layout()
 		VID_RESET_LAYOUT:
-			_reset_to_factory_layout()
+			if _layout_persistence != null:
+				_layout_persistence.reset_to_factory_layout()
 		_:
 			pass
 	_refresh_view_menu_check_marks()
 
 
-func _reset_to_factory_layout() -> void:
-	if _dock_host == null or _dock_host.dock_manager == null:
-		return
-	_set_preferred_layout(CUSTOM_LAYOUT_PREF_FACTORY)
-	_dock_host.dock_manager.reset_to_default_layout()
-
-
 func _on_layout_changed() -> void:
-	if _layout_autosave_queued:
-		return
-	_layout_autosave_queued = true
-	call_deferred(&"_deferred_autosave_layout")
+	if _layout_persistence != null:
+		_layout_persistence.on_layout_changed()
 
 
-func _deferred_autosave_layout() -> void:
-	_layout_autosave_queued = false
-	if not is_instance_valid(self) or _dock_host == null or _dock_host.dock_manager == null:
-		return
-	var path: String = _custom_layout_store_path()
-	if path.is_empty():
-		return
-	var payload: Dictionary = CodaEditorLayoutStoreScript.build_payload(
-		_dock_host, _dock_host.dock_manager
-	)
-	var text: String = CodaJsonUtilScript.stringify(payload, "  ")
-	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
-	if f == null:
-		return
-	f.store_string(text)
-	if f.has_method(&"flush"):
-		f.flush()
-	f.close()
-	_set_preferred_layout(CUSTOM_LAYOUT_PREF_CUSTOM)
-
-
-func _custom_layout_store_path() -> String:
-	if _plugin == null:
-		return ""
-	var cache: String = _plugin.get_editor_interface().get_editor_paths().get_cache_dir()
-	if cache.is_empty():
-		return ""
-	return cache.path_join(CUSTOM_LAYOUT_SUBDIR).path_join(CUSTOM_LAYOUT_FILENAME)
-
-
-func _layout_prefs_store_path() -> String:
-	if _plugin == null:
-		return ""
-	var cache: String = _plugin.get_editor_interface().get_editor_paths().get_cache_dir()
-	if cache.is_empty():
-		return ""
-	return cache.path_join(CUSTOM_LAYOUT_SUBDIR).path_join(CUSTOM_LAYOUT_PREFS_FILENAME)
-
-
-func _get_preferred_layout() -> String:
-	var p: String = _layout_prefs_store_path()
-	if p.is_empty() or not FileAccess.file_exists(p):
-		return CUSTOM_LAYOUT_PREF_CUSTOM  # Back-compat: custom layout file existing used to imply preference.
-	var text: String = FileAccess.get_file_as_string(p)
-	if text.is_empty():
-		return CUSTOM_LAYOUT_PREF_CUSTOM
-	var json := JSON.new()
-	if json.parse(text) != OK:
-		return CUSTOM_LAYOUT_PREF_CUSTOM
-	var root: Variant = json.data
-	if typeof(root) != TYPE_DICTIONARY:
-		return CUSTOM_LAYOUT_PREF_CUSTOM
-	var pref: String = str((root as Dictionary).get(CUSTOM_LAYOUT_PREFS_KEY, CUSTOM_LAYOUT_PREF_CUSTOM))
-	return pref if pref in [CUSTOM_LAYOUT_PREF_FACTORY, CUSTOM_LAYOUT_PREF_CUSTOM] else CUSTOM_LAYOUT_PREF_CUSTOM
-
-
-func _set_preferred_layout(pref: String) -> void:
-	var p: String = _layout_prefs_store_path()
-	if p.is_empty():
-		return
-	var dir_path: String = p.get_base_dir()
-	if not dir_path.is_empty():
-		DirAccess.make_dir_recursive_absolute(dir_path)
-	var payload := {
-		"version": 1,
-		CUSTOM_LAYOUT_PREFS_KEY: pref,
-	}
-	var text: String = CodaJsonUtilScript.stringify(payload, "  ")
-	var f: FileAccess = FileAccess.open(p, FileAccess.WRITE)
-	if f == null:
-		return
-	f.store_string(text)
-	if f.has_method(&"flush"):
-		f.flush()
-	f.close()
-
-
-func _save_custom_layout() -> void:
-	if _dock_host == null or _dock_host.dock_manager == null:
-		return
-	var path: String = _custom_layout_store_path()
-	if path.is_empty():
-		return
-	var dir_path: String = path.get_base_dir()
-	if not dir_path.is_empty():
-		DirAccess.make_dir_recursive_absolute(dir_path)
-	var dm: CodaDockManager = _dock_host.dock_manager
-	var payload: Dictionary = CodaEditorLayoutStoreScript.build_payload(_dock_host, dm)
-	var text: String = CodaJsonUtilScript.stringify(payload, "  ")
-	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
-	if f == null:
-		NexusCodaLog.warn("layout", "Could not save custom layout (%s)" % str(FileAccess.get_open_error()))
-		return
-	f.store_string(text)
-	if f.has_method(&"flush"):
-		f.flush()
-	f.close()
-	_set_preferred_layout(CUSTOM_LAYOUT_PREF_CUSTOM)
-	NexusCodaLog.info("layout", "Saved custom layout.")
-
-
-func _load_custom_layout_if_present() -> void:
-	var path: String = _custom_layout_store_path()
-	if _get_preferred_layout() != CUSTOM_LAYOUT_PREF_CUSTOM:
-		return
-	if path.is_empty() or not FileAccess.file_exists(path):
-		return
-	_load_custom_layout()
-
-
-func _load_custom_layout() -> void:
-	if _dock_host == null or _dock_host.dock_manager == null:
-		return
-	var path: String = _custom_layout_store_path()
-	if path.is_empty() or not FileAccess.file_exists(path):
-		NexusCodaLog.info("layout", "No saved custom layout found.")
-		return
-	var text: String = FileAccess.get_file_as_string(path)
-	if text.is_empty():
-		return
-	var json := JSON.new()
-	if json.parse(text) != OK:
-		NexusCodaLog.warn("layout", "Saved custom layout is invalid JSON.")
-		return
-	var root: Variant = json.data
-	if typeof(root) != TYPE_DICTIONARY:
-		return
-	CodaEditorLayoutStoreScript.apply_payload(
-		_dock_host, _dock_host.dock_manager, root as Dictionary
-	)
-	_set_preferred_layout(CUSTOM_LAYOUT_PREF_CUSTOM)
-	NexusCodaLog.info("layout", "Loaded custom layout.")
-
-
-func _clear_custom_layout() -> void:
-	var path: String = _custom_layout_store_path()
-	if path.is_empty():
-		return
-	if FileAccess.file_exists(path):
-		var err: Error = DirAccess.remove_absolute(path)
-		if err != OK:
-			NexusCodaLog.warn("layout", "Could not remove saved custom layout (%s)" % error_string(err))
-			return
-	_set_preferred_layout(CUSTOM_LAYOUT_PREF_FACTORY)
-	NexusCodaLog.info("layout", "Cleared saved custom layout.")
+func _deferred_layout_autosave() -> void:
+	if _layout_persistence != null:
+		_layout_persistence.run_deferred_autosave()
 
 
 func _on_panel_visibility_changed(_panel_id: StringName, _is_visible: bool) -> void:
 	_refresh_view_menu_check_marks()
 
 
-func _fill_recent_menu() -> void:
-	CodaProjectIo.prune_missing_recent_paths(_plugin)
-	_recent_menu.clear()
-	_recent_paths_snapshot = CodaProjectIo.read_recent_paths(_plugin)
-	if _recent_paths_snapshot.is_empty():
-		_recent_menu.add_item("(No recent projects)", RECENT_ID_BASE)
-		_recent_menu.set_item_disabled(_recent_menu.item_count - 1, true)
-		return
-	for i in _recent_paths_snapshot.size():
-		var label: String = _recent_paths_snapshot[i]
-		if label.length() > 72:
-			label = "…" + label.substr(label.length() - 71, 71)
-		_recent_menu.add_item(label, RECENT_ID_BASE + i)
-
-
 func _on_file_id_pressed(id: int) -> void:
 	match id:
 		MID_NEW:
-			await _action_new_async()
+			await _session_new_async()
 		MID_OPEN:
-			await _action_open_async()
+			await _session_open_async()
 		MID_CLOSE:
-			await _action_close_window_async()
+			await _session_close_async()
 		MID_SAVE:
-			await _action_save_async()
+			await _session_save_async()
 		MID_SAVE_AS:
-			await _action_save_as_async()
+			await _session_save_as_async()
 		_:
 			pass
 
 
 func _on_recent_id_pressed(id: int) -> void:
-	var idx: int = id - RECENT_ID_BASE
-	if idx < 0 or idx >= _recent_paths_snapshot.size():
+	if _project_session == null:
 		return
-	var path: String = _recent_paths_snapshot[idx]
-	await _open_path_after_confirm_async(path)
-
-
-## One ephemeral dialog per call so multiple Nexus windows never share signals or state.
-func _pick_file_via_editor_dialog(save_mode: bool, suggested_file: String = "") -> String:
-	if _plugin == null:
-		return ""
-	var base: Control = _plugin.get_editor_interface().get_base_control()
-	var dlg := EditorFileDialog.new()
-	# Windows native file dialog is known to skip file_selected (Godot #94154); use Godot UI dialog.
-	dlg.use_native_dialog = false
-	dlg.access = EditorFileDialog.ACCESS_RESOURCES
-	dlg.file_mode = (
-		EditorFileDialog.FILE_MODE_SAVE_FILE
-		if save_mode
-		else EditorFileDialog.FILE_MODE_OPEN_FILE
-	)
-	dlg.title = (
-		"Save Nexus Coda Project As" if save_mode else "Open Nexus Coda Project"
-	)
-	dlg.clear_filters()
-	dlg.add_filter(CodaProjectIo.FORMAT_FILTER)
-	dlg.current_dir = "res://"
-	if save_mode and not suggested_file.is_empty():
-		dlg.current_file = suggested_file
-	base.add_child(dlg)
-	var path: String = await _await_editor_file_path(dlg)
-	dlg.queue_free()
-	return path
-
-
-func _bind_project_signals(state: Variant) -> void:
-	if _project_signal_source != null and is_instance_valid(_project_signal_source):
-		if _project_signal_source.structure_changed.is_connected(_on_project_structure_changed):
-			_project_signal_source.structure_changed.disconnect(_on_project_structure_changed)
-		if _project_signal_source.project_dirty.is_connected(_on_project_structure_changed):
-			_project_signal_source.project_dirty.disconnect(_on_project_structure_changed)
-	_project_signal_source = null
-	if state == null:
+	var path: String = _project_session.recent_path_for_menu_id(id)
+	if path.is_empty():
 		return
-	var st: CodaState = state as CodaState
-	if st == null:
-		return
-	_project_signal_source = st
-	st.structure_changed.connect(_on_project_structure_changed)
-	st.project_dirty.connect(_on_project_structure_changed)
-
-
-func _on_project_structure_changed() -> void:
-	if _suppress_dirty:
-		return
-	_dirty = true
-	_update_title()
-
-
-func _update_title() -> void:
-	var doc_name: String = "Untitled"
-	if not _current_path.is_empty():
-		doc_name = _current_path.get_file()
-	title = "Nexus Coda — %s%s" % [doc_name, " *" if _dirty else ""]
-	if _status_bar != null:
-		_status_bar.set_project_state(_current_path, _dirty)
-
-
-func _load_empty_project() -> void:
-	_suppress_dirty = true
-	var st: CodaState = CodaStateScript.new()
-	st.clear_to_empty_project()
-	_apply_state_to_panels(st)
-	_suppress_dirty = false
-
-
-func _apply_loaded_state(st: CodaState) -> void:
-	_suppress_dirty = true
-	_apply_state_to_panels(st)
-	_suppress_dirty = false
-
-
-func _apply_state_to_panels(st: CodaState) -> void:
-	if _browser_panel != null and _browser_panel.has_method(&"set_project"):
-		_browser_panel.set_project(st)
-	_bind_project_signals(st)
-	_push_project_to_runtime(st)
-	if _graph_panel != null:
-		_graph_panel.attach_project(st)
-		_graph_panel.on_browser_event_selected(null)
-	if _inspector_panel != null:
-		_inspector_panel.attach_project(st)
-		_inspector_panel.on_browser_event_selected(null)
-	if _player_panel != null:
-		_player_panel.attach_project(st)
-		_player_panel.on_browser_event_selected(null)
-	if _timeline_panel != null:
-		_timeline_panel.attach_project(st)
-		_timeline_panel.on_browser_event_selected(null)
-	if _mixer_panel != null:
-		_mixer_panel.attach_project(st)
-	if _browser_panel != null and _browser_panel.has_method(&"pulse_events_selection_to_editor"):
-		_browser_panel.pulse_events_selection_to_editor()
-	if st != null:
-		_apply_theme_appearance(st.theme_mode, st.accent_color)
-
-
-func _action_new_async() -> void:
-	if _plugin != null and _plugin.has_method(&"spawn_new_coda_editor_window"):
-		_plugin.spawn_new_coda_editor_window()
-		NexusCodaLog.info("project_io", "Opened new Nexus Coda editor instance")
-	else:
-		NexusCodaLog.warn("project_io", "Cannot spawn editor (plugin missing spawn_new_coda_editor_window)")
-
-
-func _action_close_window_async() -> void:
-	var ok: bool = await _confirm_unsaved_async()
-	if not ok:
-		return
-	NexusCodaLog.info("project_io", "Closing Nexus Coda editor instance")
-	queue_free()
-
-
-func _action_open_async() -> void:
-	var ok: bool = await _confirm_unsaved_async()
-	if not ok:
-		return
-	var p: String = await _pick_file_via_editor_dialog(false)
-	if not p.is_empty():
-		_open_path_internal(p)
-
-
-func _open_path_after_confirm_async(path: String) -> void:
-	var ok: bool = await _confirm_unsaved_async()
-	if not ok:
-		return
-	_open_path_internal(path)
-
-
-func _open_path_internal(path: String) -> void:
-	var loaded: Variant = CodaProjectIo.load_state_from_path(path)
-	if loaded is String:
-		if str(loaded) == CodaProjectIo.ERR_FILE_MISSING:
-			CodaProjectIo.remove_recent_path(_plugin, path)
-		_editor_notify(loaded, true)
-		return
-	var st: CodaState = loaded as CodaState
-	if st == null:
-		NexusCodaLog.error("project_io", "Could not load project.")
-		return
-	_apply_loaded_state(st)
-	_current_path = path
-	_dirty = false
-	CodaProjectIo.remember_opened_path(_plugin, path)
-	_update_title()
-	NexusCodaLog.info("project_io", 'Opened "%s"' % path)
-
-
-func _action_save_async() -> void:
-	if _current_path.is_empty():
-		await _action_save_as_async()
-		return
-	await _save_to_current_path_async()
-
-
-func _action_save_as_async() -> void:
-	var suggest := ""
-	if not _current_path.is_empty():
-		suggest = _current_path.get_file()
-	var p: String = await _pick_file_via_editor_dialog(true, suggest)
-	if p.is_empty():
-		NexusCodaLog.warn("project_io", "Save As cancelled: save dialog returned no path.")
-		_editor_notify(
-			"Save cancelled — no file path was chosen. Use Save if the project already has a path.",
-			true
-		)
-		return
-	if p.get_extension().to_lower() != CodaProjectIo.FORMAT_EXTENSION:
-		p = "%s.%s" % [p, CodaProjectIo.FORMAT_EXTENSION]
-	var err_msg: String = _write_and_finish_save(p)
-	if not err_msg.is_empty():
-		_editor_notify(err_msg, true)
-
-
-func _save_to_current_path_async() -> void:
-	var err_msg: String = _write_and_finish_save(_current_path)
-	if not err_msg.is_empty():
-		_editor_notify(err_msg, true)
-
-
-func _write_and_finish_save(path: String) -> String:
-	var st: Variant = _browser_panel.get_project() if _browser_panel.has_method(&"get_project") else null
-	if st == null:
-		return "No project state."
-	var msg: String = CodaProjectIo.save_to_path(st as CodaState, path)
-	if not msg.is_empty():
-		return msg
-	_current_path = path
-	_dirty = false
-	CodaProjectIo.remember_opened_path(_plugin, path)
-	_update_title()
-	NexusCodaLog.info("project_io", 'Saved "%s"' % path)
-	_refresh_editor_filesystem_after_save(path)
-	return ""
-
-
-func _refresh_editor_filesystem_after_save(path: String) -> void:
-	if _plugin == null:
-		return
-	var fs: EditorFileSystem = _plugin.get_editor_interface().get_resource_filesystem()
-	if fs == null:
-		return
-	# Newly created res:// files are not known to EditorFileSystem until update_file/scan.
-	# Native .tres/.res written via ResourceSaver are not imported assets — reimport_files then
-	# errors with "importer for type '' not found" (see bus layout export, etc.).
-	if path.begins_with("res://"):
-		if fs.has_method(&"update_file"):
-			fs.update_file(path)
-		var ext: String = path.get_extension().to_lower()
-		if ext != "tres" and ext != "res" and fs.has_method(&"reimport_files"):
-			fs.reimport_files(PackedStringArray([path]))
-	elif fs.has_method(&"scan"):
-		fs.call_deferred(&"scan")
-
-
-func _await_editor_file_path(dlg: EditorFileDialog) -> String:
-	_file_dialog_pick_result = ""
-	_file_dialog_pick_complete = false
-	_file_dialog_user_canceled = false
-
-	dlg.file_selected.connect(_on_editor_file_dialog_file_selected, CONNECT_ONE_SHOT)
-	dlg.files_selected.connect(_on_editor_file_dialog_files_selected, CONNECT_ONE_SHOT)
-	dlg.canceled.connect(_on_editor_file_dialog_canceled, CONNECT_ONE_SHOT)
-
-	dlg.popup_centered_ratio(0.85)
-	while not _file_dialog_pick_complete and is_instance_valid(dlg):
-		await get_tree().process_frame
-
-	if not _file_dialog_pick_result.is_empty():
-		return _file_dialog_pick_result
-	if _file_dialog_user_canceled:
-		return ""
-	# Some editor builds omit file_selected; fall back to the typed path only when not canceled.
-	var cp: Variant = dlg.get("current_path")
-	if cp != null:
-		var s: String = str(cp).strip_edges()
-		if not s.is_empty():
-			return s
-	return ""
-
-
-func _on_editor_file_dialog_file_selected(path: String) -> void:
-	if not path.is_empty():
-		_file_dialog_pick_result = path
-	_file_dialog_pick_complete = true
-
-
-func _on_editor_file_dialog_files_selected(paths: PackedStringArray) -> void:
-	if _file_dialog_pick_complete:
-		return
-	if paths.size() > 0:
-		_file_dialog_pick_result = str(paths[0])
-	_file_dialog_pick_complete = true
-
-
-func _on_editor_file_dialog_canceled() -> void:
-	if _file_dialog_pick_complete:
-		return
-	_file_dialog_user_canceled = true
-	_file_dialog_pick_complete = true
+	await _project_session.open_path_after_confirm_async(path)
 
 
 func _editor_notify(message: String, is_error: bool = false) -> void:
@@ -1538,118 +1041,31 @@ func _editor_notify(message: String, is_error: bool = false) -> void:
 		NexusCodaLog.info("project_io", message)
 
 
-func _confirm_unsaved_async() -> bool:
-	if not _dirty:
-		return true
-	_choice_result = 0
-	await _run_three_button_prompt_async(
-		"Save changes to the current project?",
-		"Save",
-		"Don't Save",
-		"Cancel"
-	)
-	var r: int = _choice_result
-	if r == 0:
-		return false
-	if r == 2:
-		return true
-	if r == 1:
-		await _action_save_async()
-		if _dirty:
-			return false
-		return true
-	return false
-
-
-func _run_three_button_prompt_async(
-	line: String, save_txt: String, discard_txt: String, cancel_txt: String
-) -> void:
-	if has_node(UNSAVED_LAYER_NODEPATH):
-		get_node(UNSAVED_LAYER_NODEPATH).queue_free()
-
-	var layer := CanvasLayer.new()
-	layer.name = "UnsavedPromptLayer"
-	layer.layer = 128
-	add_child(layer)
-
-	var root := Control.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.mouse_filter = Control.MOUSE_FILTER_STOP
-	layer.add_child(root)
-
-	var dim := ColorRect.new()
-	dim.color = Color(0.08, 0.08, 0.1, 0.55)
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dim.mouse_filter = Control.MOUSE_FILTER_STOP
-	root.add_child(dim)
-
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.add_child(center)
-
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(440, 0)
-	center.add_child(panel)
-
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_top", 16)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_bottom", 16)
-	panel.add_child(margin)
-
-	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 14)
-	margin.add_child(vb)
-
-	var title := Label.new()
-	title.text = "Nexus Coda"
-	vb.add_child(title)
-
-	var lbl := Label.new()
-	lbl.text = line
-	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vb.add_child(lbl)
-
-	var hb := HBoxContainer.new()
-	hb.alignment = BoxContainer.ALIGNMENT_END
-	hb.add_theme_constant_override("separation", 8)
-	vb.add_child(hb)
-
-	var b_cancel := Button.new()
-	b_cancel.text = cancel_txt
-	var b_disc := Button.new()
-	b_disc.text = discard_txt
-	var b_save := Button.new()
-	b_save.text = save_txt
-
-	hb.add_child(b_cancel)
-	hb.add_child(b_disc)
-	hb.add_child(b_save)
-
-	var finished := false
-	var apply_pick := func(result: int) -> void:
-		_choice_result = result
-		finished = true
-		if is_instance_valid(layer):
-			layer.queue_free()
-	var pick: Callable = Callable(apply_pick)
-
-	b_save.pressed.connect(func(): pick.call(1))
-	b_disc.pressed.connect(func(): pick.call(2))
-	b_cancel.pressed.connect(func(): pick.call(0))
-
-	while not finished and is_instance_valid(layer):
-		await get_tree().process_frame
+func _refresh_editor_filesystem_after_save(path: String) -> void:
+	if _plugin == null:
+		return
+	var fs: EditorFileSystem = _plugin.get_editor_interface().get_resource_filesystem()
+	if fs == null:
+		return
+	if path.begins_with("res://"):
+		if fs.has_method(&"update_file"):
+			fs.update_file(path)
+		var ext: String = path.get_extension().to_lower()
+		if ext != "tres" and ext != "res" and fs.has_method(&"reimport_files"):
+			fs.reimport_files(PackedStringArray([path]))
+	elif fs.has_method(&"scan"):
+		fs.call_deferred(&"scan")
 
 
 func _on_close_requested() -> void:
-	if _dirty:
-		var ok: bool = await _confirm_unsaved_async()
+	if _project_session != null and _project_session.dirty:
+		var ok: bool = await _project_session.confirm_unsaved_async()
 		if not ok:
 			return
 	_teardown_before_close()
 	queue_free()
+
+
 
 
 func _notification(what: int) -> void:
@@ -1688,9 +1104,9 @@ func _teardown_before_close() -> void:
 	if _status_bar != null and is_instance_valid(_status_bar):
 		_status_bar.queue_free()
 	_status_bar = null
-	if _color_picker_dialog != null and is_instance_valid(_color_picker_dialog):
-		_color_picker_dialog.queue_free()
-	_color_picker_dialog = null
+	if _menu_actions != null:
+		_menu_actions.teardown()
+	_menu_actions = null
 
 	# Free panels explicitly (they are re-created on next open anyway).
 	if _browser_panel != null and is_instance_valid(_browser_panel):

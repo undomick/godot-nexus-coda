@@ -24,6 +24,7 @@ const _SPINBOX_COL_WIDTH := 96
 const _BTN_SIZE := Vector2(28, 24)
 const _HEADER_HEIGHT := 30
 
+signal effect_add_menu_opened
 signal effect_add_requested(effect_type: int)
 signal effect_remove_requested(effect_id: String)
 signal effect_move_requested(from_index: int, to_index: int)
@@ -43,6 +44,8 @@ var _effects_ref: Array[CodaTrackEffect] = []
 var _row_by_effect_id: Dictionary = {}
 var _last_structure_sig: String = ""
 var _suppress: bool = false
+var _ready_done: bool = false
+var _pending_bind: bool = false
 
 
 func _ready() -> void:
@@ -78,8 +81,13 @@ func _ready() -> void:
 
 	_add_menu = PopupMenu.new()
 	_add_menu.name = "EffectAddMenu"
+	_add_menu.transient = true
+	_add_menu.exclusive = true
 	_build_add_menu()
-	_add_menu.id_pressed.connect(_on_add_menu_id_pressed)
+	if not _add_menu.id_pressed.is_connected(_on_add_menu_id_pressed):
+		_add_menu.id_pressed.connect(_on_add_menu_id_pressed)
+	if not _add_menu.index_pressed.is_connected(_on_add_menu_index_pressed):
+		_add_menu.index_pressed.connect(_on_add_menu_index_pressed)
 	add_child(_add_menu)
 
 	_scroll = ScrollContainer.new()
@@ -107,6 +115,10 @@ func _ready() -> void:
 	_footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_footer.text = ""
 	add_child(_footer)
+	_ready_done = true
+	if _pending_bind:
+		_pending_bind = false
+		_apply_bind()
 
 
 func set_chain_title(title: String) -> void:
@@ -131,7 +143,17 @@ func set_footer_visible(on: bool) -> void:
 
 
 func bind_effects_array(effects: Array[CodaTrackEffect]) -> void:
+	_last_structure_sig = ""
 	_effects_ref = effects
+	if not _ready_done or _list == null:
+		_pending_bind = true
+		return
+	_apply_bind()
+
+
+func _apply_bind() -> void:
+	if _list == null:
+		return
 	var sig: String = _compute_structure_sig()
 	if sig == _last_structure_sig and _row_by_effect_id.size() == _effects_ref.size():
 		_sync_rows_from_data()
@@ -165,16 +187,35 @@ func _build_add_menu() -> void:
 			_add_menu.add_separator(str(cat))
 			first = false
 		for t in by_cat[cat]:
-			_add_menu.add_item(CodaEffectCatalogScript.display_name_for_type(t), int(t))
+			# Menu IDs start at 1 — Godot treats 0 as "unset" for some PopupMenu paths.
+			_add_menu.add_item(CodaEffectCatalogScript.display_name_for_type(t), int(t) + 1)
 
 
 func _on_add_pressed() -> void:
+	effect_add_menu_opened.emit()
+	_add_menu.reset_size()
 	var gp: Vector2 = _add_btn.get_global_rect().position + Vector2(0, _add_btn.size.y)
-	_add_menu.popup(Rect2i(Vector2i(int(gp.x), int(gp.y)), Vector2i(1, 1)))
+	_add_menu.position = Vector2i(int(gp.x), int(gp.y))
+	_add_menu.popup()
 
 
 func _on_add_menu_id_pressed(id: int) -> void:
-	effect_add_requested.emit(id)
+	_submit_menu_pick(id)
+
+
+func _on_add_menu_index_pressed(index: int) -> void:
+	if _add_menu == null or index < 0:
+		return
+	_submit_menu_pick(_add_menu.get_item_id(index))
+
+
+func _submit_menu_pick(raw_id: int) -> void:
+	if raw_id <= 0:
+		return
+	var effect_type: int = raw_id - 1
+	if effect_type < 0 or effect_type > int(CodaTrackEffect.Type.STEREO_ENHANCE):
+		return
+	effect_add_requested.emit(effect_type)
 
 
 # ---------- Rendering ----------

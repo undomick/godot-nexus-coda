@@ -283,7 +283,7 @@ static func build_audio_effect(t: CodaTrackEffect.Type, params: Dictionary) -> A
 		CodaTrackEffect.Type.REVERB:
 			var r := AudioEffectReverb.new()
 			r.room_size = float(p.get("room_size", 0.5))
-			r.damp = float(p.get("damp", 0.5))
+			r.damping = float(p.get("damping", p.get("damp", 0.5)))
 			r.spread = float(p.get("spread", 1.0))
 			r.hipass = float(p.get("hipass", 0.0))
 			r.dry = float(p.get("dry", 1.0))

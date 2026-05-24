@@ -1,5 +1,5 @@
 @tool
-extends "res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_track_header_root.gd"
+extends PanelContainer
 
 ## Audacity-style track header: name row + overflow menu, volume row with M/S.
 
@@ -27,11 +27,16 @@ const _CTX_BUS_BASE := 2000
 
 signal track_action_requested(track_id: String, action: StringName, extra: Variant)
 
+var track_index: int = 0
+var on_drop: Callable = Callable()
+
 var _track: CodaTimelineTrack = null
 var _track_index: int = 0
 var _row_h: int = 32
 var _timeline_panel: Node = null
 var _select_group: ButtonGroup = null
+var _selected: bool = false
+var _row: HBoxContainer
 
 var _name_edit: LineEdit
 var _mute_btn: Button
@@ -48,8 +53,44 @@ var _color_picker_dialog: AcceptDialog
 
 
 func _init() -> void:
-	add_theme_constant_override(&"separation", Tokens.SPACING_XS)
 	clip_contents = true
+	_apply_panel_style(false)
+
+
+func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
+	if not (data is Dictionary):
+		return false
+	return (data as Dictionary).has("coda_timeline_track_drag")
+
+
+func _drop_data(_at_position: Vector2, data: Variant) -> void:
+	var d: Dictionary = data as Dictionary
+	var from_i: int = int(d.get("coda_timeline_track_drag", -1))
+	if from_i < 0 or from_i == track_index:
+		return
+	if on_drop.is_valid():
+		on_drop.call(from_i, track_index)
+
+
+func set_selected(selected: bool) -> void:
+	if _selected == selected:
+		return
+	_selected = selected
+	_apply_panel_style(selected)
+
+
+func _apply_panel_style(selected: bool) -> void:
+	if selected:
+		var bg: Color = Tokens.SURFACE_RAISED.lerp(Tokens.ACCENT, 0.10)
+		add_theme_stylebox_override(
+			&"panel",
+			Tokens.make_panel_stylebox(bg, Tokens.ACCENT, Tokens.RADIUS_SM, 2)
+		)
+	else:
+		add_theme_stylebox_override(
+			&"panel",
+			Tokens.make_panel_stylebox(Tokens.SURFACE_RAISED, Tokens.SURFACE_BORDER, Tokens.RADIUS_SM)
+		)
 
 
 func build_ui(
@@ -75,18 +116,24 @@ func build_ui(
 	custom_minimum_size = Vector2(0, row_height)
 	custom_maximum_size = Vector2(4000, row_height)
 
+	_row = HBoxContainer.new()
+	_row.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
+	_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_row.size_flags_vertical = Control.SIZE_FILL
+	add_child(_row)
+
 	var drag_grip := CodaTimelineTrackDragHandleScript.new()
 	drag_grip.track_index = p_track_index
 	drag_grip.timeline_panel = timeline_panel
 	drag_grip.custom_minimum_size = Vector2(20, row_height)
 	drag_grip.size_flags_vertical = Control.SIZE_FILL
-	add_child(drag_grip)
+	_row.add_child(drag_grip)
 
 	var body := HBoxContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.size_flags_vertical = Control.SIZE_FILL
 	body.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
-	add_child(body)
+	_row.add_child(body)
 
 	_accent_bar = Panel.new()
 	_accent_bar.custom_minimum_size = Vector2(3, 0)
@@ -120,7 +167,7 @@ func build_ui(
 	sel_btn.toggled.connect(
 		func(on: bool) -> void:
 			if on and timeline_panel != null and timeline_panel.has_method(&"_set_selected_track_index"):
-				timeline_panel._set_selected_track_index(p_track_index)
+				timeline_panel._set_selected_track_index(p_track_index, true)
 	)
 	top_row.add_child(sel_btn)
 
@@ -185,6 +232,7 @@ func build_ui(
 
 	_build_menus()
 	_apply_track_color_accent()
+	set_selected(p_track_index == selected_index)
 
 
 func set_bus_submenu_entries(entries: Array) -> void:
@@ -297,6 +345,46 @@ func _on_color_picker_confirmed() -> void:
 	if _track == null:
 		return
 	track_action_requested.emit(_track.id, &"set_color", _color_dialog.color)
+
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			if not _is_track_select_interactive_at(get_global_mouse_position()):
+				_select_track_from_header()
+
+
+func _select_track_from_header() -> void:
+	if _timeline_panel == null or not _timeline_panel.has_method(&"_set_selected_track_index"):
+		return
+	_timeline_panel._set_selected_track_index(_track_index, true)
+
+
+func _is_track_select_interactive_at(global_pos: Vector2) -> bool:
+	for c in _track_select_interactive_controls():
+		if c != null and c.is_visible_in_tree() and c.get_global_rect().has_point(global_pos):
+			return true
+	return false
+
+
+func _track_select_interactive_controls() -> Array[Control]:
+	var out: Array[Control] = []
+	if _name_edit != null:
+		out.append(_name_edit)
+	if _menu_btn != null:
+		out.append(_menu_btn)
+	if _mute_btn != null:
+		out.append(_mute_btn)
+	if _solo_btn != null:
+		out.append(_solo_btn)
+	if _volume_slider != null:
+		out.append(_volume_slider)
+	if _row != null and _row.get_child_count() > 0:
+		var drag_grip: Control = _row.get_child(0) as Control
+		if drag_grip != null:
+			out.append(drag_grip)
+	return out
 
 
 func _on_menu_pressed() -> void:

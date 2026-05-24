@@ -22,130 +22,6 @@ const FADER_MIN_DB := -60.0
 const FADER_MAX_DB := 12.0
 const FADER_STEP := 0.1
 
-
-class VerticalDragFader extends Control:
-	signal fader_value_changed(value: float)
-
-	const _Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
-
-	var _value: float = 0.0
-	var _dragging: bool = false
-	var _min_db: float
-	var _max_db: float
-	var _step: float
-
-	func _init(
-		min_db: float,
-		max_db: float,
-		step: float
-	) -> void:
-		_min_db = min_db
-		_max_db = max_db
-		_step = step
-		custom_minimum_size = Vector2(22, 32)
-		size_flags_vertical = Control.SIZE_EXPAND_FILL
-		mouse_default_cursor_shape = Control.CURSOR_MOVE
-		tooltip_text = "Drag vertically to adjust level"
-
-	func get_fader_value() -> float:
-		return _value
-
-	func set_value_no_signal(v: float) -> void:
-		_value = clampf(snapped(v, _step), _min_db, _max_db)
-		queue_redraw()
-
-	func _db_from_local_y(local_y: float) -> float:
-		var h: float = size.y
-		if h <= 0.0:
-			return _value
-		var t: float = 1.0 - clampf(local_y / h, 0.0, 1.0)
-		return lerpf(_min_db, _max_db, t)
-
-	func _y_center_for_db(db: float) -> float:
-		var h: float = size.y
-		var t: float = inverse_lerp(_min_db, _max_db, clampf(db, _min_db, _max_db))
-		return (1.0 - t) * h
-
-	func _apply_from_y(local_y: float) -> void:
-		var nv: float = clampf(snapped(_db_from_local_y(local_y), _step), _min_db, _max_db)
-		if is_equal_approx(nv, _value):
-			return
-		_value = nv
-		queue_redraw()
-		fader_value_changed.emit(_value)
-
-	func _gui_input(event: InputEvent) -> void:
-		if event is InputEventMouseButton:
-			var mb: InputEventMouseButton = event as InputEventMouseButton
-			if mb.button_index != MOUSE_BUTTON_LEFT:
-				return
-			if mb.pressed:
-				_dragging = true
-				_apply_from_y(mb.position.y)
-			else:
-				_dragging = false
-			accept_event()
-		elif event is InputEventMouseMotion and _dragging:
-			var mm: InputEventMouseMotion = event as InputEventMouseMotion
-			_apply_from_y(mm.position.y)
-			accept_event()
-
-	func _draw() -> void:
-		var r: Rect2 = Rect2(Vector2.ZERO, size)
-		draw_rect(r, _Tokens.SURFACE_SUNKEN, true)
-		draw_rect(r, _Tokens.SURFACE_BORDER, false, 1.0)
-		var thumb_h: float = maxf(10.0, size.y * 0.07)
-		var yc: float = _y_center_for_db(_value)
-		var thumb: Rect2 = Rect2(2.0, yc - thumb_h * 0.5, maxf(0.0, size.x - 4.0), thumb_h)
-		draw_rect(thumb, _Tokens.ACCENT_DIM, true)
-
-
-class BusDragPreview extends Control:
-	const _Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
-	var _label: Label
-
-	func _init(p_text: String) -> void:
-		custom_minimum_size = Vector2(104, 120)
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_label = Label.new()
-		_label.text = p_text
-		_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		_label.add_theme_font_size_override(&"font_size", _Tokens.FONT_LABEL_SIZE)
-		_label.add_theme_color_override(&"font_color", _Tokens.TEXT_PRIMARY)
-		_label.set_anchors_preset(Control.PRESET_FULL_RECT)
-		add_child(_label)
-
-	func _draw() -> void:
-		var fill := _Tokens.SURFACE_RAISED
-		fill.a = 0.2
-		draw_rect(Rect2(Vector2.ZERO, size), fill, true)
-		var col: Color = _Tokens.SURFACE_BORDER
-		var margin := 2.0
-		var rect := Rect2(Vector2(margin, margin), size - Vector2(margin * 2.0, margin * 2.0))
-		var dash: float = 5.0
-		var gap: float = 4.0
-		var w: float = 1.25
-		_draw_dashed_line(rect.position, Vector2(rect.end.x, rect.position.y), col, dash, gap, w)
-		_draw_dashed_line(Vector2(rect.end.x, rect.position.y), rect.end, col, dash, gap, w)
-		_draw_dashed_line(rect.end, Vector2(rect.position.x, rect.end.y), col, dash, gap, w)
-		_draw_dashed_line(Vector2(rect.position.x, rect.end.y), rect.position, col, dash, gap, w)
-
-	func _draw_dashed_line(from: Vector2, to: Vector2, color: Color, dash: float, gap: float, width: float) -> void:
-		var full: Vector2 = to - from
-		var total_len: float = full.length()
-		if total_len <= 0.001:
-			return
-		var dir: Vector2 = full / total_len
-		var t: float = 0.0
-		while t < total_len:
-			var a: Vector2 = from + dir * t
-			var seg: float = minf(dash, total_len - t)
-			var b: Vector2 = a + dir * seg
-			draw_line(a, b, color, width)
-			t += dash + gap
-
-
 var _bus: CodaBus = null
 var _syncing_ui: bool = false
 var _is_master_bus: bool = false
@@ -271,6 +147,10 @@ func _ready() -> void:
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			if _bus != null and not _is_bus_select_interactive_at(get_global_mouse_position()):
+				bus_strip_selected.emit(_bus.id)
+			return
 		if mb.button_index != MOUSE_BUTTON_RIGHT or not mb.pressed:
 			return
 		if _bus == null:
@@ -293,6 +173,10 @@ func _get_drag_data(at_position: Vector2) -> Variant:
 
 
 func _is_drag_start_allowed(global_pos: Vector2) -> bool:
+	return not _is_bus_select_interactive_at(global_pos)
+
+
+func _is_bus_select_interactive_at(global_pos: Vector2) -> bool:
 	# Only allow strip drag from empty background / border.
 	# If the pointer is over any interactive child control, do not start DnD.
 	var interactive: Array[Control] = [

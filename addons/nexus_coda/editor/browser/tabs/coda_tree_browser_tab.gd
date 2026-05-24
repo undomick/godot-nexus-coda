@@ -20,8 +20,8 @@ const CodaBrowserTreeScript := preload(
 const BrowserContextMenuScript := preload(
 	"res://addons/nexus_coda/editor/browser_context_menu.gd"
 )
-const BrowserFolderIcons := preload(
-	"res://addons/nexus_coda/editor/browser/coda_browser_folder_icons.gd"
+const CodaBrowserTreeModelScript := preload(
+	"res://addons/nexus_coda/editor/browser/coda_browser_tree_model.gd"
 )
 
 const FOLDER_ICON_DISPLAY_MAX := 16
@@ -51,6 +51,8 @@ var _delete_dialog: ConfirmationDialog
 var _delete_target_id: String = ""
 
 var _rebuild_queued: bool = false
+var _suppress_tree_selection_emit: bool = false
+var _tree_model: CodaBrowserTreeModel = CodaBrowserTreeModelScript.new()
 
 
 func _init() -> void:
@@ -135,7 +137,7 @@ func select_by_id(target_id: String) -> bool:
 	var root_item: TreeItem = _tree.get_root()
 	if root_item == null:
 		return false
-	var found: TreeItem = _find_tree_item_by_node_id(root_item, target_id)
+	var found: TreeItem = CodaBrowserTreeModel.find_tree_item_by_node_id(root_item, target_id)
 	if found == null:
 		return false
 	found.select(0)
@@ -220,107 +222,36 @@ func _deferred_rebuild() -> void:
 	_rebuild_queued = false
 	_rebuild_tree()
 	if not prev_sel.is_empty():
+		_suppress_tree_selection_emit = true
 		_select_tree_item_by_node_id(prev_sel)
-		_emit_selection()
+		_suppress_tree_selection_emit = false
+	# Do not re-emit selection here — structure-only edits (e.g. FX add) would pulse
+	# event_selection_changed and knock the Inspector out of timeline track/clip context.
 
 
 func _rebuild_tree() -> void:
 	if _tree == null or _project == null:
 		return
-	_tree.clear()
 	var root: CodaBrowserNode = _get_root_node()
 	if root == null:
+		_tree.clear()
 		return
-	var root_item: TreeItem = _tree.create_item()
-	root_item.set_metadata(0, root.id)
-	var fl: String = _filter_text_lower()
-	for child in root.children:
-		_build_tree_branch(root_item, child, fl)
-
-
-func _build_tree_branch(parent_item: TreeItem, node: CodaBrowserNode, filter_lower: String) -> void:
-	if not _branch_visible(node, filter_lower):
-		return
-	var item := _tree.create_item(parent_item)
-	item.set_text(0, node.name)
-	item.set_metadata(0, node.id)
-	item.set_editable(0, false)
-	if node.is_folder():
-		item.set_collapsed(false)
-		_apply_folder_item_icon(item, node)
-	elif _is_events_panel and node.kind == CodaBrowserNode.Kind.EVENT:
-		item.set_icon(0, BrowserFolderIcons.get_event_leaf_texture())
-	else:
-		item.set_icon(0, null)
-	for child in node.children:
-		_build_tree_branch(item, child, filter_lower)
-
-
-func _branch_visible(node: CodaBrowserNode, filter_lower: String) -> bool:
-	if filter_lower.is_empty():
-		return true
-	if node.name.to_lower().contains(filter_lower):
-		return true
-	for c in node.children:
-		if _branch_visible(c, filter_lower):
-			return true
-	return false
-
-
-func _folder_contains_leaf_kind(node: CodaBrowserNode, kind: CodaBrowserNode.Kind) -> bool:
-	for c in node.children:
-		if c.kind == kind:
-			return true
-		if c.is_folder() and _folder_contains_leaf_kind(c, kind):
-			return true
-	return false
-
-
-func _apply_folder_item_icon(item: TreeItem, folder: CodaBrowserNode) -> void:
-	var leaf_kind: CodaBrowserNode.Kind = (
-		CodaBrowserNode.Kind.EVENT if _is_events_panel else CodaBrowserNode.Kind.ASSET
-	)
-	var filled: bool = _folder_contains_leaf_kind(folder, leaf_kind)
-	var tex: Texture2D = BrowserFolderIcons.get_folder_texture(item.collapsed, filled)
-	item.set_icon(0, tex)
-
-
-func _refresh_folder_item_icon(item: TreeItem) -> void:
-	if _project == null:
-		return
-	var nid: String = str(item.get_metadata(0))
-	var node: CodaBrowserNode = _project.find_node_anywhere(nid)
-	if node != null and node.is_folder():
-		_apply_folder_item_icon(item, node)
+	_tree_model.rebuild_tree(_tree, root, _filter_text_lower(), _is_events_panel)
 
 
 func _select_tree_item_by_node_id(target_id: String) -> void:
-	if _tree == null:
-		return
-	var root_item: TreeItem = _tree.get_root()
-	if root_item == null:
-		return
-	var found: TreeItem = _find_tree_item_by_node_id(root_item, target_id)
-	if found != null:
-		found.select(0)
-		_tree.scroll_to_item(found)
+	_tree_model.select_tree_item_by_node_id(_tree, target_id)
 
 
-func _find_tree_item_by_node_id(item: TreeItem, target_id: String) -> TreeItem:
-	if str(item.get_metadata(0)) == target_id:
-		return item
-	var child: TreeItem = item.get_first_child()
-	while child != null:
-		var deeper: TreeItem = _find_tree_item_by_node_id(child, target_id)
-		if deeper != null:
-			return deeper
-		child = child.get_next()
-	return null
+func _refresh_folder_item_icon(item: TreeItem) -> void:
+	_tree_model.refresh_folder_item_icon(item, _project, _is_events_panel)
 
 
 # ---------- Selection routing ----------
 
 func _on_item_selected() -> void:
+	if _suppress_tree_selection_emit:
+		return
 	if not _emit_selection():
 		call_deferred(&"_deferred_emit_selection")
 

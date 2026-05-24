@@ -8,6 +8,9 @@ const NCODA_IMPORT_PLUGIN := preload("res://addons/nexus_coda/editor/import/nexu
 const CodaFilesystemContextMenuScript := preload(
 	"res://addons/nexus_coda/editor/coda_filesystem_context_menu_plugin.gd"
 )
+const CodaAudioBusSyncGateScript := preload(
+	"res://addons/nexus_coda/runtime/coda_audio_bus_sync_gate.gd"
+)
 
 const TOOLS_SUBMENU_NAME := "Nexus Coda"
 ## Menu item id (same as index for the single entry — matches Nexus Resonance tool menu pattern).
@@ -26,6 +29,7 @@ var _ncoda_import_plugin: EditorImportPlugin
 var _filesystem_context_menu_plugin: EditorContextMenuPlugin
 ## All open Nexus Coda editor windows (multiple instances supported).
 var _editor_windows: Array[Window] = []
+var _gameplay_was_active: bool = false
 
 
 func _enter_tree() -> void:
@@ -52,9 +56,38 @@ func _enter_tree() -> void:
 	_register_tool_shortcuts()
 	# PopupMenu must have no parent when passed to add_tool_submenu_item (engine requirement).
 	add_tool_submenu_item(TOOLS_SUBMENU_NAME, _tools_menu)
+	set_process(true)
+
+
+func _process(_delta: float) -> void:
+	var playing: bool = get_editor_interface().is_playing_scene()
+	if playing == _gameplay_was_active:
+		return
+	_gameplay_was_active = playing
+	CodaAudioBusSyncGateScript.set_gameplay_active(playing)
+	if playing:
+		_on_editor_play_started()
+	else:
+		_on_editor_play_stopped()
+
+
+func _on_editor_play_started() -> void:
+	_prune_invalid_windows()
+	for w in _editor_windows:
+		if is_instance_valid(w) and w.has_method(&"on_gameplay_play_started"):
+			w.call(&"on_gameplay_play_started")
+
+
+func _on_editor_play_stopped() -> void:
+	_prune_invalid_windows()
+	for w in _editor_windows:
+		if is_instance_valid(w) and w.has_method(&"on_gameplay_play_stopped"):
+			w.call(&"on_gameplay_play_stopped")
 
 
 func _exit_tree() -> void:
+	set_process(false)
+	CodaAudioBusSyncGateScript.set_gameplay_active(false)
 	if _filesystem_context_menu_plugin != null:
 		remove_context_menu_plugin(_filesystem_context_menu_plugin)
 		_filesystem_context_menu_plugin = null
@@ -73,9 +106,7 @@ func _exit_tree() -> void:
 	if _tools_menu != null and is_instance_valid(_tools_menu):
 		_tools_menu.queue_free()
 		_tools_menu = null
-	remove_autoload_singleton(AUTOLOAD_NAME)
-	remove_autoload_singleton(AUTOLOAD_MUSIC_NAME)
-	remove_autoload_singleton(AUTOLOAD_BRIDGE_NAME)
+	# Autoload entries stay in project.godot so plugin reload does not break running scenes.
 
 
 func get_editor_runtime() -> CodaRuntime:
@@ -116,6 +147,13 @@ func _needs_autoload_register_named(autoload_name: String, autoload_path: String
 	if current.is_empty():
 		return true
 	if current == "*" + autoload_path:
+		return false
+	if current.begins_with("*uid://"):
+		var uid_text: String = current.substr(1)
+		var uid_id: int = ResourceUID.text_to_id(uid_text)
+		if uid_id != -1 and ResourceUID.has_id(uid_id):
+			if ResourceUID.get_id_path(uid_id) == autoload_path:
+				return false
 		return false
 	return true
 
