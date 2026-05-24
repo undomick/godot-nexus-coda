@@ -107,11 +107,111 @@ func duplicate_events_node(node_id: String) -> CodaBrowserNode:
 	if parent == null:
 		return null
 	var data: Dictionary = node.to_dictionary()
+	var id_capture: Dictionary = _capture_event_duplicate_ids(data)
+	_strip_ids_for_event_duplicate(data)
 	var copy: CodaBrowserNode = CodaBrowserNode.from_dictionary(data)
+	_remap_event_duplicate_references(copy, id_capture)
 	copy.name = _suggest_duplicate_name(parent, node.name)
 	parent.insert_child_sorted(copy)
 	structure_changed.emit()
 	return copy
+
+
+## Records stable ids before [_strip_ids_for_event_duplicate] so the clone can rebuild references.
+func _capture_event_duplicate_ids(data: Dictionary) -> Dictionary:
+	var out := {
+		"param_ids": [],
+		"graph_node_ids": [],
+	}
+	for pd in data.get("event_parameters", []) as Array:
+		if pd is Dictionary:
+			(out["param_ids"] as Array).append(str((pd as Dictionary).get("id", "")))
+	var graph_raw: Variant = data.get("event_graph", null)
+	if graph_raw is Dictionary:
+		for n_raw in (graph_raw as Dictionary).get("nodes", []) as Array:
+			if n_raw is Dictionary:
+				(out["graph_node_ids"] as Array).append(str((n_raw as Dictionary).get("id", "")))
+	return out
+
+
+func _strip_ids_for_event_duplicate(data: Dictionary) -> void:
+	data.erase("id")
+	for pd in data.get("event_parameters", []) as Array:
+		if pd is Dictionary:
+			(pd as Dictionary).erase("id")
+	for md in data.get("event_modulations", []) as Array:
+		if md is Dictionary:
+			(md as Dictionary).erase("id")
+	var graph_raw: Variant = data.get("event_graph", null)
+	if graph_raw is Dictionary:
+		var graph_d: Dictionary = graph_raw
+		for n_raw in graph_d.get("nodes", []) as Array:
+			if n_raw is Dictionary:
+				(n_raw as Dictionary).erase("id")
+	var timeline_raw: Variant = data.get("event_timeline", null)
+	if timeline_raw is Dictionary:
+		_strip_ids_event_timeline_dict(timeline_raw as Dictionary)
+
+
+func _strip_ids_event_timeline_dict(timeline_d: Dictionary) -> void:
+	for tr_raw in timeline_d.get("tracks", []) as Array:
+		if not tr_raw is Dictionary:
+			continue
+		var tr_d: Dictionary = tr_raw
+		tr_d.erase("id")
+		for fx_raw in tr_d.get("effects", []) as Array:
+			if fx_raw is Dictionary:
+				(fx_raw as Dictionary).erase("id")
+		for c_raw in tr_d.get("clips", []) as Array:
+			if not c_raw is Dictionary:
+				continue
+			var c_d: Dictionary = c_raw
+			c_d.erase("id")
+			for cfx_raw in c_d.get("effects", []) as Array:
+				if cfx_raw is Dictionary:
+					(cfx_raw as Dictionary).erase("id")
+	for m_raw in timeline_d.get("markers", []) as Array:
+		if m_raw is Dictionary:
+			(m_raw as Dictionary).erase("id")
+
+
+func _remap_event_duplicate_references(copy: CodaBrowserNode, id_capture: Dictionary) -> void:
+	var param_remap: Dictionary = {}
+	var old_param_ids: Array = id_capture.get("param_ids", []) as Array
+	for i in range(copy.event_parameters.size()):
+		if i < old_param_ids.size():
+			var old_id: String = str(old_param_ids[i])
+			if not old_id.is_empty():
+				param_remap[old_id] = copy.event_parameters[i].id
+	var node_remap: Dictionary = {}
+	if copy.event_graph != null:
+		var old_node_ids: Array = id_capture.get("graph_node_ids", []) as Array
+		for i in range(copy.event_graph.nodes.size()):
+			if i < old_node_ids.size():
+				var old_nid: String = str(old_node_ids[i])
+				if not old_nid.is_empty():
+					node_remap[old_nid] = copy.event_graph.nodes[i].id
+		for e in copy.event_graph.edges:
+			if node_remap.has(e.from_node_id):
+				e.from_node_id = node_remap[e.from_node_id]
+			if node_remap.has(e.to_node_id):
+				e.to_node_id = node_remap[e.to_node_id]
+	for m in copy.event_modulations:
+		if param_remap.has(m.source_param_id):
+			m.source_param_id = param_remap[m.source_param_id]
+		if node_remap.has(m.target_node_id):
+			m.target_node_id = node_remap[m.target_node_id]
+	if copy.event_timeline != null:
+		_refresh_timeline_effect_ids(copy.event_timeline)
+
+
+func _refresh_timeline_effect_ids(timeline: CodaEventTimeline) -> void:
+	for tr in timeline.tracks:
+		for i in range(tr.effects.size()):
+			tr.effects[i] = tr.effects[i].clone_new_id()
+		for clip in tr.clips:
+			for j in range(clip.effects.size()):
+				clip.effects[j] = clip.effects[j].clone_new_id()
 
 
 func _suggest_duplicate_name(parent: CodaBrowserNode, base_name: String) -> String:
