@@ -2,7 +2,7 @@
 class_name CodaRuntimeParameterPipeline
 extends RefCounted
 
-## Parameter smoothing, global parameters, and voice modulation extracted from [CodaRuntime].
+## Parameter smoothing, globals, and per-voice modulation for CodaRuntime.
 
 const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
 
@@ -39,23 +39,25 @@ func build_param_values(event: CodaBrowserNode, user_params: Dictionary) -> Dict
 		if k.begins_with("_coda_"):
 			continue
 		var val: Variant = user_params[key]
-		if event != null:
-			var match_id: String = ""
-			for p in event.event_parameters:
-				if p.id == k:
-					match_id = p.id
-					break
-			if match_id.is_empty():
-				var lookup: String = k.to_lower()
-				for p in event.event_parameters:
-					if String(p.param_name).strip_edges().to_lower() == lookup:
-						match_id = p.id
-						break
-			if not match_id.is_empty():
-				values[match_id] = CodaEventParameter.to_float_value(val)
-				continue
-		values[k] = CodaEventParameter.to_float_value(val)
+		var param_id: String = resolve_param_id(event, k)
+		if not param_id.is_empty():
+			values[param_id] = CodaEventParameter.to_float_value(val)
+		else:
+			values[k] = CodaEventParameter.to_float_value(val)
 	return values
+
+
+func resolve_param_id(event: CodaBrowserNode, name_or_id: String) -> String:
+	if event == null:
+		return ""
+	for p in event.event_parameters:
+		if p.id == name_or_id:
+			return p.id
+	var lookup: String = name_or_id.to_lower()
+	for p in event.event_parameters:
+		if String(p.param_name).strip_edges().to_lower() == lookup:
+			return p.id
+	return ""
 
 
 func find_event_param(event: CodaBrowserNode, param_id: String) -> CodaEventParameter:
@@ -86,7 +88,7 @@ func apply_global_parameters() -> void:
 			continue
 		for gname in _global_params.keys():
 			var gkey: String = String(gname)
-			apply_parameter_without_segment_notify(th, gkey, _global_params[gname])
+			apply_parameter_without_segment_notify(th, gkey, _global_params[gkey])
 			_runtime.notify_global_param_applied(th, gkey)
 
 
@@ -99,17 +101,7 @@ func apply_parameter_without_segment_notify(
 	if event == null:
 		handle.param_values[name_or_id] = value
 		return
-	var param_id: String = ""
-	for p in event.event_parameters:
-		if p.id == name_or_id:
-			param_id = p.id
-			break
-	if param_id.is_empty():
-		var lookup: String = name_or_id.to_lower()
-		for p in event.event_parameters:
-			if String(p.param_name).strip_edges().to_lower() == lookup:
-				param_id = p.id
-				break
+	var param_id: String = resolve_param_id(event, name_or_id)
 	if param_id.is_empty():
 		handle.param_values[name_or_id] = value
 		return
@@ -152,19 +144,12 @@ func modulation_voice_levels(
 					voice_volume_db += out_val
 				CodaModulationScript.TargetProperty.SOUND_PITCH_SCALE:
 					voice_pitch *= out_val
-	if handle.blend_weight < 1.0 and handle.blend_weight > 0.0:
-		voice_volume_db += linear_to_db(handle.blend_weight)
-	elif handle.blend_weight <= 0.0:
-		voice_volume_db = -80.0
+	voice_volume_db = volume_db_with_blend(voice_volume_db, handle.blend_weight)
 	return {"volume_db": voice_volume_db, "pitch_scale": max(0.05, voice_pitch)}
 
 
 func apply_modulations(handle: CodaEventHandle) -> void:
 	if handle._player == null or not is_instance_valid(handle._player):
-		return
-	var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
-	if event == null or event.event_modulations.is_empty():
-		_apply_voice_base_with_blend(handle)
 		return
 	var levels: Dictionary = modulation_voice_levels(
 		handle,
@@ -176,15 +161,12 @@ func apply_modulations(handle: CodaEventHandle) -> void:
 	handle._player.pitch_scale = float(levels.get("pitch_scale", handle.base_pitch_scale))
 
 
-func _apply_voice_base_with_blend(handle: CodaEventHandle) -> void:
-	if handle._player == null or not is_instance_valid(handle._player):
-		return
-	var voice_volume_db: float = handle.base_volume_db
-	if handle.blend_weight < 1.0 and handle.blend_weight > 0.0:
-		voice_volume_db += linear_to_db(handle.blend_weight)
-	elif handle.blend_weight <= 0.0:
-		voice_volume_db = -80.0
-	handle._player.volume_db = voice_volume_db
+static func volume_db_with_blend(base_db: float, blend_weight: float) -> float:
+	if blend_weight < 1.0 and blend_weight > 0.0:
+		return base_db + linear_to_db(blend_weight)
+	if blend_weight <= 0.0:
+		return -80.0
+	return base_db
 
 
 static func linear_to_db(linear: float) -> float:

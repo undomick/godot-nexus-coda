@@ -2,15 +2,10 @@
 class_name CodaVoiceFader
 extends RefCounted
 
-const CodaTimelineClipScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
-)
-
-## Tweens [AudioStreamPlayer.volume_db] on behalf of [CodaRuntime]. Cancels stale fades when a
-## pooled player is reused so volume jumps never leak across voices.
+## Volume tweens for pooled timeline/graph voices. Cancels stale fades on player reuse.
 
 var _owner: Node
-var _tweens: Dictionary = {}  ## player_instance_id (int) -> Tween
+var _tweens: Dictionary = {}
 
 
 func _init(owner: Node) -> void:
@@ -34,18 +29,11 @@ func fade_volume_db(
 ) -> void:
 	cancel(player)
 	if player == null or not is_instance_valid(player):
-		if on_complete.is_valid():
-			on_complete.call()
+		_call_if_valid(on_complete)
 		return
-	if fade_ms <= 0:
+	if fade_ms <= 0 or _owner == null or not is_instance_valid(_owner):
 		player.volume_db = target_db
-		if on_complete.is_valid():
-			on_complete.call()
-		return
-	if _owner == null or not is_instance_valid(_owner):
-		player.volume_db = target_db
-		if on_complete.is_valid():
-			on_complete.call()
+		_call_if_valid(on_complete)
 		return
 	var tw: Tween = _owner.create_tween()
 	tw.set_trans(Tween.TRANS_LINEAR)
@@ -56,19 +44,18 @@ func fade_volume_db(
 	tw.finished.connect(
 		func() -> void:
 			_tweens.erase(key)
-			if on_complete.is_valid():
-				on_complete.call(),
+			_call_if_valid(on_complete),
 		CONNECT_ONE_SHOT
 	)
 
 
-static func clip_fade_db_offset(clip, cursor_seconds: float) -> float:
+static func clip_fade_db_offset(clip: CodaTimelineClip, cursor_seconds: float) -> float:
 	if clip == null:
 		return 0.0
-	var fade_in: float = maxf(0.0, float(clip.fade_in_seconds))
-	var fade_out: float = maxf(0.0, float(clip.fade_out_seconds))
-	var start_seconds: float = float(clip.start_seconds)
-	var end_seconds: float = start_seconds + float(clip.duration_seconds)
+	var fade_in: float = maxf(0.0, clip.fade_in_seconds)
+	var fade_out: float = maxf(0.0, clip.fade_out_seconds)
+	var start_seconds: float = clip.start_seconds
+	var end_seconds: float = clip.end_seconds()
 	var rel: float = cursor_seconds - start_seconds
 	if rel < 0.0:
 		return -80.0
@@ -84,3 +71,8 @@ static func linear_to_db(linear: float) -> float:
 	if linear <= 0.0:
 		return -80.0
 	return 20.0 * log(linear) / log(10.0)
+
+
+static func _call_if_valid(cb: Callable) -> void:
+	if cb.is_valid():
+		cb.call()

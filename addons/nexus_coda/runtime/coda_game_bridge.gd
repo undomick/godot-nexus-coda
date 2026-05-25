@@ -1,12 +1,8 @@
 @tool
 extends Node
 
-## Dispatches gameplay signals to Coda actions using [CodaGameSyncRule] entries from the
-## loaded project or bank manifest.
+## Routes gameplay signals to Coda actions via CodaGameSyncRule entries on the loaded project.
 
-const CodaGameSyncRuleScript := preload(
-	"res://addons/nexus_coda/editor/browser/coda_game_sync_rule.gd"
-)
 const CodaGameSyncContextScript := preload(
 	"res://addons/nexus_coda/runtime/coda_game_sync_context.gd"
 )
@@ -88,7 +84,7 @@ func connect_game_signals(root: Node) -> void:
 	disconnect_game_signals()
 	if root == null:
 		return
-	_connect_node_signals_recursive(root, root)
+	_connect_node_signals_recursive(root)
 
 
 func disconnect_game_signals() -> void:
@@ -101,7 +97,7 @@ func disconnect_game_signals() -> void:
 	_signal_connections.clear()
 
 
-func _connect_node_signals_recursive(node: Node, _root: Node) -> void:
+func _connect_node_signals_recursive(node: Node) -> void:
 	for sig_info in node.get_signal_list():
 		var sig_name: String = String(sig_info.get("name", ""))
 		if sig_name.is_empty() or sig_name.begins_with("_"):
@@ -109,13 +105,14 @@ func _connect_node_signals_recursive(node: Node, _root: Node) -> void:
 		if not _rules_want_signal(sig_name):
 			continue
 		var cb: Callable = _make_game_signal_callback(sig_name)
-		if not node.is_connected(sig_name, cb):
-			node.connect(sig_name, cb)
-			_signal_connections.append(
-				{"source": node, "signal": StringName(sig_name), "callable": cb}
-			)
+		if node.is_connected(sig_name, cb):
+			continue
+		node.connect(sig_name, cb)
+		_signal_connections.append(
+			{"source": node, "signal": StringName(sig_name), "callable": cb}
+		)
 	for child in node.get_children():
-		_connect_node_signals_recursive(child, _root)
+		_connect_node_signals_recursive(child)
 
 
 func _rules_want_signal(signal_name: String) -> bool:
@@ -125,9 +122,8 @@ func _rules_want_signal(signal_name: String) -> bool:
 	return false
 
 
-## Callable.bind() appends bound args after signal args, so the signal name must be captured
-## per connection instead of bound onto a shared handler (otherwise arg0 becomes the name).
 func _make_game_signal_callback(signal_name: String) -> Callable:
+	# Capture the name per connection; Callable.bind would shift signal args.
 	var captured_name: String = signal_name
 	return func(arg0: Variant = null) -> void:
 		emit_game_signal(captured_name, payload_from_signal_arg(arg0))

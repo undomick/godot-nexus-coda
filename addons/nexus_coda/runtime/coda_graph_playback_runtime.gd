@@ -12,6 +12,7 @@ const CodaRuntimeParameterPipelineScript := preload(
 
 var _runtime: CodaRuntime = null
 var _voice_fader: CodaVoiceFader = null
+var _paused_graph_handles: Array[CodaEventHandle] = []
 
 
 func setup(runtime: CodaRuntime, voice_fader: CodaVoiceFader) -> void:
@@ -40,49 +41,21 @@ func start_graph_event(
 	handle._bus_name = _runtime.bus_name
 	handle.timeline_runtime = _runtime
 
-	var active_handles: Dictionary = _runtime.get_active_handles()
 	var parallel_entries: Array = _split_parallel_entries(plan_entries)
 	var queued_after_parallel: Array = plan_entries.slice(parallel_entries.size())
-
-	var primary_player: AudioStreamPlayer = null
-	var parallel_started_indices: Dictionary = {}
-	for i in parallel_entries.size():
-		var entry: Dictionary = parallel_entries[i] as Dictionary
-		var tail: Array = parallel_entries.slice(i + 1)
-		tail.append_array(queued_after_parallel)
-		var player: AudioStreamPlayer = _start_player_for_entry(
-			entry, params, tail, handle.loop
-		)
-		if player == null:
-			continue
-		parallel_started_indices[i] = true
-		if primary_player == null:
-			primary_player = player
-			handle.current_sound_id = String(entry.get("sound_id", ""))
-			handle.base_volume_db = float(entry.get("volume_db", 0.0)) + float(params.get("volume_db", 0.0))
-			handle.base_pitch_scale = float(entry.get("pitch_scale", 1.0)) * float(params.get("pitch_scale", 1.0))
-			handle.blend_weight = float(entry.get("blend_weight", 1.0))
-			handle._bind_player(player)
-			handle.params["_coda_playback_gen"] = int(player.get_meta(&"_coda_playback_gen", -1))
-			active_handles[player.get_instance_id()] = handle
-		else:
-			var sib_h: CodaEventHandle = _make_sibling_handle(handle, entry, player)
-			handle.graph_parallel_siblings.append(sib_h)
-			active_handles[player.get_instance_id()] = sib_h
-	if primary_player == null:
+	var step: Dictionary = _start_parallel_step(
+		handle, parallel_entries, queued_after_parallel, params, handle.loop
+	)
+	if step.get("primary_player") == null:
 		return null
-	if parallel_started_indices.size() < parallel_entries.size():
-		_runtime.runtime_report_pool_exhausted({
-			"mode": "graph_blend",
-			"path": event.name,
-			"active": _runtime.active_voice_count(),
-			"pool_size": _runtime.runtime_pool_size(),
-			"detail": "voice pool exhausted; BLEND step incomplete for '%s' (%d/%d voices)"
-				% [event.name, parallel_started_indices.size(), parallel_entries.size()],
-		})
+	var started_indices: Dictionary = step.get("started_indices", {}) as Dictionary
+	if started_indices.size() < parallel_entries.size():
+		_report_blend_pool_exhausted(
+			event.name, started_indices.size(), parallel_entries.size()
+		)
 		handle.params["_coda_full_plan"] = plan_entries
 		handle.params["_coda_plan"] = _graph_plan_after_incomplete_parallel_step(
-			parallel_entries, parallel_started_indices, queued_after_parallel
+			parallel_entries, started_indices, queued_after_parallel
 		)
 		mark_plan_resume(handle)
 		_runtime.runtime_emit_voice_started(handle)
@@ -175,6 +148,166 @@ func unmark_plan_resume(handle: CodaEventHandle) -> void:
 		resume_handles.remove_at(idx)
 
 
+func get_paused_graph_handles() -> Array[CodaEventHandle]:
+	return _paused_graph_handles
+
+
+func drop_paused_preview_state(handle: CodaEventHandle) -> void:
+	if handle == null:
+		return
+	var idx: int = _paused_graph_handles.find(handle)
+	if idx >= 0:
+		_paused_graph_handles.remove_at(idx)
+	handle.params.erase("_coda_graph_pause_snapshot")
+
+
+func finalize_all_paused_previews() -> void:
+	for item in _paused_graph_handles.duplicate():
+		var h: CodaEventHandle = item as CodaEventHandle
+		if h == null:
+			continue
+		_finalize_paused_preview(h)
+	_paused_graph_handles.clear()
+
+
+func pause_graph_preview(handle: CodaEventHandle) -> void:
+	if handle == null or handle.is_timeline:
+		return
+	var snapshot: Dictionary = {}
+	_snapshot_pause_player(handle, snapshot)
+	for sib in handle.graph_parallel_siblings:
+		if sib == null:
+			continue
+		_snapshot_pause_player(sib, snapshot)
+	handle.params["_coda_graph_pause_snapshot"] = snapshot
+	if not _paused_graph_handles.has(handle):
+		_paused_graph_handles.append(handle)
+
+
+func resume_graph_preview(handle: CodaEventHandle) -> void:
+	if handle == null or handle.is_timeline:
+		return
+	var snapshot: Variant = handle.params.get("_coda_graph_pause_snapshot", {})
+	drop_paused_preview_state(handle)
+	if typeof(snapshot) != TYPE_DICTIONARY:
+		return
+	var snap: Dictionary = snapshot as Dictionary
+	if snap.is_empty():
+		return
+	var expected: int = snap.size()
+	var resumed: int = 0
+	if _resume_paused_player(handle, handle, snap):
+		resumed += 1
+	for sib in handle.graph_parallel_siblings:
+		if sib == null:
+			continue
+		if _resume_paused_player(handle, sib, snap):
+			resumed += 1
+	if resumed != expected and handle._alive:
+		_runtime.stop(handle)
+
+
+func _finalize_paused_preview(handle: CodaEventHandle) -> void:
+	if handle == null:
+		return
+	drop_paused_preview_state(handle)
+	if not handle._paused:
+		return
+	handle._paused = false
+	unmark_plan_resume(handle)
+	stop_parallel_siblings(handle)
+	handle.clear_player_binding()
+	var was_alive: bool = handle._alive
+	if was_alive:
+		handle._alive = false
+		handle.finished.emit()
+	_runtime.runtime_emit_voice_finished(handle)
+
+
+func _snapshot_pause_player(voice: CodaEventHandle, snapshot: Dictionary) -> void:
+	if voice._player == null or not is_instance_valid(voice._player):
+		return
+	var pk: int = voice._player.get_instance_id()
+	var pos: float = 0.0
+	if voice._player.playing:
+		pos = voice._player.get_playback_position()
+	_runtime.get_active_handles().erase(pk)
+	if voice._player.playing:
+		voice._player.stop()
+	snapshot[str(pk)] = {
+		"position": pos,
+		"gen": int(voice._player.get_meta(&"_coda_playback_gen", -1)),
+	}
+
+
+func _resume_paused_player(
+	owner: CodaEventHandle, voice: CodaEventHandle, snapshot: Dictionary
+) -> bool:
+	if voice._player == null or not is_instance_valid(voice._player):
+		return false
+	if voice._player.stream == null:
+		return false
+	var key: String = str(voice._player.get_instance_id())
+	var saved: Variant = snapshot.get(key, null)
+	if typeof(saved) != TYPE_DICTIONARY:
+		return false
+	var saved_d: Dictionary = saved as Dictionary
+	var expected_gen: int = int(saved_d.get("gen", -2))
+	if int(voice._player.get_meta(&"_coda_playback_gen", -1)) != expected_gen:
+		return false
+	var at: float = maxf(0.0, float(saved_d.get("position", 0.0)))
+	voice._player.play(at)
+	var gen: int = int(voice._player.get_meta(&"_coda_playback_gen", -1))
+	var active_handles: Dictionary = _runtime.get_active_handles()
+	if voice == owner:
+		owner.params["_coda_playback_gen"] = gen
+		active_handles[voice._player.get_instance_id()] = owner
+	else:
+		voice.params["_coda_playback_gen"] = gen
+		active_handles[voice._player.get_instance_id()] = voice
+	return true
+
+
+func _start_parallel_step(
+	owner: CodaEventHandle,
+	parallel_entries: Array,
+	plan_tail: Array,
+	params: Dictionary,
+	event_loops: bool,
+) -> Dictionary:
+	var active_handles: Dictionary = _runtime.get_active_handles()
+	var primary_player: AudioStreamPlayer = null
+	var started_indices: Dictionary = {}
+	for i in parallel_entries.size():
+		var entry: Dictionary = parallel_entries[i] as Dictionary
+		var tail: Array = parallel_entries.slice(i + 1)
+		tail.append_array(plan_tail)
+		var player: AudioStreamPlayer = _start_player_for_entry(entry, params, tail, event_loops)
+		if player == null:
+			continue
+		started_indices[i] = true
+		if primary_player == null:
+			_bind_primary_player(owner, entry, player, params)
+			active_handles[player.get_instance_id()] = owner
+			primary_player = player
+		else:
+			var sib_h: CodaEventHandle = _make_sibling_handle(owner, entry, player)
+			owner.graph_parallel_siblings.append(sib_h)
+			active_handles[player.get_instance_id()] = sib_h
+	return {"primary_player": primary_player, "started_indices": started_indices}
+
+
+func _bind_primary_player(
+	owner: CodaEventHandle, entry: Dictionary, player: AudioStreamPlayer, params: Dictionary
+) -> void:
+	owner.current_sound_id = String(entry.get("sound_id", ""))
+	owner.base_volume_db = float(entry.get("volume_db", 0.0)) + float(params.get("volume_db", 0.0))
+	owner.base_pitch_scale = float(entry.get("pitch_scale", 1.0)) * float(params.get("pitch_scale", 1.0))
+	owner.blend_weight = float(entry.get("blend_weight", 1.0))
+	owner._bind_player(player)
+	owner.params["_coda_playback_gen"] = int(player.get_meta(&"_coda_playback_gen", -1))
+
+
 func _split_parallel_entries(entries: Array) -> Array:
 	return CodaRuntimeGraphPlaybackScript.split_parallel_entries(entries)
 
@@ -230,35 +363,15 @@ func _restart_graph_loop_from_full_plan(h: CodaEventHandle) -> bool:
 	var plan_entries: Array = full as Array
 	var parallel_entries: Array = _split_parallel_entries(plan_entries)
 	var queued_after_parallel: Array = plan_entries.slice(parallel_entries.size())
-	var active_handles: Dictionary = _runtime.get_active_handles()
-	var primary_player: AudioStreamPlayer = null
-	var parallel_started_indices: Dictionary = {}
-	for i in parallel_entries.size():
-		var entry: Dictionary = parallel_entries[i] as Dictionary
-		var tail: Array = parallel_entries.slice(i + 1)
-		tail.append_array(queued_after_parallel)
-		var player: AudioStreamPlayer = _start_player_for_entry(entry, h.params, tail, h.loop)
-		if player == null:
-			continue
-		parallel_started_indices[i] = true
-		if primary_player == null:
-			primary_player = player
-			h.current_sound_id = String(entry.get("sound_id", ""))
-			h.base_volume_db = float(entry.get("volume_db", 0.0)) + float(h.params.get("volume_db", 0.0))
-			h.base_pitch_scale = float(entry.get("pitch_scale", 1.0)) * float(h.params.get("pitch_scale", 1.0))
-			h.blend_weight = float(entry.get("blend_weight", 1.0))
-			h._bind_player(player)
-			h.params["_coda_playback_gen"] = int(player.get_meta(&"_coda_playback_gen", -1))
-			active_handles[player.get_instance_id()] = h
-		else:
-			var sib_h: CodaEventHandle = _make_sibling_handle(h, entry, player)
-			h.graph_parallel_siblings.append(sib_h)
-			active_handles[player.get_instance_id()] = sib_h
-	if primary_player == null:
+	var step: Dictionary = _start_parallel_step(
+		h, parallel_entries, queued_after_parallel, h.params, h.loop
+	)
+	if step.get("primary_player") == null:
 		return false
-	if parallel_started_indices.size() < parallel_entries.size():
+	var started_indices: Dictionary = step.get("started_indices", {}) as Dictionary
+	if started_indices.size() < parallel_entries.size():
 		h.params["_coda_plan"] = _graph_plan_after_incomplete_parallel_step(
-			parallel_entries, parallel_started_indices, queued_after_parallel
+			parallel_entries, started_indices, queued_after_parallel
 		)
 		mark_plan_resume(h)
 		return false
@@ -337,56 +450,22 @@ func _try_finish_graph_handle(h: CodaEventHandle) -> void:
 		var plan_slice: Array = queued as Array
 		var parallel_entries: Array = _split_parallel_entries(plan_slice)
 		var rest: Array = plan_slice.slice(parallel_entries.size())
-		var active_handles: Dictionary = _runtime.get_active_handles()
-		var primary_player: AudioStreamPlayer = null
-		var parallel_started_indices: Dictionary = {}
-		for i in parallel_entries.size():
-			var entry: Dictionary = parallel_entries[i] as Dictionary
-			var tail: Array = parallel_entries.slice(i + 1)
-			tail.append_array(rest)
-			var player: AudioStreamPlayer = _start_player_for_entry(entry, h.params, tail, h.loop)
-			if player == null:
-				continue
-			parallel_started_indices[i] = true
-			if primary_player == null:
-				primary_player = player
-				h.current_sound_id = String(entry.get("sound_id", ""))
-				h.base_volume_db = float(entry.get("volume_db", 0.0)) + float(h.params.get("volume_db", 0.0))
-				h.base_pitch_scale = float(entry.get("pitch_scale", 1.0)) * float(h.params.get("pitch_scale", 1.0))
-				h.blend_weight = float(entry.get("blend_weight", 1.0))
-				h._bind_player(player)
-				h.params["_coda_playback_gen"] = int(player.get_meta(&"_coda_playback_gen", -1))
-				active_handles[player.get_instance_id()] = h
-			else:
-				var sib_h: CodaEventHandle = _make_sibling_handle(h, entry, player)
-				h.graph_parallel_siblings.append(sib_h)
-				active_handles[player.get_instance_id()] = sib_h
-		if primary_player != null:
-			if parallel_started_indices.size() < parallel_entries.size():
-				_runtime.runtime_report_pool_exhausted({
-					"mode": "graph_blend",
-					"path": h.event_path,
-					"active": _runtime.active_voice_count(),
-					"pool_size": _runtime.runtime_pool_size(),
-					"detail": "voice pool exhausted; BLEND step incomplete for '%s' (%d/%d voices)"
-						% [h.event_path, parallel_started_indices.size(), parallel_entries.size()],
-				})
+		var step: Dictionary = _start_parallel_step(h, parallel_entries, rest, h.params, h.loop)
+		if step.get("primary_player") != null:
+			var started_indices: Dictionary = step.get("started_indices", {}) as Dictionary
+			if started_indices.size() < parallel_entries.size():
+				_report_blend_pool_exhausted(
+					h.event_path, started_indices.size(), parallel_entries.size()
+				)
 				h.params["_coda_plan"] = _graph_plan_after_incomplete_parallel_step(
-					parallel_entries, parallel_started_indices, rest
+					parallel_entries, started_indices, rest
 				)
 				mark_plan_resume(h)
 				return
 			h.params["_coda_plan"] = rest
 			unmark_plan_resume(h)
 			return
-		_runtime.runtime_report_pool_exhausted({
-			"mode": "graph_sequence",
-			"path": h.event_path,
-			"active": _runtime.active_voice_count(),
-			"pool_size": _runtime.runtime_pool_size(),
-			"detail": "voice pool exhausted; sequence paused for '%s' (%d entries remain)"
-				% [h.event_path, plan_slice.size()],
-		})
+		_report_sequence_pool_exhausted(h.event_path, plan_slice.size())
 		mark_plan_resume(h)
 		return
 	if h.loop:
@@ -398,3 +477,25 @@ func _try_finish_graph_handle(h: CodaEventHandle) -> void:
 	unmark_plan_resume(h)
 	h._on_player_finished()
 	_runtime.runtime_emit_voice_finished(h)
+
+
+func _report_blend_pool_exhausted(path_label: String, started: int, total: int) -> void:
+	_runtime.runtime_report_pool_exhausted({
+		"mode": "graph_blend",
+		"path": path_label,
+		"active": _runtime.active_voice_count(),
+		"pool_size": _runtime.runtime_pool_size(),
+		"detail": "voice pool exhausted; BLEND step incomplete for '%s' (%d/%d voices)"
+			% [path_label, started, total],
+	})
+
+
+func _report_sequence_pool_exhausted(path_label: String, remaining: int) -> void:
+	_runtime.runtime_report_pool_exhausted({
+		"mode": "graph_sequence",
+		"path": path_label,
+		"active": _runtime.active_voice_count(),
+		"pool_size": _runtime.runtime_pool_size(),
+		"detail": "voice pool exhausted; sequence paused for '%s' (%d entries remain)"
+			% [path_label, remaining],
+	})

@@ -2,36 +2,29 @@
 extends RefCounted
 class_name CodaGraphScheduler
 
-## Single-shot evaluation of an event graph: starting from the trigger, walk down the graph,
-## decide which leaf SOUND nodes to play and in what order. Phase 4: SWITCH and BLEND now
-## consult parameter values to pick a branch.
-##
-## Returned plan entries are Dictionaries:
-##   { "audio_path": String, "volume_db": float, "pitch_scale": float, "loop": bool, "sound_id": String,
-##     "blend_weight": float (1.0 by default; <1 for the secondary side of a BLEND crossfade) }
+## One-shot event graph evaluation: trigger walk to ordered SOUND plan entries.
 
 const NodeData := preload("res://addons/nexus_coda/editor/browser/coda_event_graph_node_data.gd")
 
-## Resolves an event graph into a flat play list. `param_values` maps parameter id (String) to
-## current value (number/bool). Used by SWITCH and BLEND to pick branches.
-##
-## `seed` lets callers (preview vs. gameplay) get deterministic results when needed.
-## Returns `{ "entries": Array, "event_loop": bool }`. [code]event_loop[/code] is true when a
-## visited SEQUENCE container had its Loop toggle enabled (restart the flattened plan).
+## Returns `{ "entries": Array, "event_loop": bool }`.
 static func plan(graph: CodaEventGraph, param_values: Dictionary = {}, seed: int = 0) -> Dictionary:
-	var out: Array = []
 	if graph == null:
-		return {"entries": out, "event_loop": false}
+		return _empty_plan()
 	var trigger: CodaEventGraphNodeData = graph.find_first_of_kind(NodeData.Kind.TRIGGER)
 	if trigger == null:
-		return {"entries": out, "event_loop": false}
+		return _empty_plan()
 	var rng := RandomNumberGenerator.new()
 	if seed != 0:
 		rng.seed = seed
 	else:
 		rng.randomize()
+	var out: Array = []
 	var event_loop: bool = _walk(graph, trigger, rng, param_values, out)
 	return {"entries": out, "event_loop": event_loop}
+
+
+static func _empty_plan() -> Dictionary:
+	return {"entries": [], "event_loop": false}
 
 
 static func _walk(
@@ -46,11 +39,9 @@ static func _walk(
 	var request_loop: bool = false
 	match node.kind:
 		NodeData.Kind.TRIGGER:
-			for child in graph.get_children(node.id):
-				request_loop = _walk(graph, child, rng, param_values, out) or request_loop
+			request_loop = _walk_children(graph, node, rng, param_values, out)
 		NodeData.Kind.SEQUENCE:
-			for child in graph.get_children(node.id):
-				request_loop = _walk(graph, child, rng, param_values, out) or request_loop
+			request_loop = _walk_children(graph, node, rng, param_values, out)
 			if bool(node.properties.get("loop", false)):
 				request_loop = true
 		NodeData.Kind.RANDOM:
@@ -64,18 +55,37 @@ static func _walk(
 		NodeData.Kind.BLEND:
 			request_loop = _walk_blend(graph, node, rng, param_values, out) or request_loop
 		NodeData.Kind.SOUND:
-			var path: String = String(node.properties.get("audio_path", "")).strip_edges()
-			if path.is_empty():
-				return request_loop
-			out.append({
-				"audio_path": path,
-				"volume_db": float(node.properties.get("volume_db", 0.0)),
-				"pitch_scale": float(node.properties.get("pitch_scale", 1.0)),
-				"loop": bool(node.properties.get("loop", false)),
-				"sound_id": node.id,
-				"blend_weight": 1.0,
-			})
+			var entry: Dictionary = _sound_plan_entry(node)
+			if not entry.is_empty():
+				out.append(entry)
 	return request_loop
+
+
+static func _walk_children(
+	graph: CodaEventGraph,
+	node: CodaEventGraphNodeData,
+	rng: RandomNumberGenerator,
+	param_values: Dictionary,
+	out: Array
+) -> bool:
+	var request_loop: bool = false
+	for child in graph.get_children(node.id):
+		request_loop = _walk(graph, child, rng, param_values, out) or request_loop
+	return request_loop
+
+
+static func _sound_plan_entry(node: CodaEventGraphNodeData) -> Dictionary:
+	var path: String = String(node.properties.get("audio_path", "")).strip_edges()
+	if path.is_empty():
+		return {}
+	return {
+		"audio_path": path,
+		"volume_db": float(node.properties.get("volume_db", 0.0)),
+		"pitch_scale": float(node.properties.get("pitch_scale", 1.0)),
+		"loop": bool(node.properties.get("loop", false)),
+		"sound_id": node.id,
+		"blend_weight": 1.0,
+	}
 
 
 static func _pick_weighted(
@@ -84,9 +94,7 @@ static func _pick_weighted(
 	rng: RandomNumberGenerator
 ) -> CodaEventGraphNodeData:
 	var weights_raw: Variant = random_node.properties.get("weights", [])
-	var weights: Array = []
-	if weights_raw is Array:
-		weights = weights_raw
+	var weights: Array = weights_raw if weights_raw is Array else []
 	var total: float = 0.0
 	var resolved: Array = []
 	for i in children.size():
@@ -118,12 +126,8 @@ static func _walk_switch(
 	var children: Array = graph.get_children(node.id)
 	if children.is_empty():
 		return false
-	var idx: int = 0
 	var param_id: String = String(node.properties.get("parameter_id", ""))
-	if not param_id.is_empty() and param_values.has(param_id):
-		var v: Variant = param_values[param_id]
-		idx = int(round(float(v) if typeof(v) in [TYPE_FLOAT, TYPE_INT] else 0.0))
-	idx = clamp(idx, 0, children.size() - 1)
+	var idx: int = _param_switch_index(param_values, param_id, children.size())
 	return _walk(graph, children[idx], rng, param_values, out)
 
 
@@ -140,19 +144,14 @@ static func _walk_blend(
 	if children.size() == 1:
 		return _walk(graph, children[0], rng, param_values, out)
 	var param_id: String = String(node.properties.get("parameter_id", ""))
-	var t: float = 0.0
-	if not param_id.is_empty() and param_values.has(param_id):
-		var v: Variant = param_values[param_id]
-		t = float(v) if typeof(v) in [TYPE_FLOAT, TYPE_INT] else 0.0
-	t = clamp(t, 0.0, 1.0)
+	var t: float = _param_blend_t(param_values, param_id)
 	var idx_f: float = t * (children.size() - 1)
 	var lo: int = int(floor(idx_f))
 	var hi: int = int(ceil(idx_f))
 	if lo == hi:
 		return _walk(graph, children[lo], rng, param_values, out)
 	var frac: float = idx_f - lo
-	# Interleave branch steps so SEQUENCE children crossfade in lockstep instead of
-	# flattening every sound into one parallel burst.
+	# Interleave branch steps so SEQUENCE children crossfade in lockstep.
 	var lo_plan: Array = []
 	var hi_plan: Array = []
 	var lo_loop: bool = _walk(graph, children[lo], rng, param_values, lo_plan)
@@ -170,3 +169,18 @@ static func _walk_blend(
 			d2["blend_parallel_step"] = step
 			out.append(d2)
 	return lo_loop or hi_loop
+
+
+static func _param_switch_index(param_values: Dictionary, param_id: String, child_count: int) -> int:
+	if param_id.is_empty() or not param_values.has(param_id):
+		return 0
+	var v: Variant = param_values[param_id]
+	var idx: int = int(round(float(v) if typeof(v) in [TYPE_FLOAT, TYPE_INT] else 0.0))
+	return clampi(idx, 0, child_count - 1)
+
+
+static func _param_blend_t(param_values: Dictionary, param_id: String) -> float:
+	if param_id.is_empty() or not param_values.has(param_id):
+		return 0.0
+	var v: Variant = param_values[param_id]
+	return clampf(float(v) if typeof(v) in [TYPE_FLOAT, TYPE_INT] else 0.0, 0.0, 1.0)

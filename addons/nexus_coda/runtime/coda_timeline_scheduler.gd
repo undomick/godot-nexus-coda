@@ -2,28 +2,17 @@
 extends RefCounted
 class_name CodaTimelineScheduler
 
-## Resolves a [code]CodaEventTimeline[/code] into a flat list of plan entries the runtime
-## can dispatch over time. The format mirrors [code]coda_graph_scheduler.gd[/code]:
-##   { "audio_path", "volume_db", "pitch_scale", "loop", "sound_id", "blend_weight" }
-## plus the timeline-specific extras:
-##   { "start_offset_seconds": time after [code]t_from[/code] when the voice should fire,
-##     "stream_offset_seconds": where to seek into the source audio,
-##     "duration_seconds": how long the voice should keep playing (clipped to t_to if set),
-##     "track_id": String, "clip_id": String,
-##     "fade_in_seconds": float, "fade_out_seconds": float }
-##
-## The scheduler is purely time-based and ignores [code]tempo_bpm[/code]; the bars/beats grid
-## is an editor-only concept in the MVP.
+## Plans timeline clips in a time window [t_from, t_to). Output entries match the graph
+## scheduler shape plus start/stream offsets and fade times. Looping is handled by runtime.
 
-## Returns ordered plan entries for the time window [code][t_from, t_to)[/code].
-##
-## - [code]t_to <= 0[/code] disables the upper bound (used when starting a voice without a
-##   pre-known end). Loop handling is done by the runtime, not the scheduler.
-## - [code]param_values[/code] is reserved for future per-clip conditions (e.g. switch tracks
-##   on parameter values); MVP simply ignores it but the signature mirrors the graph scheduler.
+const CodaRuntimeTimelineLayoutScript := preload(
+	"res://addons/nexus_coda/runtime/coda_runtime_timeline_layout.gd"
+)
+
+
 static func plan(
 	timeline: CodaEventTimeline,
-	param_values: Dictionary = {},
+	_param_values: Dictionary = {},
 	t_from: float = 0.0,
 	t_to: float = -1.0,
 ) -> Array:
@@ -38,22 +27,14 @@ static func plan(
 	if window_end <= t_from:
 		return out
 
-	var has_solo: bool = false
-	for t in timeline.tracks:
-		if t.solo:
-			has_solo = true
-			break
-
+	var has_solo: bool = CodaRuntimeTimelineLayoutScript.timeline_has_solo(timeline)
 	for track in timeline.tracks:
-		if track.mute:
-			continue
-		if has_solo and not track.solo:
+		if not CodaRuntimeTimelineLayoutScript.track_is_audible(track, has_solo):
 			continue
 		for clip in track.clips:
 			var entry: Dictionary = _entry_for_clip(track, clip, t_from, window_end)
-			if entry.is_empty():
-				continue
-			out.append(entry)
+			if not entry.is_empty():
+				out.append(entry)
 
 	out.sort_custom(_compare_entries_by_offset)
 	return out
@@ -78,10 +59,9 @@ static func _entry_for_clip(
 		return {}
 	var stream_offset: float = clip.offset_seconds + maxf(0.0, t_from - clip_start)
 	var start_offset: float = maxf(0.0, clip_start - t_from)
-	var combined_volume_db: float = clip.volume_db + track.volume_db
 	return {
 		"audio_path": clip.audio_path,
-		"volume_db": combined_volume_db,
+		"volume_db": clip.volume_db + track.volume_db,
 		"pitch_scale": clip.pitch_scale,
 		"loop": false,
 		"sound_id": clip.id,

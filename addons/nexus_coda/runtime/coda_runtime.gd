@@ -2,20 +2,7 @@
 extends Node
 class_name CodaRuntime
 
-## Runtime entry point. Used both as the autoload "Coda" in running games and as an
-## editor-side preview instance owned by the plugin. Both modes share this implementation.
-##
-## Public API:
-##   Coda.set_project(state: CodaState)     # editor or boot-time wiring
-##   Coda.play(path, params := {})          # returns CodaEventHandle or null
-##   Coda.play_event_node(node, params)     # play a specific browser node directly
-##   Coda.stop(handle, fade_ms := 0)
-##   Coda.stop_all()
-##   Coda.is_alive(handle)
-##   Coda.set_parameter(handle, name, value)
-##   Coda.set_global_parameter(name, value)
-##   Coda.apply_snapshot(snapshot_id, blend_ms := -1)
-##   Coda.notify_music_state_changed(handle)
+## Autoload and editor preview runtime. Public API: play/stop, parameters, snapshots, banks.
 
 signal voice_started(handle: CodaEventHandle)
 signal voice_finished(handle: CodaEventHandle)
@@ -23,18 +10,9 @@ signal voice_pool_exhausted(context: Dictionary)
 signal marker_reached(handle: CodaEventHandle, marker_id: String)
 signal project_loaded(state: CodaState)
 
-const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
-const CodaBrowserNodeScript := preload("res://addons/nexus_coda/editor/browser/coda_browser_node.gd")
 const CodaVoicePoolScript := preload("res://addons/nexus_coda/runtime/coda_voice_pool.gd")
-const CodaEventHandleScript := preload("res://addons/nexus_coda/runtime/coda_event_handle.gd")
 const CodaEventResolverScript := preload("res://addons/nexus_coda/runtime/coda_event_resolver.gd")
 const CodaGraphSchedulerScript := preload("res://addons/nexus_coda/runtime/coda_graph_scheduler.gd")
-const CodaTimelineSchedulerScript := preload(
-	"res://addons/nexus_coda/runtime/coda_timeline_scheduler.gd"
-)
-const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_bus_helper.gd")
-const CodaBankExportScript := preload("res://addons/nexus_coda/editor/io/coda_bank_export.gd")
-const CodaBusScript := preload("res://addons/nexus_coda/editor/browser/coda_bus.gd")
 const CodaVoiceFaderScript := preload("res://addons/nexus_coda/runtime/coda_voice_fader.gd")
 const CodaTimelineSegmentDriverScript := preload(
 	"res://addons/nexus_coda/runtime/coda_timeline_segment_driver.gd"
@@ -61,6 +39,9 @@ const CodaRuntimeParameterPipelineScript := preload(
 const CodaRuntimeBusSyncScript := preload(
 	"res://addons/nexus_coda/runtime/coda_runtime_bus_sync.gd"
 )
+const CodaRuntimeBankRegistryScript := preload(
+	"res://addons/nexus_coda/runtime/coda_runtime_bank_registry.gd"
+)
 const NexusCodaLogScript := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 
 const RUNTIME_LOG_SCOPE := "runtime"
@@ -70,33 +51,16 @@ const RUNTIME_LOG_SCOPE := "runtime"
 
 var _project: CodaState = null
 var _pool: CodaVoicePool
-var _active_handles: Dictionary = {}  ## player_instance_id -> CodaEventHandle
+var _active_handles: Dictionary = {}
 var _next_handle_id: int = 1
-## Loaded banks: bank_id (String) -> { "bank_name": String, "events_by_path": { path: CodaBrowserNode } }
-var _loaded_banks: Dictionary = {}
-## Active timeline-mode handles: handle -> dispatcher state. Each entry tracks the timeline
-## cursor, currently-playing per-clip voices and which clips have already been fired in this
-## (loop) iteration so the same clip is not retriggered every frame.
 var _timeline_dispatchers: Dictionary = {}
-## player_instance_id -> CodaEventHandle (timeline-mode only). Lets [code]_on_voice_finished[/code]
-## resolve a finished timeline voice without going through [code]_active_handles[/code].
 var _timeline_voice_owner: Dictionary = {}
-## player_instance_id -> playback generation stamped at the last [method AudioStreamPlayer.play]
-## on that pooled player. Guards against stale [signal AudioStreamPlayer.finished] after reuse.
 var _timeline_voice_playback_gen: Dictionary = {}
-## Monotonic generation per pooled-player play; prior gens are marked orphaned on supersede.
 var _next_playback_gen: int = 1
-var _player_pending_finish_gen: Dictionary = {}  ## player_instance_id -> int
-var _orphaned_finish_gens: Dictionary = {}  ## gen -> true
-## True while [method stop_all] is iterating pooled [AudioStreamPlayer]s. A synthetic
-## [signal AudioStreamPlayer.finished] from [method AudioStreamPlayer.stop] must not dequeue graph
-## plan entries or new voices would start during teardown.
+var _player_pending_finish_gen: Dictionary = {}
+var _orphaned_finish_gens: Dictionary = {}
 var _stop_all_in_progress: bool = false
-## Graph handles blocked on voice-pool exhaustion (mid-sequence or loop restart). Retried each frame.
 var _graph_plan_resume_handles: Array[CodaEventHandle] = []
-## Graph previews paused via [method pause_graph_preview]. Removed from [code]_active_handles[/code] while
-## stopped so the pool stays available; [method stop_all] must still finalize these handles.
-var _paused_graph_handles: Array[CodaEventHandle] = []
 var _voice_fader: CodaVoiceFader
 var _segment_driver: CodaTimelineSegmentDriver
 var _snapshot_blender: CodaSnapshotBlender
@@ -105,6 +69,7 @@ var _timeline_dispatcher: CodaTimelineDispatcher
 var _graph_playback: CodaGraphPlaybackRuntime
 var _parameter_pipeline: CodaRuntimeParameterPipeline
 var _bus_sync: CodaRuntimeBusSync
+var _bank_registry: CodaRuntimeBankRegistry
 var _transition_policy: CodaMusicTransitionPolicy
 var _pool_warn_last_ms: Dictionary = {}
 
@@ -123,6 +88,8 @@ func _ready() -> void:
 	_parameter_pipeline.setup(self)
 	_bus_sync = CodaRuntimeBusSyncScript.new()
 	_bus_sync.setup(self)
+	_bank_registry = CodaRuntimeBankRegistryScript.new()
+	_bank_registry.setup(self)
 	_snapshot_blender = CodaSnapshotBlenderScript.new()
 	_snapshot_blender.setup(_project, Callable(_bus_sync, "sync_buses"))
 	_timeline_music = CodaTimelineMusicControllerScript.new()
@@ -170,14 +137,12 @@ func set_project(project: Variant) -> void:
 	# previous CodaState (timeline cursors, graph plans, pooled players).
 	stop_all()
 	if project != null:
-		# Loaded banks override play() resolution; clear them when wiring a new project so stale
-		# bank events cannot shadow the new CodaState.
-		_loaded_banks.clear()
+		_bank_registry.clear()
 	if _project != null:
-		if _project.structure_changed.is_connected(_on_project_structure_changed):
-			_project.structure_changed.disconnect(_on_project_structure_changed)
-		if _project.project_dirty.is_connected(_on_project_dirty_sync_buses):
-			_project.project_dirty.disconnect(_on_project_dirty_sync_buses)
+		if _project.structure_changed.is_connected(_on_project_buses_changed):
+			_project.structure_changed.disconnect(_on_project_buses_changed)
+		if _project.project_dirty.is_connected(_on_project_buses_changed):
+			_project.project_dirty.disconnect(_on_project_buses_changed)
 	if project == null:
 		_project = null
 		if _snapshot_blender != null:
@@ -191,18 +156,14 @@ func set_project(project: Variant) -> void:
 		_snapshot_blender.setup(_project, Callable(_bus_sync, "sync_buses"))
 	_bus_sync.sync_buses()
 	if _project != null:
-		if not _project.structure_changed.is_connected(_on_project_structure_changed):
-			_project.structure_changed.connect(_on_project_structure_changed)
-		if not _project.project_dirty.is_connected(_on_project_dirty_sync_buses):
-			_project.project_dirty.connect(_on_project_dirty_sync_buses)
+		if not _project.structure_changed.is_connected(_on_project_buses_changed):
+			_project.structure_changed.connect(_on_project_buses_changed)
+		if not _project.project_dirty.is_connected(_on_project_buses_changed):
+			_project.project_dirty.connect(_on_project_buses_changed)
 	project_loaded.emit(_project)
 
 
-func _on_project_structure_changed() -> void:
-	_bus_sync.apply_loaded_bank_buses()
-
-
-func _on_project_dirty_sync_buses() -> void:
+func _on_project_buses_changed() -> void:
 	_bus_sync.apply_loaded_bank_buses()
 
 
@@ -219,8 +180,7 @@ func get_project() -> CodaState:
 
 
 func play(event_path: String, params: Dictionary = {}) -> CodaEventHandle:
-	# Loaded banks win over the live project so gameplay is deterministic across builds.
-	var bank_resolved: Dictionary = _resolve_in_loaded_banks(event_path)
+	var bank_resolved: Dictionary = _bank_registry.resolve_event(event_path)
 	var event_node: CodaBrowserNode = bank_resolved.get("node", null) as CodaBrowserNode
 	var source_bank_id: String = str(bank_resolved.get("bank_id", ""))
 	if event_node == null and _project != null:
@@ -229,22 +189,6 @@ func play(event_path: String, params: Dictionary = {}) -> CodaEventHandle:
 		_warn("event not found: '%s'" % event_path)
 		return null
 	return _start_event(event_node, event_path, params, source_bank_id)
-
-
-func _resolve_in_loaded_banks(event_path: String) -> Dictionary:
-	var p: String = event_path.strip_edges()
-	if p.begins_with("events/"):
-		p = p.substr(7)
-	# Later load_bank() calls should override earlier banks (DLC / hotfix), matching
-	# _rebuild_bus_id_map_from_loaded_banks where the last manifest wins per bus id.
-	var bank_ids: Array = _loaded_banks.keys()
-	for i in range(bank_ids.size() - 1, -1, -1):
-		var bank_id: String = String(bank_ids[i])
-		var entry: Dictionary = _loaded_banks[bank_id]
-		var by_path: Dictionary = entry.get("events_by_path", {})
-		if by_path.has(p):
-			return {"node": by_path[p] as CodaBrowserNode, "bank_id": bank_id}
-	return {"node": null, "bank_id": ""}
 
 
 func play_event_node(node: Variant, params: Dictionary = {}) -> CodaEventHandle:
@@ -264,7 +208,7 @@ func play_event_node(node: Variant, params: Dictionary = {}) -> CodaEventHandle:
 func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	if handle == null:
 		return
-	_drop_paused_graph_preview_state(handle)
+	_graph_playback.drop_paused_preview_state(handle)
 	if handle.is_timeline:
 		if _timeline_dispatchers.has(handle):
 			_timeline_dispatcher.finalize_handle(handle, fade_ms)
@@ -290,7 +234,7 @@ func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 
 
 func stop_all() -> void:
-	_finalize_all_paused_graph_previews()
+	_graph_playback.finalize_all_paused_previews()
 	# Mirror [_finalize_timeline_handle]: stop lane voices, drop dispatcher refs, then emit the
 	# same handle/runtime signals as a normal timeline end. Otherwise `await handle.finished` and
 	# `voice_finished` subscribers never run for timeline previews stopped via stop_all().
@@ -329,8 +273,7 @@ func stop_all() -> void:
 		_pool.stop_all()
 	_stop_all_in_progress = false
 	for gh2 in graph_handles:
-		# BLEND parallel legs use sibling handles that never receive [signal voice_started]. Emitting
-		# [signal voice_finished] for them here would duplicate teardown for one [method play] call.
+		# BLEND siblings never get voice_started; skip voice_finished to avoid double teardown.
 		if bool(gh2.params.get("_coda_is_sibling", false)):
 			gh2._alive = false
 			continue
@@ -497,78 +440,19 @@ func active_voice_count() -> int:
 	return _pool.active_count()
 
 
-## Loads a `.coda_bank` and registers its events for playback.
-## Returns the loaded bank id on success, or empty string on failure.
 func load_bank(path: String) -> String:
-	var manifest_raw: Variant = CodaBankExportScript.read_manifest_from_path(path)
-	if manifest_raw is String:
-		_warn(str(manifest_raw))
-		return ""
-	var manifest: Dictionary = manifest_raw
-	var bank_id: String = str(manifest.get("bank_id", ""))
-	if bank_id.is_empty():
-		_warn("bank file has no bank_id")
-		return ""
-	var events_by_path: Dictionary = {}
-	for event_raw in manifest.get("events", []) as Array:
-		if not (event_raw is Dictionary):
-			continue
-		var event_dict: Dictionary = event_raw
-		var event_path: String = str(event_dict.get("__path", ""))
-		var node: CodaBrowserNode = CodaBrowserNode.from_dictionary(event_dict)
-		if node == null or event_path.is_empty():
-			continue
-		events_by_path[event_path] = node
-	var bank_bus_root: CodaBus = null
-	var buses_raw: Variant = manifest.get("buses", null)
-	if buses_raw is Dictionary:
-		bank_bus_root = CodaBusScript.from_dictionary(buses_raw as Dictionary)
-	# Re-loading an existing bank_id must move it to the end of insertion order. Godot keeps
-	# key position on assignment, but later load_bank / hotfix wins rely on reverse iteration.
-	if _loaded_banks.has(bank_id):
-		_stop_voices_for_bank(bank_id)
-		_loaded_banks.erase(bank_id)
-	_loaded_banks[bank_id] = {
-		"bank_name": str(manifest.get("bank_name", "Bank")),
-		"events_by_path": events_by_path,
-		"bus_root": bank_bus_root,
-	}
-	_bus_sync.apply_loaded_bank_buses()
-	return bank_id
+	return _bank_registry.load_bank(path)
 
 
-## Unloads a previously-loaded bank by id. No-op if id is unknown.
 func unload_bank(bank_id: String) -> bool:
-	if not _loaded_banks.has(bank_id):
-		return false
-	_stop_voices_for_bank(bank_id)
-	_loaded_banks.erase(bank_id)
-	_bus_sync.apply_loaded_bank_buses()
-	return true
+	return _bank_registry.unload_bank(bank_id)
 
 
 func loaded_bank_ids() -> PackedStringArray:
-	var out := PackedStringArray()
-	for k in _loaded_banks.keys():
-		out.append(String(k))
-	return out
+	return _bank_registry.loaded_bank_ids()
 
 
-func _stop_voices_for_bank(bank_id: String) -> void:
-	if bank_id.is_empty():
-		return
-	var seen: Dictionary = {}
-	for item in _collect_runtime_handles():
-		var h: CodaEventHandle = item as CodaEventHandle
-		if h == null or seen.has(h):
-			continue
-		if h.source_bank_id != bank_id:
-			continue
-		seen[h] = true
-		stop(h)
-
-
-func _collect_runtime_handles() -> Array:
+func collect_runtime_handles() -> Array:
 	var out: Array = []
 	var seen: Dictionary = {}
 	for h in _active_handles.values():
@@ -583,7 +467,7 @@ func _collect_runtime_handles() -> Array:
 		if h != null and not seen.has(h):
 			seen[h] = true
 			out.append(h)
-	for h in _paused_graph_handles:
+	for h in _graph_playback.get_paused_graph_handles():
 		if h != null and not seen.has(h):
 			seen[h] = true
 			out.append(h)
@@ -700,7 +584,7 @@ func runtime_emit_voice_finished(handle: CodaEventHandle) -> void:
 
 
 func get_loaded_banks() -> Dictionary:
-	return _loaded_banks
+	return _bank_registry.get_loaded_banks()
 
 
 func get_parameter_pipeline() -> CodaRuntimeParameterPipeline:
@@ -760,125 +644,12 @@ func runtime_begin_player_voice(player: AudioStreamPlayer) -> int:
 	)
 
 
-func _drop_paused_graph_preview_state(handle: CodaEventHandle) -> void:
-	if handle == null:
-		return
-	var idx: int = _paused_graph_handles.find(handle)
-	if idx >= 0:
-		_paused_graph_handles.remove_at(idx)
-	handle.params.erase("_coda_graph_pause_snapshot")
-
-
-func _finalize_all_paused_graph_previews() -> void:
-	for item in _paused_graph_handles.duplicate():
-		var h: CodaEventHandle = item as CodaEventHandle
-		if h == null:
-			continue
-		_finalize_paused_graph_preview(h)
-	_paused_graph_handles.clear()
-
-
-func _finalize_paused_graph_preview(handle: CodaEventHandle) -> void:
-	if handle == null:
-		return
-	_drop_paused_graph_preview_state(handle)
-	if not handle._paused:
-		return
-	handle._paused = false
-	_graph_playback.unmark_plan_resume(handle)
-	_graph_playback.stop_parallel_siblings(handle)
-	handle.clear_player_binding()
-	var was_alive: bool = handle._alive
-	if was_alive:
-		handle._alive = false
-		handle.finished.emit()
-	voice_finished.emit(handle)
-
-
-func _snapshot_graph_pause_player(
-	voice: CodaEventHandle, snapshot: Dictionary
-) -> void:
-	if voice._player == null or not is_instance_valid(voice._player):
-		return
-	var pk: int = voice._player.get_instance_id()
-	var pos: float = 0.0
-	if voice._player.playing:
-		pos = voice._player.get_playback_position()
-	_active_handles.erase(pk)
-	if voice._player.playing:
-		voice._player.stop()
-	snapshot[str(pk)] = {
-		"position": pos,
-		"gen": int(voice._player.get_meta(&"_coda_playback_gen", -1)),
-	}
-
-
-## Graph preview: stop pooled players on pause so [code]stream_paused[/code] voices do not pin the pool.
 func pause_graph_preview(handle: CodaEventHandle) -> void:
-	if handle == null or handle.is_timeline:
-		return
-	var snapshot: Dictionary = {}
-	_snapshot_graph_pause_player(handle, snapshot)
-	for sib in handle.graph_parallel_siblings:
-		if sib == null:
-			continue
-		_snapshot_graph_pause_player(sib, snapshot)
-	handle.params["_coda_graph_pause_snapshot"] = snapshot
-	if not _paused_graph_handles.has(handle):
-		_paused_graph_handles.append(handle)
+	_graph_playback.pause_graph_preview(handle)
 
 
-## Graph preview: resume voices stopped by [method pause_graph_preview].
 func resume_graph_preview(handle: CodaEventHandle) -> void:
-	if handle == null or handle.is_timeline:
-		return
-	_drop_paused_graph_preview_state(handle)
-	var snapshot: Variant = handle.params.get("_coda_graph_pause_snapshot", {})
-	handle.params.erase("_coda_graph_pause_snapshot")
-	if typeof(snapshot) != TYPE_DICTIONARY:
-		return
-	var snap: Dictionary = snapshot as Dictionary
-	if snap.is_empty():
-		return
-	var expected: int = snap.size()
-	var resumed: int = 0
-	if _resume_graph_paused_player(handle, handle, snap):
-		resumed += 1
-	for sib in handle.graph_parallel_siblings:
-		if sib == null:
-			continue
-		if _resume_graph_paused_player(handle, sib, snap):
-			resumed += 1
-	# Partial resume (e.g. voice pool reused a paused BLEND leg) leaves a wrong mix â€” stop cleanly.
-	if resumed != expected and handle._alive:
-		stop(handle)
-
-
-func _resume_graph_paused_player(
-	owner: CodaEventHandle, voice: CodaEventHandle, snapshot: Dictionary
-) -> bool:
-	if voice._player == null or not is_instance_valid(voice._player):
-		return false
-	if voice._player.stream == null:
-		return false
-	var key: String = str(voice._player.get_instance_id())
-	var saved: Variant = snapshot.get(key, null)
-	if typeof(saved) != TYPE_DICTIONARY:
-		return false
-	var saved_d: Dictionary = saved as Dictionary
-	var expected_gen: int = int(saved_d.get("gen", -2))
-	if int(voice._player.get_meta(&"_coda_playback_gen", -1)) != expected_gen:
-		return false
-	var at: float = maxf(0.0, float(saved_d.get("position", 0.0)))
-	voice._player.play(at)
-	var gen: int = int(voice._player.get_meta(&"_coda_playback_gen", -1))
-	if voice == owner:
-		owner.params["_coda_playback_gen"] = gen
-		_active_handles[voice._player.get_instance_id()] = owner
-	else:
-		voice.params["_coda_playback_gen"] = gen
-		_active_handles[voice._player.get_instance_id()] = voice
-	return true
+	_graph_playback.resume_graph_preview(handle)
 
 
 func pause_timeline_preview(handle: CodaEventHandle) -> void:

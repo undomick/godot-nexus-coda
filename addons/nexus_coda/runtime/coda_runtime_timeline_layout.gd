@@ -2,7 +2,22 @@
 class_name CodaRuntimeTimelineLayout
 extends RefCounted
 
-## Timeline layout fingerprints for editor preview resync.
+## Timeline layout fingerprints and shared track filtering for runtime dispatch.
+
+
+static func timeline_has_solo(timeline: CodaEventTimeline) -> bool:
+	for tr in timeline.tracks:
+		if tr.solo:
+			return true
+	return false
+
+
+static func track_is_audible(track: CodaTimelineTrack, has_solo: bool) -> bool:
+	if track.mute:
+		return false
+	if has_solo and not track.solo:
+		return false
+	return true
 
 
 static func layout_signature(timeline: CodaEventTimeline) -> String:

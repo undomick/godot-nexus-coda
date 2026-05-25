@@ -1,8 +1,8 @@
 class_name CodaTimelineInputController
 extends RefCounted
 
-## Mouse, keyboard, hit testing, snap, and drag logic for [CodaTimelineView].
-## Domain mutations are expressed as signals; the host panel applies them.
+## Mouse, keyboard, hit testing, snap, and drag logic for CodaTimelineView.
+## Mutations go out as signals; the host view applies them.
 
 const Renderer := preload("res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_renderer.gd")
 
@@ -51,14 +51,11 @@ signal audition_requested
 
 var _drag_kind: DragKind = DragKind.NONE
 var _drag_clip_id: String = ""
-var _drag_track_id: String = ""
 var _drag_start_seconds: float = 0.0
 var _drag_initial_clip_start: float = 0.0
 var _drag_initial_clip_duration: float = 0.0
 var _drag_initial_clip_offset: float = 0.0
 var _drag_marker_id: String = ""
-var _drag_initial_loop_start: float = 0.0
-var _drag_initial_loop_end: float = 0.0
 var _drag_pan_initial_scroll: float = 0.0
 var _drag_initial_screen_pos: Vector2 = Vector2.ZERO
 var _marker_press_id: String = ""
@@ -120,8 +117,7 @@ func drop_data(view: CodaTimelineView, at_position: Vector2, data: Variant) -> v
 
 func hit_test(view: CodaTimelineView, local_pos: Vector2) -> Dictionary:
 	var timeline: CodaEventTimeline = view.get_timeline()
-	var on_ruler: bool = local_pos.y < RULER_HEIGHT
-	if on_ruler:
+	if local_pos.y < RULER_HEIGHT:
 		var marker := _hit_marker_near(view, local_pos.x)
 		if marker != null:
 			return {"kind": "marker", "marker_id": marker.id}
@@ -141,10 +137,10 @@ func hit_test(view: CodaTimelineView, local_pos: Vector2) -> Dictionary:
 	var t: float = _x_to_seconds(view, local_pos.x)
 	var track: CodaTimelineTrack = timeline.tracks[track_index]
 	for clip in track.clips:
-		if t < clip.start_seconds or t > clip.start_seconds + clip.duration_seconds:
+		if t < clip.start_seconds or t > clip.end_seconds():
 			continue
 		var clip_x0: float = _seconds_to_x(view, clip.start_seconds)
-		var clip_x1: float = _seconds_to_x(view, clip.start_seconds + clip.duration_seconds)
+		var clip_x1: float = _seconds_to_x(view, clip.end_seconds())
 		var dist_l: float = abs(local_pos.x - clip_x0)
 		var dist_r: float = abs(local_pos.x - clip_x1)
 		var edge: String = "none"
@@ -195,26 +191,7 @@ func zoom_around(view: CodaTimelineView, pos: Vector2, factor: float) -> void:
 
 
 func _handle_mouse_button(view: CodaTimelineView, mb: InputEventMouseButton) -> void:
-	if (
-		mb.pressed
-		and (
-			mb.button_index == MOUSE_BUTTON_WHEEL_UP
-			or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN
-		)
-	):
-		if mb.shift_pressed:
-			var dir: float = 1.0 if mb.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1.0
-			var step_sec: float = view.get_zoom() * 48.0
-			view.set_scroll_seconds(max(0.0, view.get_scroll_seconds() + dir * step_sec))
-			view.queue_redraw()
-			view.accept_event()
-			return
-	if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-		zoom_around(view, mb.position, 0.85)
-		view.accept_event()
-		return
-	if mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-		zoom_around(view, mb.position, 1.15)
+	if _handle_wheel(view, mb):
 		view.accept_event()
 		return
 	if mb.button_index == MOUSE_BUTTON_MIDDLE:
@@ -228,35 +205,41 @@ func _handle_mouse_button(view: CodaTimelineView, mb: InputEventMouseButton) -> 
 		return
 	if mb.button_index == MOUSE_BUTTON_RIGHT:
 		if mb.pressed:
-			var hit_r: Dictionary = hit_test(view, mb.position)
-			var hit_kind: String = String(hit_r.get("kind", ""))
-			if hit_kind == "clip":
-				view.open_clip_context_menu(
-					String(hit_r.get("clip_id", "")),
-					Vector2i(
-						int(view.get_global_mouse_position().x),
-						int(view.get_global_mouse_position().y)
-					)
-				)
-			elif hit_kind == "marker":
-				view.open_marker_context_menu(
-					String(hit_r.get("marker_id", "")),
-					Vector2i(
-						int(view.get_global_mouse_position().x),
-						int(view.get_global_mouse_position().y)
-					)
-				)
+			_open_context_menu_for_hit(view, hit_test(view, mb.position))
 		view.accept_event()
 		return
 	if mb.button_index != MOUSE_BUTTON_LEFT:
 		return
 	if mb.pressed:
 		view.grab_focus()
-		var hit: Dictionary = hit_test(view, mb.position)
-		_begin_drag(view, hit, mb)
+		_begin_drag(view, hit_test(view, mb.position), mb)
 	else:
 		_end_drag()
 	view.accept_event()
+
+
+func _handle_wheel(view: CodaTimelineView, mb: InputEventMouseButton) -> bool:
+	if not mb.pressed:
+		return false
+	if (
+		mb.shift_pressed
+		and (
+			mb.button_index == MOUSE_BUTTON_WHEEL_UP
+			or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN
+		)
+	):
+		var dir: float = 1.0 if mb.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1.0
+		var step_sec: float = view.get_zoom() * 48.0
+		view.set_scroll_seconds(max(0.0, view.get_scroll_seconds() + dir * step_sec))
+		view.queue_redraw()
+		return true
+	if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+		zoom_around(view, mb.position, 0.85)
+		return true
+	if mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		zoom_around(view, mb.position, 1.15)
+		return true
+	return false
 
 
 func _handle_mouse_motion(view: CodaTimelineView, mm: InputEventMouseMotion) -> void:
@@ -362,22 +345,13 @@ func _begin_drag(view: CodaTimelineView, hit: Dictionary, mb: InputEventMouseBut
 			_marker_press_pos = mb.position
 			_drag_kind = DragKind.NONE
 		return
-	if k == "loop_start":
-		_drag_kind = DragKind.LOOP_START
-		_drag_initial_loop_start = timeline.loop_start_seconds
-		_drag_initial_loop_end = timeline.loop_end_seconds
-		timeline_interaction_started.emit()
-		return
-	if k == "loop_end":
-		_drag_kind = DragKind.LOOP_END
-		_drag_initial_loop_start = timeline.loop_start_seconds
-		_drag_initial_loop_end = timeline.loop_end_seconds
+	if k == "loop_start" or k == "loop_end":
+		_drag_kind = DragKind.LOOP_START if k == "loop_start" else DragKind.LOOP_END
 		timeline_interaction_started.emit()
 		return
 	if k == "clip":
 		var clip_id: String = String(hit.get("clip_id", ""))
 		_drag_clip_id = clip_id
-		_drag_track_id = String(hit.get("track_id", ""))
 		var info: Dictionary = timeline.find_clip(clip_id)
 		if info.is_empty():
 			_drag_kind = DragKind.NONE
@@ -405,15 +379,25 @@ func _begin_drag(view: CodaTimelineView, hit: Dictionary, mb: InputEventMouseBut
 		view.clear_marker_selection()
 		selection_cleared.emit()
 		_drag_kind = DragKind.NONE
-		return
 
 
 func _end_drag() -> void:
 	_drag_kind = DragKind.NONE
 	_drag_clip_id = ""
-	_drag_track_id = ""
 	_drag_marker_id = ""
 	_marker_press_id = ""
+
+
+func _open_context_menu_for_hit(view: CodaTimelineView, hit: Dictionary) -> void:
+	var menu_pos := Vector2i(
+		int(view.get_global_mouse_position().x),
+		int(view.get_global_mouse_position().y)
+	)
+	match String(hit.get("kind", "")):
+		"clip":
+			view.open_clip_context_menu(String(hit.get("clip_id", "")), menu_pos)
+		"marker":
+			view.open_marker_context_menu(String(hit.get("marker_id", "")), menu_pos)
 
 
 func _track_index_at_y(view: CodaTimelineView, y: float) -> int:
@@ -422,7 +406,7 @@ func _track_index_at_y(view: CodaTimelineView, y: float) -> int:
 	var n: int = view.track_count()
 	if n == 0:
 		return -1
-	var idx: int = int((y - RULER_HEIGHT) / view.get_track_row_height())
+	var idx: int = _track_row_from_y(view, y)
 	if idx < 0 or idx >= n:
 		return -1
 	return idx
@@ -434,8 +418,11 @@ func _track_index_for_drop_y(view: CodaTimelineView, y: float) -> int:
 		return -1
 	if y < RULER_HEIGHT:
 		return 0
-	var idx: int = int((y - RULER_HEIGHT) / view.get_track_row_height())
-	return clampi(idx, 0, n - 1)
+	return clampi(_track_row_from_y(view, y), 0, n - 1)
+
+
+func _track_row_from_y(view: CodaTimelineView, y: float) -> int:
+	return int((y - RULER_HEIGHT) / view.get_track_row_height())
 
 
 func _hit_marker_near(view: CodaTimelineView, x: float) -> CodaTimelineMarker:
@@ -468,7 +455,7 @@ func _snap_candidate_times(view: CodaTimelineView, for_time: float) -> Array[flo
 	for tr in timeline.tracks:
 		for cl in tr.clips:
 			out.append(cl.start_seconds)
-			out.append(cl.start_seconds + cl.duration_seconds)
+			out.append(cl.end_seconds())
 	if view.get_snap_mode() != CodaTimelineView.SnapMode.NONE:
 		var step: float = _snap_step_seconds(view)
 		if step > 0.0:
