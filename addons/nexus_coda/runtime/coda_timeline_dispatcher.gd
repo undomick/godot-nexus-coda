@@ -77,7 +77,7 @@ func start_timeline_event(
 		"loop_override_end": loop_override_end,
 	}
 	handle.timeline_runtime = _runtime
-	_prime_overlapping_voices(handle, dispatchers[handle], timeline, handle.timeline_cursor_seconds)
+	_prime_non_segment_lanes(handle, dispatchers[handle], timeline, handle.timeline_cursor_seconds)
 	_runtime.runtime_emit_voice_started(handle)
 	return handle
 
@@ -155,7 +155,7 @@ func tick_dispatchers(delta: float) -> void:
 			var loop_lo: float = loop_start if loop_start >= 0.0 else 0.0
 			if next_cursor < cursor_at_frame_start:
 				_fire_clips_in_range(handle, d, timeline, next_cursor, cursor_at_frame_start)
-			_prime_overlapping_voices(handle, d, timeline, next_cursor)
+			_prime_non_segment_lanes(handle, d, timeline, next_cursor)
 			prev_cursor = loop_lo
 
 		handle.timeline_cursor_seconds = next_cursor
@@ -239,7 +239,7 @@ func resync_preview_for_event(event_id: String) -> void:
 	d["fired_clip_ids"] = {}
 	d["spent_clip_ids"] = {}
 	stop_voices(d, handle)
-	_prime_overlapping_voices(handle, d, timeline, handle.timeline_cursor_seconds)
+	_prime_non_segment_lanes(handle, d, timeline, handle.timeline_cursor_seconds)
 
 
 func pause_preview(handle: CodaEventHandle) -> void:
@@ -267,7 +267,7 @@ func resume_preview(handle: CodaEventHandle) -> void:
 		handle._paused = false
 		d["fired_clip_ids"] = {}
 		d["spent_clip_ids"] = {}
-		_prime_overlapping_voices(handle, d, timeline, handle.timeline_cursor_seconds)
+		_prime_non_segment_lanes(handle, d, timeline, handle.timeline_cursor_seconds)
 		return
 	handle._paused = false
 	for p in voices.values():
@@ -512,7 +512,15 @@ func _apply_seek(handle: CodaEventHandle, d: Dictionary, target_seconds: float) 
 	stop_voices(d, handle)
 	d["fired_clip_ids"] = {}
 	d["spent_clip_ids"] = {}
-	_prime_overlapping_voices(handle, d, timeline, clamped)
+	_prime_non_segment_lanes(handle, d, timeline, clamped)
+
+
+func _prime_non_segment_lanes(
+	handle: CodaEventHandle, d: Dictionary, timeline: CodaEventTimeline, at_seconds: float
+) -> void:
+	_prime_overlapping_voices(handle, d, timeline, at_seconds)
+	if CodaTimelineSegmentDriverScript.segments_track(timeline) != null:
+		_runtime.notify_music_state_changed(handle)
 
 
 func _prime_overlapping_voices(
@@ -528,6 +536,8 @@ func _prime_overlapping_voices(
 		if track.mute:
 			continue
 		if has_solo and not track.solo:
+			continue
+		if CodaTimelineSegmentDriverScript.is_segments_track(track):
 			continue
 		for clip in track.clips:
 			if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
