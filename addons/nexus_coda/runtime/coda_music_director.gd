@@ -73,6 +73,7 @@ func set_music(
 				}
 			)
 			return _slot_handle(slot_key)
+	_cancel_pending_quantized_for_slot(slot_key)
 	return _set_music_immediate(path, actual_fade, slot_key, params)
 
 
@@ -102,6 +103,7 @@ func stop_music(slot: String = "default", fade_ms: int = -1, sync_to_bar: bool =
 				}
 			)
 			return
+	_cancel_pending_quantized_for_slot(slot_key)
 	_stop_slot(slot_key, actual_fade)
 
 
