@@ -67,6 +67,7 @@ func start_timeline_event(
 		"timeline": timeline,
 		"voices": {},
 		"fired_clip_ids": {},
+		"fired_marker_ids": {},
 		"spent_clip_ids": {},
 		"layout_sig": CodaRuntimeTimelineLayoutScript.layout_signature(timeline),
 		"live_params": live_params,
@@ -147,6 +148,7 @@ func tick_dispatchers(delta: float) -> void:
 				)
 			_fire_clips_in_range(handle, d, timeline, cursor_at_frame_start, wrap_target)
 			d["fired_clip_ids"] = {}
+			d["fired_marker_ids"] = {}
 			d["spent_clip_ids"] = {}
 			stop_voices(d, handle)
 			var loop_lo: float = loop_start if loop_start >= 0.0 else 0.0
@@ -234,6 +236,7 @@ func resync_preview_for_event(event_id: String) -> void:
 		return
 	d["layout_sig"] = sig
 	d["fired_clip_ids"] = {}
+	d["fired_marker_ids"] = {}
 	d["spent_clip_ids"] = {}
 	stop_voices(d, handle)
 	_prime_overlapping_voices(handle, d, timeline, handle.timeline_cursor_seconds)
@@ -247,6 +250,7 @@ func pause_preview(handle: CodaEventHandle) -> void:
 	var d: Dictionary = dispatchers[handle]
 	stop_voices(d, handle)
 	d["fired_clip_ids"] = {}
+	d["fired_marker_ids"] = {}
 	d["spent_clip_ids"] = {}
 
 
@@ -263,6 +267,7 @@ func resume_preview(handle: CodaEventHandle) -> void:
 			return
 		handle._paused = false
 		d["fired_clip_ids"] = {}
+		d["fired_marker_ids"] = {}
 		d["spent_clip_ids"] = {}
 		_prime_overlapping_voices(handle, d, timeline, handle.timeline_cursor_seconds)
 		return
@@ -508,6 +513,7 @@ func _apply_seek(handle: CodaEventHandle, d: Dictionary, target_seconds: float) 
 	handle.timeline_cursor_seconds = clamped
 	stop_voices(d, handle)
 	d["fired_clip_ids"] = {}
+	d["fired_marker_ids"] = {}
 	d["spent_clip_ids"] = {}
 	_prime_overlapping_voices(handle, d, timeline, clamped)
 

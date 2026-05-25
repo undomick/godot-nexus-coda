@@ -74,9 +74,28 @@ func check_markers_crossed(
 ) -> void:
 	if timeline == null or timeline.markers.is_empty():
 		return
+	var fired_markers: Dictionary = {}
+	if dispatchers.has(handle):
+		var d: Dictionary = dispatchers[handle]
+		fired_markers = d.get("fired_marker_ids", {})
 	for m in timeline.markers:
-		if m.time_seconds <= prev_cursor or m.time_seconds > next_cursor:
+		if m.time_seconds > next_cursor:
 			continue
+		if fired_markers.has(m.id):
+			continue
+		# (prev, next] — markers exactly at prev_cursor were skipped when prev_cursor is 0
+		# (timeline start / loop origin), silencing t=0 TRANSITION markers.
+		var crossed: bool = m.time_seconds > prev_cursor and m.time_seconds <= next_cursor
+		if (
+			not crossed
+			and is_zero_approx(prev_cursor)
+			and m.time_seconds >= 0.0
+			and m.time_seconds <= next_cursor
+		):
+			crossed = true
+		if not crossed:
+			continue
+		fired_markers[m.id] = true
 		if _marker_reached.is_valid():
 			_marker_reached.call(handle, m.id)
 		if (
@@ -88,6 +107,8 @@ func check_markers_crossed(
 			_segment_driver.apply_segment_change(
 				_runtime, handle, d, m.target_segment_id, segment_crossfade_ms()
 			)
+	if dispatchers.has(handle):
+		(dispatchers[handle] as Dictionary)["fired_marker_ids"] = fired_markers
 
 
 func spawn_segment_voice(
