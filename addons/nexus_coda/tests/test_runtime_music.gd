@@ -33,6 +33,7 @@ static func run() -> int:
 	failed += _test_graph_stop_fade_blocks_plan_advance()
 	failed += _test_graph_stop_fade_defers_voice_finished()
 	failed += _test_timeline_seek_ignored_while_paused()
+	failed += _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish()
 	return failed
 
 
@@ -270,6 +271,44 @@ static func _test_graph_stop_fade_defers_voice_finished() -> int:
 	runtime.stop(handle, 500)
 	if int(finished_count[0]) != 0:
 		push_error("graph stop fade should defer voice_finished until teardown completes")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish() -> int:
+	var runtime: CodaRuntime = _make_runtime()
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	runtime.set_project(state)
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle._alive = true
+	handle.event_node = ev
+	var playing: AudioStreamPlayer = AudioStreamPlayer.new()
+	runtime.add_child(playing)
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 44100.0
+	playing.stream = stream
+	playing.play()
+	var stopped: AudioStreamPlayer = AudioStreamPlayer.new()
+	runtime.add_child(stopped)
+	var d: Dictionary = {
+		"timeline": ev.event_timeline,
+		"voices": {"stem_a": stopped, "stem_b": playing},
+	}
+	runtime._timeline_dispatchers[handle] = d
+	runtime._timeline_dispatcher.finalize_handle(handle, 500)
+	if not runtime._timeline_dispatchers.has(handle):
+		push_error("timeline fade must not tear down while a playing voice is still fading")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	if not is_instance_valid(playing):
+		push_error("timeline fade must not hard-stop the still-playing voice immediately")
 		runtime.stop_all()
 		runtime.free()
 		return 1
