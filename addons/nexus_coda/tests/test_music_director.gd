@@ -2,6 +2,10 @@ extends RefCounted
 class_name TestMusicDirector
 
 const CodaMusicDirectorScript := preload("res://addons/nexus_coda/runtime/coda_music_director.gd")
+const CodaMusicTransitionPolicyScript := preload(
+	"res://addons/nexus_coda/runtime/coda_music_transition_policy.gd"
+)
+const CodaEventHandleScript := preload("res://addons/nexus_coda/runtime/coda_event_handle.gd")
 const CodaTestMockRuntimeScript := preload(
 	"res://addons/nexus_coda/tests/helpers/coda_test_mocks.gd"
 )
@@ -12,6 +16,7 @@ static func run() -> int:
 	failed += _test_same_path_only_params()
 	failed += _test_new_path_stops_old()
 	failed += _test_failed_play_keeps_old_music()
+	failed += _test_quantized_queue_supersedes_same_slot()
 	return failed
 
 
@@ -92,6 +97,49 @@ static func _test_failed_play_keeps_old_music() -> int:
 		return 1
 	if not mock.is_alive(h1):
 		push_error("outgoing handle should stay alive after failed play")
+		mock.queue_free()
+		return 1
+	mock.queue_free()
+	return 0
+
+
+static func _test_quantized_queue_supersedes_same_slot() -> int:
+	var mock: CodaTestMockRuntime = CodaTestMockRuntimeScript.new()
+	var policy: CodaMusicTransitionPolicy = CodaMusicTransitionPolicyScript.default_policy()
+	policy.quantize_to_bar = true
+	mock._policy = policy
+	var director: CodaMusicDirector = CodaMusicDirectorScript.new()
+	director.bind_runtime(mock)
+	var timeline := CodaEventTimeline.new()
+	timeline.tempo_bpm = 120.0
+	timeline.time_signature = Vector2i(4, 4)
+	var event := CodaBrowserNode.new()
+	event.kind = CodaBrowserNode.Kind.EVENT
+	event.event_timeline = timeline
+	var first: CodaEventHandle = CodaEventHandleScript.new()
+	first._alive = true
+	first.event_node = event
+	first.is_timeline = true
+	first.timeline_cursor_seconds = 1.5
+	director._slots["default"] = {"handle": first, "event_path": "music/a"}
+	director.set_music("music/a", 500, "default", {}, true)
+	director.set_music("music/b", 500, "default", {}, true)
+	if director._pending_quantized.size() != 1:
+		push_error("quantized queue should keep only the latest request per slot")
+		mock.queue_free()
+		return 1
+	if str(director._pending_quantized[0].get("event_path", "")) != "music/b":
+		push_error("latest quantized set_music should win")
+		mock.queue_free()
+		return 1
+	director._pending_quantized[0]["fire_at"] = 0
+	director._process(0.0)
+	if mock.play_calls.size() != 1:
+		push_error("superseded quantized request must not play")
+		mock.queue_free()
+		return 1
+	if mock.play_calls[0].get("path", "") != "music/b":
+		push_error("processed quantized request should play the latest path")
 		mock.queue_free()
 		return 1
 	mock.queue_free()

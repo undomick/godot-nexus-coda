@@ -279,9 +279,14 @@ func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	if fade_ms > 0:
 		handle._paused = true
 	_graph_playback.stop_parallel_siblings(handle, fade_ms)
-	_fade_out_and_finalize_handle(handle, fade_ms)
-	if was_alive:
-		voice_finished.emit(handle)
+	if was_alive and fade_ms > 0:
+		_fade_out_and_finalize_handle(
+			handle, fade_ms, func() -> void: voice_finished.emit(handle)
+		)
+	else:
+		_fade_out_and_finalize_handle(handle, fade_ms)
+		if was_alive:
+			voice_finished.emit(handle)
 
 
 func stop_all() -> void:
@@ -429,26 +434,34 @@ func retire_timeline_voice(d: Dictionary, clip_id: String) -> void:
 	_timeline_dispatcher.retire_lane_voice(d, clip_id)
 
 
-func _fade_out_and_finalize_handle(handle: CodaEventHandle, fade_ms: int) -> void:
+func _fade_out_and_finalize_handle(
+	handle: CodaEventHandle, fade_ms: int, on_complete: Callable = Callable()
+) -> void:
 	if handle == null:
 		return
 	if fade_ms <= 0:
 		handle._stop_local(0)
+		if on_complete.is_valid():
+			on_complete.call()
 		return
-	var players: Array[AudioStreamPlayer] = _collect_handle_players(handle)
+	var players: Array[AudioStreamPlayer] = _collect_handle_players(handle, fade_ms > 0)
 	if players.is_empty():
 		handle._stop_local(0)
+		if on_complete.is_valid():
+			on_complete.call()
 		return
 	var remaining: int = players.size()
 	var on_one_done := func() -> void:
 		remaining -= 1
 		if remaining <= 0:
 			handle._stop_local(0)
+			if on_complete.is_valid():
+				on_complete.call()
 	for p in players:
 		_voice_fader.fade_volume_db(p, -80.0, fade_ms, on_one_done)
 
 
-func _collect_handle_players(handle: CodaEventHandle) -> Array[AudioStreamPlayer]:
+func _collect_handle_players(handle: CodaEventHandle, include_idle: bool = false) -> Array[AudioStreamPlayer]:
 	var out: Array[AudioStreamPlayer] = []
 	if handle == null:
 		return out
@@ -456,15 +469,17 @@ func _collect_handle_players(handle: CodaEventHandle) -> Array[AudioStreamPlayer
 		var d: Dictionary = _timeline_dispatchers[handle]
 		for p in d.get("voices", {}).values():
 			var pl: AudioStreamPlayer = p as AudioStreamPlayer
-			if pl != null and is_instance_valid(pl) and pl.playing:
+			if pl != null and is_instance_valid(pl) and (include_idle or pl.playing):
 				out.append(pl)
-	elif handle._player != null and is_instance_valid(handle._player) and handle._player.playing:
-		out.append(handle._player)
+	elif handle._player != null and is_instance_valid(handle._player):
+		if include_idle or handle._player.playing:
+			out.append(handle._player)
 	for sib in handle.graph_parallel_siblings:
 		if sib == null:
 			continue
-		if sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
-			out.append(sib._player)
+		if sib._player != null and is_instance_valid(sib._player):
+			if include_idle or sib._player.playing:
+				out.append(sib._player)
 	return out
 
 

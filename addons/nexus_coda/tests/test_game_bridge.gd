@@ -117,6 +117,11 @@ static func _test_condition_expression() -> int:
 	if CodaGameSyncDispatcherScript.rule_matches(rule, "zone", {"zone": "desert"}):
 		push_error("condition should fail for non-matching zone")
 		return 1
+	var unsupported := _make_rule(CodaGameSyncRuleScript.Action.SET_MUSIC, "zone")
+	unsupported.condition_expression = "zone!=forest"
+	if CodaGameSyncDispatcherScript.rule_matches(unsupported, "zone", {"zone": "forest"}):
+		push_error("unsupported condition expressions must not match")
+		return 1
 	return 0
 
 

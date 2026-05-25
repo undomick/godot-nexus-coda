@@ -203,4 +203,14 @@ func _seconds_until_next_bar(cursor: float, slot_key: String = "default") -> flo
 
 
 func _queue_quantized(item: Dictionary) -> void:
+	var slot_key: String = str(item.get("slot", "default"))
+	_cancel_pending_quantized_for_slot(slot_key)
 	_pending_quantized.append(item)
+
+
+func _cancel_pending_quantized_for_slot(slot_key: String) -> void:
+	var remaining: Array[Dictionary] = []
+	for pending in _pending_quantized:
+		if str(pending.get("slot", "default")) != slot_key:
+			remaining.append(pending)
+	_pending_quantized = remaining
