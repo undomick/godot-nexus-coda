@@ -107,7 +107,7 @@ func tick_dispatchers(delta: float) -> void:
 		if handle.timeline_pending_seek_seconds >= 0.0:
 			if not handle._paused:
 				_apply_seek(handle, d, handle.timeline_pending_seek_seconds)
-			handle.timeline_pending_seek_seconds = -1.0
+				handle.timeline_pending_seek_seconds = -1.0
 
 		_refresh_voice_output_levels(handle, d, timeline)
 
@@ -270,20 +270,22 @@ func resume_preview(handle: CodaEventHandle) -> void:
 	if handle == null or not dispatchers.has(handle):
 		return
 	var d: Dictionary = dispatchers[handle]
+	handle._paused = false
+	if handle.timeline_pending_seek_seconds >= 0.0:
+		_apply_seek(handle, d, handle.timeline_pending_seek_seconds)
+		handle.timeline_pending_seek_seconds = -1.0
+		return
 	var voices: Dictionary = d.get("voices", {})
 	if voices.is_empty():
 		var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
 		if timeline == null:
-			handle._paused = false
 			return
-		handle._paused = false
 		d["fired_clip_ids"] = {}
 		d["fired_marker_ids"] = {}
 		d["spent_clip_ids"] = {}
 		_prime_overlapping_voices(handle, d, timeline, handle.timeline_cursor_seconds)
 		_sync_segment_voice_after_prime(handle, d, timeline)
 		return
-	handle._paused = false
 	for p in voices.values():
 		var pl: AudioStreamPlayer = p as AudioStreamPlayer
 		if pl != null and is_instance_valid(pl):

@@ -17,6 +17,7 @@ static func run() -> int:
 	failed += _test_new_path_stops_old()
 	failed += _test_failed_play_keeps_old_music()
 	failed += _test_quantized_queue_supersedes_same_slot()
+	failed += _test_quantized_set_music_returns_null_until_fired()
 	return failed
 
 
@@ -140,6 +141,41 @@ static func _test_quantized_queue_supersedes_same_slot() -> int:
 		return 1
 	if mock.play_calls[0].get("path", "") != "music/b":
 		push_error("processed quantized request should play the latest path")
+		mock.queue_free()
+		return 1
+	mock.queue_free()
+	return 0
+
+
+static func _test_quantized_set_music_returns_null_until_fired() -> int:
+	var mock: CodaTestMockRuntime = CodaTestMockRuntimeScript.new()
+	var policy: CodaMusicTransitionPolicy = CodaMusicTransitionPolicyScript.default_policy()
+	policy.quantize_to_bar = true
+	mock._policy = policy
+	var director: CodaMusicDirector = CodaMusicDirectorScript.new()
+	director.bind_runtime(mock)
+	var timeline := CodaEventTimeline.new()
+	timeline.tempo_bpm = 120.0
+	timeline.time_signature = Vector2i(4, 4)
+	var event := CodaBrowserNode.new()
+	event.kind = CodaBrowserNode.Kind.EVENT
+	event.event_timeline = timeline
+	var first: CodaEventHandle = CodaEventHandleScript.new()
+	first._alive = true
+	first.event_node = event
+	first.is_timeline = true
+	first.timeline_cursor_seconds = 1.5
+	director._slots["default"] = {"handle": first, "event_path": "music/a"}
+	var queued: CodaEventHandle = director.set_music("music/b", 500, "default", {}, true)
+	if queued != null:
+		push_error("quantized set_music must not return the outgoing handle")
+		mock.queue_free()
+		return 1
+	director._pending_quantized[0]["fire_at"] = 0
+	director._process(0.0)
+	var after: CodaEventHandle = director.get_slot_handle("default")
+	if after == null or after == first:
+		push_error("quantized set_music should install a new handle after the bar fires")
 		mock.queue_free()
 		return 1
 	mock.queue_free()

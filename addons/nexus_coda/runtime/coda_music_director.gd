@@ -72,7 +72,8 @@ func set_music(
 					"fire_at": Time.get_ticks_msec() + int(wait_sec * 1000.0),
 				}
 			)
-			return _slot_handle(slot_key)
+			# No new handle yet — returning the outgoing handle would mis-route params/finished.
+			return null
 	return _set_music_immediate(path, actual_fade, slot_key, params)
 
 

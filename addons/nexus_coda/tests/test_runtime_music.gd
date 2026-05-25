@@ -32,7 +32,7 @@ static func run() -> int:
 	failed += _test_timeline_start_uses_music_state_not_cursor_prime()
 	failed += _test_graph_stop_fade_blocks_plan_advance()
 	failed += _test_graph_stop_fade_defers_voice_finished()
-	failed += _test_timeline_seek_ignored_while_paused()
+	failed += _test_timeline_seek_deferred_while_paused()
 	return failed
 
 
@@ -278,7 +278,7 @@ static func _test_graph_stop_fade_defers_voice_finished() -> int:
 	return 0
 
 
-static func _test_timeline_seek_ignored_while_paused() -> int:
+static func _test_timeline_seek_deferred_while_paused() -> int:
 	var runtime: CodaRuntime = _make_runtime()
 	var state: CodaState = CodaTestRuntimeScript.build_music_state()
 	runtime.set_project(state)
@@ -300,13 +300,24 @@ static func _test_timeline_seek_ignored_while_paused() -> int:
 	}
 	runtime._timeline_dispatchers[handle] = d
 	runtime._timeline_dispatcher.tick_dispatchers(0.0)
-	if handle.timeline_pending_seek_seconds >= 0.0:
-		push_error("paused timeline should consume pending seek without applying it")
+	if handle.timeline_pending_seek_seconds < 0.0:
+		push_error("paused timeline should keep pending seek until resume")
 		runtime.stop_all()
 		runtime.free()
 		return 1
 	if not (d.get("voices", {}) as Dictionary).is_empty():
-		push_error("paused timeline seek must not reprime voices")
+		push_error("paused timeline seek must not reprime voices before resume")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime._timeline_dispatcher.resume_preview(handle)
+	if handle.timeline_pending_seek_seconds >= 0.0:
+		push_error("resume should consume pending seek")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	if not is_equal_approx(handle.timeline_cursor_seconds, 12.0):
+		push_error("resume should apply deferred seek position")
 		runtime.stop_all()
 		runtime.free()
 		return 1
