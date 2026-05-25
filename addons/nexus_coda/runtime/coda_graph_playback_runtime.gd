@@ -215,6 +215,7 @@ func _finalize_paused_preview(handle: CodaEventHandle) -> void:
 		return
 	handle._paused = false
 	unmark_plan_resume(handle)
+	_unpause_graph_players(handle)
 	stop_parallel_siblings(handle)
 	handle.clear_player_binding()
 	var was_alive: bool = handle._alive
@@ -231,9 +232,10 @@ func _snapshot_pause_player(voice: CodaEventHandle, snapshot: Dictionary) -> voi
 	var pos: float = 0.0
 	if voice._player.playing:
 		pos = voice._player.get_playback_position()
-	_runtime.get_active_handles().erase(pk)
-	if voice._player.playing:
-		voice._player.stop()
+		# Keep the pooled player reserved (stream_paused still reports playing). Stopping
+		# would return the slot to acquire() and another voice could reuse this player.
+		voice._player.stream_paused = true
+	voice._player.set_meta(&"_coda_graph_paused", true)
 	snapshot[str(pk)] = {
 		"position": pos,
 		"gen": int(voice._player.get_meta(&"_coda_playback_gen", -1)),
@@ -255,8 +257,13 @@ func _resume_paused_player(
 	var expected_gen: int = int(saved_d.get("gen", -2))
 	if int(voice._player.get_meta(&"_coda_playback_gen", -1)) != expected_gen:
 		return false
-	var at: float = maxf(0.0, float(saved_d.get("position", 0.0)))
-	voice._player.play(at)
+	if voice._player.has_meta(&"_coda_graph_paused"):
+		voice._player.remove_meta(&"_coda_graph_paused")
+	if voice._player.playing:
+		voice._player.stream_paused = false
+	else:
+		var at: float = maxf(0.0, float(saved_d.get("position", 0.0)))
+		voice._player.play(at)
 	var gen: int = int(voice._player.get_meta(&"_coda_playback_gen", -1))
 	var active_handles: Dictionary = _runtime.get_active_handles()
 	if voice == owner:
@@ -266,6 +273,19 @@ func _resume_paused_player(
 		voice.params["_coda_playback_gen"] = gen
 		active_handles[voice._player.get_instance_id()] = voice
 	return true
+
+
+func _unpause_graph_players(handle: CodaEventHandle) -> void:
+	if handle._player != null and is_instance_valid(handle._player):
+		if handle._player.has_meta(&"_coda_graph_paused"):
+			handle._player.remove_meta(&"_coda_graph_paused")
+		handle._player.stream_paused = false
+	for sib in handle.graph_parallel_siblings:
+		if sib == null or sib._player == null or not is_instance_valid(sib._player):
+			continue
+		if sib._player.has_meta(&"_coda_graph_paused"):
+			sib._player.remove_meta(&"_coda_graph_paused")
+		sib._player.stream_paused = false
 
 
 func _start_parallel_step(
