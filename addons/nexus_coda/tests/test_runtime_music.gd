@@ -34,6 +34,8 @@ static func run() -> int:
 	failed += _test_graph_stop_fade_defers_voice_finished()
 	failed += _test_timeline_seek_ignored_while_paused()
 	failed += _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish()
+	failed += _test_timeline_fade_ignores_music_state_notify()
+	failed += _test_set_project_clears_global_parameters()
 	return failed
 
 
@@ -346,6 +348,55 @@ static func _test_timeline_seek_ignored_while_paused() -> int:
 		return 1
 	if not (d.get("voices", {}) as Dictionary).is_empty():
 		push_error("paused timeline seek must not reprime voices")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_timeline_fade_ignores_music_state_notify() -> int:
+	var runtime: CodaRuntime = _make_runtime()
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	runtime.set_project(state)
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle._alive = true
+	handle.event_node = ev
+	handle.param_values = {"music_state": 0}
+	var d: Dictionary = {
+		"timeline": ev.event_timeline,
+		"active_segment_id": "calm",
+		"voices": {},
+	}
+	runtime._timeline_dispatchers[handle] = d
+	runtime._timeline_dispatcher.finalize_handle(handle, 500)
+	if not handle._paused:
+		push_error("timeline fade stop should pause the handle")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.set_parameter(handle, "music_state", 1)
+	if str(d.get("active_segment_id", "")) != "calm":
+		push_error("paused timeline fade must not apply music_state segment change")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_set_project_clears_global_parameters() -> int:
+	var runtime: CodaRuntime = _make_runtime()
+	var state_a: CodaState = CodaTestRuntimeScript.build_music_state()
+	runtime.set_project(state_a)
+	runtime.set_global_parameter("music_state", 99)
+	runtime.set_project(CodaTestRuntimeScript.build_music_state())
+	if runtime._parameter_pipeline.has_global_params():
+		push_error("set_project must clear global parameters")
 		runtime.stop_all()
 		runtime.free()
 		return 1

@@ -177,6 +177,7 @@ func _capture_event_duplicate_ids(data: Dictionary) -> Dictionary:
 	var out := {
 		"param_ids": [],
 		"graph_node_ids": [],
+		"timeline_clip_ids": _capture_timeline_clip_ids_from_dict(data.get("event_timeline", null)),
 	}
 	for pd in data.get("event_parameters", []) as Array:
 		if pd is Dictionary:
@@ -186,6 +187,29 @@ func _capture_event_duplicate_ids(data: Dictionary) -> Dictionary:
 		for n_raw in (graph_raw as Dictionary).get("nodes", []) as Array:
 			if n_raw is Dictionary:
 				(out["graph_node_ids"] as Array).append(str((n_raw as Dictionary).get("id", "")))
+	return out
+
+
+func _capture_timeline_clip_ids_from_dict(timeline_raw: Variant) -> Array:
+	var out: Array = []
+	if not timeline_raw is Dictionary:
+		return out
+	for tr_raw in (timeline_raw as Dictionary).get("tracks", []) as Array:
+		if not tr_raw is Dictionary:
+			continue
+		for c_raw in (tr_raw as Dictionary).get("clips", []) as Array:
+			if c_raw is Dictionary:
+				out.append(str((c_raw as Dictionary).get("id", "")))
+	return out
+
+
+func _collect_timeline_clip_ids(timeline: CodaEventTimeline) -> Array:
+	var out: Array = []
+	if timeline == null:
+		return out
+	for tr in timeline.tracks:
+		for clip in tr.clips:
+			out.append(clip.id)
 	return out
 
 
@@ -251,11 +275,21 @@ func _remap_event_duplicate_references(copy: CodaBrowserNode, id_capture: Dictio
 				e.from_node_id = node_remap[e.from_node_id]
 			if node_remap.has(e.to_node_id):
 				e.to_node_id = node_remap[e.to_node_id]
+	var clip_remap: Dictionary = {}
+	if copy.event_timeline != null:
+		var old_clip_ids: Array = id_capture.get("timeline_clip_ids", []) as Array
+		var new_clip_ids: Array = _collect_timeline_clip_ids(copy.event_timeline)
+		for i in range(mini(old_clip_ids.size(), new_clip_ids.size())):
+			var old_cid: String = str(old_clip_ids[i])
+			if not old_cid.is_empty():
+				clip_remap[old_cid] = str(new_clip_ids[i])
 	for m in copy.event_modulations:
 		if param_remap.has(m.source_param_id):
 			m.source_param_id = param_remap[m.source_param_id]
 		if node_remap.has(m.target_node_id):
 			m.target_node_id = node_remap[m.target_node_id]
+		elif clip_remap.has(m.target_node_id):
+			m.target_node_id = clip_remap[m.target_node_id]
 	if copy.event_timeline != null:
 		_refresh_timeline_effect_ids(copy.event_timeline)
 

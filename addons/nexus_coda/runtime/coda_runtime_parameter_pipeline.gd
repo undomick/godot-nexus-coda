@@ -25,6 +25,11 @@ func set_global_parameter(name: String, value: Variant) -> void:
 	_global_params[name] = value
 
 
+func clear_global_parameters() -> void:
+	_global_params.clear()
+	_global_params_last.clear()
+
+
 func get_global_parameter(name: String, default_value: Variant = null) -> Variant:
 	return _global_params.get(name, default_value)
 

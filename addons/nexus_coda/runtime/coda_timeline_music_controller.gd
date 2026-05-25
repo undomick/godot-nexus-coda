@@ -38,7 +38,7 @@ func segment_crossfade_ms() -> int:
 func notify_music_state_changed(
 	handle: CodaEventHandle, dispatchers: Dictionary, find_param: Callable
 ) -> void:
-	if handle == null or not handle.is_timeline or not dispatchers.has(handle):
+	if handle == null or not handle.is_timeline or handle._paused or not dispatchers.has(handle):
 		return
 	var d: Dictionary = dispatchers[handle]
 	var timeline = d.get("timeline", null)

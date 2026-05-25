@@ -169,6 +169,7 @@ func set_project(project: Variant) -> void:
 	# Editor project loads and gameplay project swaps must not keep dispatchers tied to the
 	# previous CodaState (timeline cursors, graph plans, pooled players).
 	stop_all()
+	_parameter_pipeline.clear_global_parameters()
 	if project != null:
 		# Loaded banks override play() resolution; clear them when wiring a new project so stale
 		# bank events cannot shadow the new CodaState.
