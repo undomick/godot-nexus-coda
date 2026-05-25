@@ -79,6 +79,7 @@ func start_timeline_event(
 	}
 	handle.timeline_runtime = _runtime
 	_prime_overlapping_voices(handle, dispatchers[handle], timeline, handle.timeline_cursor_seconds)
+	_runtime.notify_music_state_changed(handle)
 	_runtime.runtime_emit_voice_started(handle)
 	return handle
 
@@ -162,6 +163,11 @@ func tick_dispatchers(delta: float) -> void:
 			# Forward landing keeps fired_clip_ids so overlap with the pre-wrap tail is not retriggered.
 			_prime_overlapping_voices(handle, d, timeline, next_cursor)
 			prev_cursor = loop_lo if backward_landing else cursor_at_frame_start
+			var active_seg: String = str(d.get("active_segment_id", ""))
+			if not active_seg.is_empty():
+				# stop_voices cleared the segment stem; apply_segment_change skips when id unchanged.
+				d["active_segment_id"] = ""
+				_runtime.notify_music_state_changed(handle)
 
 		handle.timeline_cursor_seconds = next_cursor
 		if _timeline_music != null:
@@ -537,6 +543,8 @@ func _prime_overlapping_voices(
 		if track.mute:
 			continue
 		if has_solo and not track.solo:
+			continue
+		if CodaTimelineSegmentDriverScript.is_segments_track(track):
 			continue
 		for clip in track.clips:
 			if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
