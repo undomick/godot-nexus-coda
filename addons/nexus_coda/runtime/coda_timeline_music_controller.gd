@@ -81,7 +81,7 @@ func check_markers_crossed(
 		if raw is Dictionary:
 			fired_markers = raw as Dictionary
 	for m in timeline.markers:
-		if m.time_seconds <= prev_cursor or m.time_seconds > next_cursor:
+		if m.time_seconds < prev_cursor or m.time_seconds >= next_cursor:
 			continue
 		if fired_markers.has(m.id):
 			continue

@@ -3,6 +3,9 @@ extends SceneTree
 const LayoutStore := preload("res://addons/nexus_coda/editor/shell/coda_editor_layout_store.gd")
 const LayoutStoreClass := preload("res://addons/nexus_coda/editor/shell/coda_editor_layout_store.gd")
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
+const CodaEventGraphNodeDataScript := preload(
+	"res://addons/nexus_coda/editor/browser/coda_event_graph_node_data.gd"
+)
 const CodaTimelineMarkerUiScript := preload(
 	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_marker_ui.gd"
 )
@@ -54,6 +57,7 @@ func _init() -> void:
 	failed += _test_layout_store()
 	failed += _test_bank_rename_duplicate()
 	failed += _test_event_duplicate_ids()
+	failed += _test_event_duplicate_graph_parameter_id()
 	failed += _test_delete_event_clears_banks()
 	failed += _test_orphaned_event_edits_not_serialized()
 	failed += _test_marker_ui()
@@ -158,6 +162,34 @@ static func _test_event_duplicate_ids() -> int:
 	var edge: CodaEventGraphEdge = copy.event_graph.edges[0]
 	if edge.from_node_id == ev.event_graph.nodes[0].id or edge.to_node_id == sound.id:
 		push_error("duplicate_events_node graph edge remap")
+		return 1
+	return 0
+
+
+static func _test_event_duplicate_graph_parameter_id() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var ev: CodaBrowserNode = state.add_events_event(state.events_root.id, "IntensitySwitch")
+	if ev == null:
+		push_error("add_events_event failed")
+		return 1
+	var param := CodaEventParameter.new()
+	param.param_name = "Intensity"
+	ev.event_parameters.append(param)
+	var sw: CodaEventGraphNodeData = CodaEventGraphNodeDataScript.new(
+		CodaEventGraphNodeDataScript.Kind.SWITCH
+	)
+	sw.properties["parameter_id"] = param.id
+	ev.event_graph.nodes.append(sw)
+	var copy: CodaBrowserNode = state.duplicate_events_node(ev.id)
+	if copy == null or copy.event_graph == null or copy.event_graph.nodes.is_empty():
+		push_error("duplicate_events_node failed for switch graph")
+		return 1
+	var copy_pid: String = str(copy.event_graph.nodes[0].properties.get("parameter_id", ""))
+	if copy_pid.is_empty() or copy_pid == param.id:
+		push_error("duplicate_events_node should remap graph parameter_id")
+		return 1
+	if copy_pid != copy.event_parameters[0].id:
+		push_error("duplicate_events_node graph parameter_id should match copy param")
 		return 1
 	return 0
 

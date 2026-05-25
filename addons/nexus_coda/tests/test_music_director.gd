@@ -12,6 +12,7 @@ static func run() -> int:
 	failed += _test_same_path_only_params()
 	failed += _test_new_path_stops_old()
 	failed += _test_failed_play_keeps_old_music()
+	failed += _test_quantized_queue_drains()
 	return failed
 
 
@@ -92,6 +93,38 @@ static func _test_failed_play_keeps_old_music() -> int:
 		return 1
 	if not mock.is_alive(h1):
 		push_error("outgoing handle should stay alive after failed play")
+		mock.queue_free()
+		return 1
+	mock.queue_free()
+	return 0
+
+
+static func _test_quantized_queue_drains() -> int:
+	var mock: CodaTestMockRuntime = CodaTestMockRuntimeScript.new()
+	var director: CodaMusicDirector = CodaMusicDirectorScript.new()
+	mock.add_child(director)
+	director.bind_runtime(mock)
+	director._pending_quantized.append(
+		{
+			"kind": "set_music",
+			"event_path": "music/queued",
+			"fade_ms": 400,
+			"slot": "default",
+			"params": {"music_state": 2},
+			"fire_at": 0,
+		}
+	)
+	director._process(0.0)
+	if mock.play_calls.size() != 1:
+		push_error("quantized queue should drain via _process")
+		mock.queue_free()
+		return 1
+	if str(mock.play_calls[0].get("path", "")) != "music/queued":
+		push_error("quantized queue should play queued path")
+		mock.queue_free()
+		return 1
+	if not director.is_processing():
+		push_error("music director should enable processing in _ready")
 		mock.queue_free()
 		return 1
 	mock.queue_free()

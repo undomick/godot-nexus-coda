@@ -246,6 +246,10 @@ func _remap_event_duplicate_references(copy: CodaBrowserNode, id_capture: Dictio
 				var old_nid: String = str(old_node_ids[i])
 				if not old_nid.is_empty():
 					node_remap[old_nid] = copy.event_graph.nodes[i].id
+		for n in copy.event_graph.nodes:
+			var pid: String = str(n.properties.get("parameter_id", ""))
+			if param_remap.has(pid):
+				n.properties["parameter_id"] = param_remap[pid]
 		for e in copy.event_graph.edges:
 			if node_remap.has(e.from_node_id):
 				e.from_node_id = node_remap[e.from_node_id]

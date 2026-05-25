@@ -727,6 +727,8 @@ func runtime_bump_playback_gen() -> int:
 
 
 func runtime_begin_player_voice(player: AudioStreamPlayer) -> int:
+	if player != null and is_instance_valid(player):
+		_voice_fader.cancel(player)
 	return CodaPooledVoiceLifecycleScript.begin_player_voice(
 		player,
 		_timeline_dispatchers,

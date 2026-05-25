@@ -475,6 +475,8 @@ func retire_lane_voice(d: Dictionary, clip_id: String) -> void:
 	d["voices"] = voices
 	if p == null or not is_instance_valid(p):
 		return
+	if _voice_fader != null:
+		_voice_fader.cancel(p)
 	var pk: int = p.get_instance_id()
 	voice_owner.erase(pk)
 	voice_playback_gen.erase(pk)

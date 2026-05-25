@@ -17,6 +17,7 @@ const CodaTimelineMarkerScript := preload(
 static func run() -> int:
 	var failed: int = 0
 	failed += _test_marker_crossed_once()
+	failed += _test_marker_at_timeline_start()
 	failed += _test_marker_in_loop_wrap_tail()
 	failed += _test_marker_forward_wrap_overlap_dedupe()
 	failed += _test_should_notify_for_param()
@@ -43,6 +44,30 @@ static func _test_marker_crossed_once() -> int:
 	ctrl.check_markers_crossed(handle, ev.event_timeline, 10.5, 11.0, dispatchers)
 	if markers.size() != 1:
 		push_error("marker should not fire again")
+		return 1
+	return 0
+
+
+static func _test_marker_at_timeline_start() -> int:
+	var markers: Array[String] = []
+	var ctrl := CodaTimelineMusicControllerScript.new()
+	ctrl.setup(null, null, CodaTimelineSegmentDriverScript.new(), null, func(_h: CodaEventHandle, mid: String) -> void:
+		markers.append(mid)
+	)
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var timeline = ev.event_timeline
+	timeline.markers.clear()
+	var start_marker := CodaTimelineMarkerScript.new()
+	start_marker.time_seconds = 0.0
+	timeline.markers.append(start_marker)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle.event_node = ev
+	var dispatchers: Dictionary = {handle: {"timeline": timeline}}
+	ctrl.check_markers_crossed(handle, timeline, 0.0, 0.1, dispatchers)
+	if markers.size() != 1 or markers[0] != start_marker.id:
+		push_error("marker at timeline start should fire on first tick")
 		return 1
 	return 0
 

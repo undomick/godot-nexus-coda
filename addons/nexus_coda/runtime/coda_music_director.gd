@@ -28,6 +28,7 @@ func bind_runtime(runtime) -> void:
 
 
 func _ready() -> void:
+	set_process(true)
 	call_deferred(&"_auto_bind")
 
 
