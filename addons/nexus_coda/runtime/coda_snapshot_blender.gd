@@ -68,10 +68,35 @@ func tick(delta: float) -> void:
 	if _sync_buses.is_valid():
 		_sync_buses.call()
 	if t >= 1.0:
+		_commit_blend_end()
+
+
+func _commit_blend_end() -> void:
+	if _blend.is_empty() or _pending_snapshot_id.is_empty() or _project == null:
 		clear()
+		return
+	var snap: CodaSnapshot = _project.find_snapshot_by_id(_pending_snapshot_id)
+	if snap == null:
+		clear()
+		return
+	for bus_id in snap.bus_overrides.keys():
+		var b: CodaBus = _project.bus_root.find_by_id(bus_id)
+		if b == null:
+			continue
+		var entry: Dictionary = snap.bus_overrides[bus_id] as Dictionary
+		b.volume_db = float(entry.get("volume_db", b.volume_db))
+		b.mute = bool(entry.get("mute", b.mute))
+		b.solo = bool(entry.get("solo", b.solo))
+		b.bypass = bool(entry.get("bypass", b.bypass))
+		b.send_target_id = str(entry.get("send_target_id", b.send_target_id))
+	if _sync_buses.is_valid():
+		_sync_buses.call()
+	clear()
 
 
 func _begin_blend(snapshot_id: String, blend_ms: int) -> void:
+	if is_blending():
+		_commit_blend_end()
 	var snap: CodaSnapshot = _project.find_snapshot_by_id(snapshot_id)
 	if snap == null:
 		return
