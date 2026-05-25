@@ -105,7 +105,8 @@ func tick_dispatchers(delta: float) -> void:
 		_runtime.get_parameter_pipeline().advance_smoothing(handle, delta)
 
 		if handle.timeline_pending_seek_seconds >= 0.0:
-			_apply_seek(handle, d, handle.timeline_pending_seek_seconds)
+			if not handle._paused:
+				_apply_seek(handle, d, handle.timeline_pending_seek_seconds)
 			handle.timeline_pending_seek_seconds = -1.0
 
 		_refresh_voice_output_levels(handle, d, timeline)
@@ -231,7 +232,7 @@ func resync_preview_for_event(event_id: String) -> void:
 		return
 	var handle: CodaEventHandle = active_handle_for_event(event_id)
 	var dispatchers: Dictionary = _runtime.get_timeline_dispatchers()
-	if handle == null or not dispatchers.has(handle):
+	if handle == null or not dispatchers.has(handle) or handle._paused:
 		return
 	var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
 	if event == null or event.event_timeline == null:

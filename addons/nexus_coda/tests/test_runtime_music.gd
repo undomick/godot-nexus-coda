@@ -30,6 +30,8 @@ static func run() -> int:
 	failed += _test_stop_all_finalizes_plan_resume_handles()
 	failed += _test_segment_change_keeps_active_on_spawn_failure()
 	failed += _test_timeline_start_uses_music_state_not_cursor_prime()
+	failed += _test_graph_stop_fade_blocks_plan_advance()
+	failed += _test_timeline_seek_ignored_while_paused()
 	return failed
 
 
@@ -199,6 +201,86 @@ static func _test_segment_change_keeps_active_on_spawn_failure() -> int:
 		return 1
 	if d.get("voices", {}).has(seg_tr[0].clips[1].id):
 		push_error("failed segment spawn must not add a new segment voice")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_graph_stop_fade_blocks_plan_advance() -> int:
+	var runtime: CodaRuntime = _make_runtime()
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle._alive = true
+	handle.current_sound_id = "step_a"
+	var player: AudioStreamPlayer = AudioStreamPlayer.new()
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	if tree != null:
+		tree.root.add_child(player)
+	handle._bind_player(player)
+	handle.params["_coda_plan"] = [
+		{
+			"audio_path": "res://addons/nexus_coda/samples/silence.wav",
+			"volume_db": 0.0,
+			"pitch_scale": 1.0,
+			"sound_id": "step_b",
+			"blend_weight": 1.0,
+		}
+	]
+	runtime._active_handles[player.get_instance_id()] = handle
+	runtime.stop(handle, 500)
+	if not handle._paused:
+		push_error("graph stop with fade should pause the handle")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	if (handle.params.get("_coda_plan", []) as Array).size() != 0:
+		push_error("graph stop should clear the remaining plan")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	var before_sound: String = handle.current_sound_id
+	runtime._graph_playback.on_voice_finished_for_graph(player, player.get_instance_id(), false)
+	if handle.current_sound_id != before_sound:
+		push_error("graph stop fade should block plan advance on voice_finished")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_timeline_seek_ignored_while_paused() -> int:
+	var runtime: CodaRuntime = _make_runtime()
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	runtime.set_project(state)
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle._alive = true
+	handle._paused = true
+	handle.event_node = ev
+	handle.timeline_cursor_seconds = 0.0
+	handle.timeline_length_seconds = ev.event_timeline.length_seconds
+	handle.timeline_pending_seek_seconds = 12.0
+	var d: Dictionary = {
+		"timeline": ev.event_timeline,
+		"voices": {},
+		"fired_clip_ids": {},
+		"fired_marker_ids": {},
+		"spent_clip_ids": {},
+	}
+	runtime._timeline_dispatchers[handle] = d
+	runtime._timeline_dispatcher.tick_dispatchers(0.0)
+	if handle.timeline_pending_seek_seconds >= 0.0:
+		push_error("paused timeline should consume pending seek without applying it")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	if not (d.get("voices", {}) as Dictionary).is_empty():
+		push_error("paused timeline seek must not reprime voices")
 		runtime.stop_all()
 		runtime.free()
 		return 1
