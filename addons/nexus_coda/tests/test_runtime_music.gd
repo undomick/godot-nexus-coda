@@ -26,6 +26,7 @@ class SegmentSpawnTestRuntime extends CodaRuntime:
 static func run() -> int:
 	var failed: int = 0
 	failed += _test_set_parameter_segment_notify()
+	failed += _test_global_parameter_music_state_segment()
 	failed += _test_notify_music_state_changed()
 	failed += _test_stop_all_finalizes_plan_resume_handles()
 	failed += _test_segment_change_keeps_active_on_spawn_failure()
@@ -66,6 +67,30 @@ static func _test_set_parameter_segment_notify() -> int:
 	runtime.set_parameter(handle, "music_state", 1)
 	if str(d.get("active_segment_id", "")) != "tense":
 		push_error("music_state set_parameter should trigger segment change")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_global_parameter_music_state_segment() -> int:
+	var runtime: SegmentSpawnTestRuntime = _make_runtime()
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	runtime.set_project(state)
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle._alive = true
+	handle.event_node = ev
+	handle.param_values = {}
+	var d: Dictionary = {"timeline": ev.event_timeline, "active_segment_id": ""}
+	runtime._timeline_dispatchers[handle] = d
+	runtime.set_global_parameter("music_state", 1)
+	runtime._parameter_pipeline.apply_global_parameters()
+	if str(d.get("active_segment_id", "")) != "tense":
+		push_error("music_state set_global_parameter should trigger segment change")
 		runtime.stop_all()
 		runtime.free()
 		return 1

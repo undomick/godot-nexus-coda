@@ -391,6 +391,10 @@ func _maybe_notify_music_state(handle: CodaEventHandle, name_or_id: String) -> v
 	notify_music_state_changed(handle)
 
 
+func notify_global_param_applied(handle: CodaEventHandle, name_or_id: String) -> void:
+	_maybe_notify_music_state(handle, name_or_id)
+
+
 func set_global_parameter(name: String, value: Variant) -> void:
 	_parameter_pipeline.set_global_parameter(name, value)
 
