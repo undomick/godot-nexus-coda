@@ -85,7 +85,9 @@ func apply_global_parameters() -> void:
 		if th == null or not th._alive:
 			continue
 		for gname in _global_params.keys():
-			apply_parameter_without_segment_notify(th, String(gname), _global_params[gname])
+			var gkey: String = String(gname)
+			apply_parameter_without_segment_notify(th, gkey, _global_params[gname])
+			_runtime.notify_global_param_applied(th, gkey)
 
 
 func apply_parameter_without_segment_notify(

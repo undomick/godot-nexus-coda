@@ -177,6 +177,7 @@ func _capture_event_duplicate_ids(data: Dictionary) -> Dictionary:
 	var out := {
 		"param_ids": [],
 		"graph_node_ids": [],
+		"clip_ids": _capture_timeline_clip_ids_from_dict(data.get("event_timeline", null)),
 	}
 	for pd in data.get("event_parameters", []) as Array:
 		if pd is Dictionary:
@@ -251,13 +252,47 @@ func _remap_event_duplicate_references(copy: CodaBrowserNode, id_capture: Dictio
 				e.from_node_id = node_remap[e.from_node_id]
 			if node_remap.has(e.to_node_id):
 				e.to_node_id = node_remap[e.to_node_id]
+	var clip_remap: Dictionary = {}
+	if copy.event_timeline != null:
+		var old_clip_ids: Array = id_capture.get("clip_ids", []) as Array
+		var new_clip_ids: Array = _collect_timeline_clip_ids(copy.event_timeline)
+		for i in range(mini(old_clip_ids.size(), new_clip_ids.size())):
+			var old_cid: String = str(old_clip_ids[i])
+			if not old_cid.is_empty():
+				clip_remap[old_cid] = str(new_clip_ids[i])
 	for m in copy.event_modulations:
 		if param_remap.has(m.source_param_id):
 			m.source_param_id = param_remap[m.source_param_id]
 		if node_remap.has(m.target_node_id):
 			m.target_node_id = node_remap[m.target_node_id]
+		elif clip_remap.has(m.target_node_id):
+			m.target_node_id = clip_remap[m.target_node_id]
 	if copy.event_timeline != null:
+		for mk in copy.event_timeline.markers:
+			if clip_remap.has(mk.target_segment_id):
+				mk.target_segment_id = clip_remap[mk.target_segment_id]
 		_refresh_timeline_effect_ids(copy.event_timeline)
+
+
+func _capture_timeline_clip_ids_from_dict(timeline_raw: Variant) -> Array:
+	var ids: Array = []
+	if not timeline_raw is Dictionary:
+		return ids
+	for tr_raw in (timeline_raw as Dictionary).get("tracks", []) as Array:
+		if not tr_raw is Dictionary:
+			continue
+		for c_raw in (tr_raw as Dictionary).get("clips", []) as Array:
+			if c_raw is Dictionary:
+				ids.append(str((c_raw as Dictionary).get("id", "")))
+	return ids
+
+
+func _collect_timeline_clip_ids(timeline: CodaEventTimeline) -> Array:
+	var ids: Array = []
+	for tr in timeline.tracks:
+		for clip in tr.clips:
+			ids.append(clip.id)
+	return ids
 
 
 func _refresh_timeline_effect_ids(timeline: CodaEventTimeline) -> void:

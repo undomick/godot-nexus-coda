@@ -32,6 +32,13 @@ const CodaEffectsChainBindingScript := preload(
 const CodaTimelineClipScript := preload(
 	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
 )
+const CodaTimelineTrackScript := preload(
+	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_track.gd"
+)
+const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
+const CodaEventParameterScript := preload(
+	"res://addons/nexus_coda/editor/browser/coda_event_parameter.gd"
+)
 const CodaInspectorEffectsSectionScript := preload(
 	"res://addons/nexus_coda/editor/panels/inspector/coda_inspector_effects_section.gd"
 )
@@ -54,6 +61,7 @@ func _init() -> void:
 	failed += _test_layout_store()
 	failed += _test_bank_rename_duplicate()
 	failed += _test_event_duplicate_ids()
+	failed += _test_event_duplicate_remaps_timeline_clip_modulations()
 	failed += _test_delete_event_clears_banks()
 	failed += _test_orphaned_event_edits_not_serialized()
 	failed += _test_marker_ui()
@@ -158,6 +166,41 @@ static func _test_event_duplicate_ids() -> int:
 	var edge: CodaEventGraphEdge = copy.event_graph.edges[0]
 	if edge.from_node_id == ev.event_graph.nodes[0].id or edge.to_node_id == sound.id:
 		push_error("duplicate_events_node graph edge remap")
+		return 1
+	return 0
+
+
+static func _test_event_duplicate_remaps_timeline_clip_modulations() -> int:
+	var state: CodaState = CodaStateScript.new()
+	var ev: CodaBrowserNode = state.add_events_event(state.events_root.id, "Stems")
+	if ev == null:
+		push_error("add_events_event failed")
+		return 1
+	ev.event_timeline = CodaEventTimelineScript.make_default()
+	var intensity := CodaEventParameterScript.new()
+	intensity.param_name = "intensity"
+	ev.event_parameters.append(intensity)
+	var stem_track: CodaTimelineTrack = CodaTimelineTrackScript.new()
+	stem_track.track_name = "Music"
+	var stem_clip: CodaTimelineClip = CodaTimelineClipScript.new()
+	stem_clip.id = "stem_low"
+	stem_track.clips.append(stem_clip)
+	ev.event_timeline.tracks.append(stem_track)
+	var mod := CodaModulationScript.new()
+	mod.source_param_id = intensity.id
+	mod.target_node_id = stem_clip.id
+	ev.event_modulations.append(mod)
+	var copy: CodaBrowserNode = state.duplicate_events_node(ev.id)
+	if copy == null or copy.event_modulations.is_empty():
+		push_error("duplicate_events_node failed for clip modulation")
+		return 1
+	var mod_copy: CodaModulation = copy.event_modulations[0]
+	if mod_copy.target_node_id == stem_clip.id:
+		push_error("duplicate_events_node should remap timeline clip modulation targets")
+		return 1
+	var copy_clip: CodaTimelineClip = copy.event_timeline.tracks[1].clips[0]
+	if mod_copy.target_node_id != copy_clip.id:
+		push_error("duplicate_events_node clip modulation should target duplicated clip id")
 		return 1
 	return 0
 
