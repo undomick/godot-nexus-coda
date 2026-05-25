@@ -357,7 +357,9 @@ func apply_snapshot(snapshot_id: String, blend_ms: int = -1) -> bool:
 
 
 func notify_music_state_changed(handle: CodaEventHandle) -> void:
-	if _timeline_music == null:
+	if _timeline_music == null or handle == null:
+		return
+	if handle._paused:
 		return
 	_timeline_music.notify_music_state_changed(
 		handle, _timeline_dispatchers, Callable(_parameter_pipeline, "find_event_param")
