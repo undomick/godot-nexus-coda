@@ -31,6 +31,7 @@ static func run() -> int:
 	failed += _test_segment_change_keeps_active_on_spawn_failure()
 	failed += _test_timeline_start_uses_music_state_not_cursor_prime()
 	failed += _test_graph_stop_fade_blocks_plan_advance()
+	failed += _test_graph_stop_fade_defers_voice_finished()
 	failed += _test_timeline_seek_ignored_while_paused()
 	return failed
 
@@ -244,6 +245,31 @@ static func _test_graph_stop_fade_blocks_plan_advance() -> int:
 	runtime._graph_playback.on_voice_finished_for_graph(player, player.get_instance_id(), false)
 	if handle.current_sound_id != before_sound:
 		push_error("graph stop fade should block plan advance on voice_finished")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_graph_stop_fade_defers_voice_finished() -> int:
+	var runtime: CodaRuntime = _make_runtime()
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle._alive = true
+	var player: AudioStreamPlayer = AudioStreamPlayer.new()
+	runtime.add_child(player)
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 44100.0
+	player.stream = stream
+	player.play()
+	handle._bind_player(player)
+	runtime._active_handles[player.get_instance_id()] = handle
+	var finished_count: Array[int] = [0]
+	runtime.voice_finished.connect(func(_h: CodaEventHandle) -> void: finished_count[0] += 1)
+	runtime.stop(handle, 500)
+	if int(finished_count[0]) != 0:
+		push_error("graph stop fade should defer voice_finished until teardown completes")
 		runtime.stop_all()
 		runtime.free()
 		return 1
