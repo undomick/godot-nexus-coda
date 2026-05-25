@@ -18,6 +18,9 @@ static func run() -> int:
 	failed += _test_failed_play_keeps_old_music()
 	failed += _test_quantized_queue_supersedes_same_slot()
 	failed += _test_quantized_slot_parameter_targets_pending_play()
+	failed += _test_immediate_stop_cancels_pending_quantized()
+	failed += _test_immediate_set_music_cancels_pending_quantized()
+	failed += _test_fade_stop_then_set_music_stops_outgoing()
 	return failed
 
 
@@ -193,6 +196,96 @@ static func _test_quantized_slot_parameter_targets_pending_play() -> int:
 	var played_params: Dictionary = mock.play_calls[0].get("params", {}) as Dictionary
 	if int(played_params.get("music_state", -1)) != 2:
 		push_error("played music should receive queued slot parameters")
+		mock.queue_free()
+		return 1
+	mock.queue_free()
+	return 0
+
+
+static func _timeline_slot_setup(director: CodaMusicDirector) -> void:
+	var timeline := CodaEventTimeline.new()
+	timeline.tempo_bpm = 120.0
+	timeline.time_signature = Vector2i(4, 4)
+	var event := CodaBrowserNode.new()
+	event.kind = CodaBrowserNode.Kind.EVENT
+	event.event_timeline = timeline
+	var first: CodaEventHandle = CodaEventHandleScript.new()
+	first._alive = true
+	first.event_node = event
+	first.is_timeline = true
+	first.timeline_cursor_seconds = 1.5
+	director._slots["default"] = {"handle": first, "event_path": "music/a"}
+
+
+static func _test_immediate_stop_cancels_pending_quantized() -> int:
+	var mock: CodaTestMockRuntime = CodaTestMockRuntimeScript.new()
+	var policy: CodaMusicTransitionPolicy = CodaMusicTransitionPolicyScript.default_policy()
+	policy.quantize_to_bar = false
+	mock._policy = policy
+	var director: CodaMusicDirector = CodaMusicDirectorScript.new()
+	director.bind_runtime(mock)
+	_timeline_slot_setup(director)
+	director.set_music("music/b", 500, "default", {}, true)
+	if director._pending_quantized.is_empty():
+		push_error("expected pending quantized set_music before immediate stop")
+		mock.queue_free()
+		return 1
+	director.stop_music("default", 500, false)
+	if not director._pending_quantized.is_empty():
+		push_error("immediate stop_music should cancel pending quantized requests")
+		mock.queue_free()
+		return 1
+	if mock.stop_calls.size() != 1:
+		push_error("immediate stop_music should stop the live slot handle")
+		mock.queue_free()
+		return 1
+	mock.queue_free()
+	return 0
+
+
+static func _test_immediate_set_music_cancels_pending_quantized() -> int:
+	var mock: CodaTestMockRuntime = CodaTestMockRuntimeScript.new()
+	var policy: CodaMusicTransitionPolicy = CodaMusicTransitionPolicyScript.default_policy()
+	policy.quantize_to_bar = false
+	mock._policy = policy
+	var director: CodaMusicDirector = CodaMusicDirectorScript.new()
+	director.bind_runtime(mock)
+	_timeline_slot_setup(director)
+	director.set_music("music/b", 500, "default", {}, true)
+	director.set_music("music/c", 500, "default", {}, false)
+	if not director._pending_quantized.is_empty():
+		push_error("immediate set_music should cancel pending quantized requests")
+		mock.queue_free()
+		return 1
+	if mock.play_calls.size() != 1 or mock.play_calls[0].get("path", "") != "music/c":
+		push_error("immediate set_music should play the new path")
+		mock.queue_free()
+		return 1
+	mock.queue_free()
+	return 0
+
+
+static func _test_fade_stop_then_set_music_stops_outgoing() -> int:
+	var mock: CodaTestMockRuntime = CodaTestMockRuntimeScript.new()
+	var director: CodaMusicDirector = CodaMusicDirectorScript.new()
+	director.bind_runtime(mock)
+	var h1: CodaEventHandle = director.set_music("music/a", 800)
+	if h1 == null:
+		push_error("set_music should return handle")
+		mock.queue_free()
+		return 1
+	director.stop_music("default", 2000)
+	if not mock.is_alive(h1):
+		push_error("fade stop should keep outgoing handle alive until teardown")
+		mock.queue_free()
+		return 1
+	director.set_music("music/b", 800)
+	if mock.stop_calls.size() != 2:
+		push_error("set_music after fade stop should stop the outgoing handle")
+		mock.queue_free()
+		return 1
+	if mock.play_calls.size() != 2:
+		push_error("set_music after fade stop should start the new path")
 		mock.queue_free()
 		return 1
 	mock.queue_free()

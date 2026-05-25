@@ -156,7 +156,11 @@ func _process(_delta: float) -> void:
 func _set_music_immediate(
 	event_path: String, fade_ms: int, slot_key: String, params: Dictionary
 ) -> CodaEventHandle:
+	_cancel_pending_quantized_for_slot(slot_key)
 	var existing: Dictionary = _slots.get(slot_key, {}) as Dictionary
+	var fading_out: CodaEventHandle = existing.get("outgoing_handle", null) as CodaEventHandle
+	if fading_out != null and _runtime.is_alive(fading_out):
+		_runtime.stop(fading_out, fade_ms)
 	var old_handle: CodaEventHandle = existing.get("handle", null) as CodaEventHandle
 	var old_path: String = str(existing.get("event_path", ""))
 	if old_handle != null and _runtime.is_alive(old_handle) and old_path == event_path:
@@ -182,10 +186,21 @@ func _set_music_immediate(
 
 
 func _stop_slot(slot_key: String, fade_ms: int) -> void:
+	_cancel_pending_quantized_for_slot(slot_key)
 	var existing: Dictionary = _slots.get(slot_key, {}) as Dictionary
+	var fading_out: CodaEventHandle = existing.get("outgoing_handle", null) as CodaEventHandle
+	if fading_out != null and _runtime.is_alive(fading_out):
+		_runtime.stop(fading_out, 0)
 	var handle: CodaEventHandle = existing.get("handle", null) as CodaEventHandle
 	if handle != null and _runtime.is_alive(handle):
 		_runtime.stop(handle, fade_ms)
+		if fade_ms > 0:
+			_slots[slot_key] = {
+				"outgoing_handle": handle,
+				"priority": int(existing.get("priority", 0)),
+				"paused": bool(existing.get("paused", false)),
+			}
+			return
 	_slots.erase(slot_key)
 
 
