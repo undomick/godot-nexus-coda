@@ -136,6 +136,7 @@ func set_project(project: Variant) -> void:
 	# Editor project loads and gameplay project swaps must not keep dispatchers tied to the
 	# previous CodaState (timeline cursors, graph plans, pooled players).
 	stop_all()
+	_parameter_pipeline.clear_global_parameters()
 	if project != null:
 		_bank_registry.clear()
 	if _project != null:
@@ -325,6 +326,9 @@ func set_parameter(handle: CodaEventHandle, name_or_id: String, value: Variant) 
 
 func _maybe_notify_music_state(handle: CodaEventHandle, name_or_id: String) -> void:
 	if _timeline_music == null or handle == null or not handle.is_timeline:
+		return
+	# Faded timeline stops and editor pause both set _paused; do not spawn segment voices.
+	if handle._paused:
 		return
 	var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
 	if not _timeline_music.should_notify_for_param(

@@ -9,13 +9,13 @@ const CodaMusicTransitionPolicyScript := preload(
 	"res://addons/nexus_coda/runtime/coda_music_transition_policy.gd"
 )
 
-var _runtime: CodaRuntime = null
+var _runtime = null
 var _policy: CodaMusicTransitionPolicy = null
 var _slots: Dictionary = {}
 var _pending_quantized: Array[Dictionary] = []
 
 
-func bind_runtime(runtime: CodaRuntime) -> void:
+func bind_runtime(runtime) -> void:
 	_runtime = runtime
 	if runtime != null and runtime.has_method("get_transition_policy"):
 		_policy = runtime.get_transition_policy()

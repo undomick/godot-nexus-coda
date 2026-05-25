@@ -21,6 +21,12 @@ const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime
 const CodaTimelineDispatcherScript := preload(
 	"res://addons/nexus_coda/runtime/coda_timeline_dispatcher.gd"
 )
+const CodaTimelineClipDispatchScript := preload(
+	"res://addons/nexus_coda/runtime/coda_timeline_clip_dispatch.gd"
+)
+const CodaTimelineLaneVoiceScript := preload(
+	"res://addons/nexus_coda/runtime/coda_timeline_lane_voice.gd"
+)
 const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
 const CodaEventParameterScript := preload(
 	"res://addons/nexus_coda/editor/browser/coda_event_parameter.gd"
@@ -215,9 +221,11 @@ static func _test_timeline_refresh_applies_per_voice_modulation() -> int:
 		"fired_clip_ids": {stem_clip.id: true},
 	}
 	runtime._timeline_dispatchers[handle] = d
-	var dispatcher: CodaTimelineDispatcher = CodaTimelineDispatcherScript.new()
-	dispatcher.setup(runtime, null, null)
-	dispatcher._refresh_voice_output_levels(handle, d, timeline)
+	var lane_voice: CodaTimelineLaneVoice = CodaTimelineLaneVoiceScript.new()
+	lane_voice.setup(runtime, null)
+	var clip_dispatch: CodaTimelineClipDispatch = CodaTimelineClipDispatchScript.new()
+	clip_dispatch.setup(runtime, lane_voice)
+	clip_dispatch.refresh_voice_output_levels(handle, d, timeline)
 	if abs(player.volume_db - (-12.0)) > 0.05:
 		push_error("timeline refresh should apply RTPC modulation per voice, got %s" % player.volume_db)
 		return 1

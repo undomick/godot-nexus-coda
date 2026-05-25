@@ -35,6 +35,8 @@ static func run() -> int:
 	failed += _test_graph_stop_fade_defers_voice_finished()
 	failed += _test_timeline_seek_while_paused_updates_cursor_only()
 	failed += _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish()
+	failed += _test_timeline_fade_ignores_music_state_notify()
+	failed += _test_set_project_clears_global_parameters()
 	return failed
 
 
@@ -334,6 +336,50 @@ static func _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish() -
 		return 1
 	if not is_instance_valid(playing):
 		push_error("timeline fade must not hard-stop the still-playing voice immediately")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_timeline_fade_ignores_music_state_notify() -> int:
+	var runtime: SegmentSpawnTestRuntime = _make_runtime()
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	runtime.set_project(state)
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle._alive = true
+	handle._paused = true
+	handle.event_node = ev
+	handle.param_values = {"music_state": 0}
+	var d: Dictionary = {"timeline": ev.event_timeline, "active_segment_id": ""}
+	runtime._timeline_dispatchers[handle] = d
+	runtime.set_parameter(handle, "music_state", 1)
+	if str(d.get("active_segment_id", "")) != "":
+		push_error("music_state notify must not run while timeline handle is paused during fade")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_set_project_clears_global_parameters() -> int:
+	var runtime: CodaRuntime = _make_runtime()
+	runtime.set_global_parameter("music_state", 2)
+	if not runtime.get_parameter_pipeline().has_global_params():
+		push_error("set_global_parameter should register a global")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	runtime.set_project(state)
+	if runtime.get_parameter_pipeline().has_global_params():
+		push_error("set_project must clear global parameters from the previous project")
 		runtime.stop_all()
 		runtime.free()
 		return 1
