@@ -16,6 +16,7 @@ static func run() -> int:
 	failed += _test_all_actions()
 	failed += _test_condition_expression()
 	failed += _test_payload_from_signal_arg()
+	failed += _test_set_music_state_ignores_unlisted_payload_keys()
 	return failed
 
 
@@ -56,6 +57,12 @@ static func _test_all_actions() -> int:
 		calls["stop_music"].append({"slot": slot, "fade": fade})
 	ctx.set_parameter_fn = func(h: CodaEventHandle, name: String, value: Variant) -> void:
 		calls["set_parameter"].append({"name": name, "value": value})
+	ctx.set_slot_parameter_fn = func(slot: String, name: String, value: Variant) -> bool:
+		var h: CodaEventHandle = ctx.get_slot_handle_fn.call(slot) as CodaEventHandle
+		if h == null:
+			return false
+		ctx.set_parameter_fn.call(h, name, value)
+		return true
 	ctx.apply_snapshot_fn = func(sid: String, fade: int) -> void:
 		calls["apply_snapshot"].append({"snapshot_id": sid, "fade": fade})
 	ctx.notify_music_state_fn = func(h: CodaEventHandle) -> void: calls["notify"].append(h)
@@ -121,6 +128,35 @@ static func _test_condition_expression() -> int:
 	unsupported.condition_expression = "zone!=forest"
 	if CodaGameSyncDispatcherScript.rule_matches(unsupported, "zone", {"zone": "forest"}):
 		push_error("unsupported condition expressions must not match")
+		return 1
+	return 0
+
+
+static func _test_set_music_state_ignores_unlisted_payload_keys() -> int:
+	var calls: Dictionary = {"set_parameter": []}
+	var alive_handle: CodaEventHandle = CodaEventHandleScript.new()
+	alive_handle._alive = true
+	var ctx := CodaGameSyncContextScript.new()
+	ctx.set_slot_parameter_fn = func(slot: String, name: String, value: Variant) -> bool:
+		calls["set_parameter"].append({"slot": slot, "name": name, "value": value})
+		return true
+	ctx.get_slot_handle_fn = func(_slot: String) -> CodaEventHandle:
+		return alive_handle
+	ctx.is_alive_fn = func(_h: CodaEventHandle) -> bool:
+		return true
+	ctx.notify_music_state_fn = func(_h: CodaEventHandle) -> void:
+		pass
+	var rule := _make_rule(CodaGameSyncRuleScript.Action.SET_MUSIC_STATE, "zone_entered")
+	rule.parameter_overrides = {"music_state": 2}
+	CodaGameSyncDispatcherScript.dispatch(rule, {"zone": "forest"}, ctx)
+	if calls["set_parameter"].size() != 1:
+		push_error("SET_MUSIC_STATE should only apply declared override keys")
+		return 1
+	if str(calls["set_parameter"][0].get("name", "")) != "music_state":
+		push_error("SET_MUSIC_STATE should apply music_state, not zone")
+		return 1
+	if int(calls["set_parameter"][0].get("value", -1)) != 2:
+		push_error("SET_MUSIC_STATE should use override value when payload has no music_state")
 		return 1
 	return 0
 

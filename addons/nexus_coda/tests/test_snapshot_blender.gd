@@ -97,8 +97,8 @@ static func _test_blend_interrupt_commits_previous() -> int:
 	if abs(bus.volume_db - (-12.0)) > 0.001:
 		push_error("interrupted blend should commit the previous snapshot volume")
 		return 1
-	if bus.mute:
-		push_error("interrupted blend should commit the previous snapshot mute state")
+	if not bus.mute:
+		push_error("interrupted blend should apply the new snapshot mute immediately")
 		return 1
 	return 0
 
