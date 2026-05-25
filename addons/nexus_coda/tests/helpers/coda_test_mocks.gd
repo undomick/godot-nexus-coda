@@ -9,6 +9,7 @@ const CodaMusicTransitionPolicyScript := preload(
 )
 
 var play_calls: Array[Dictionary] = []
+var play_fail_paths: Dictionary = {}
 var stop_calls: Array[Dictionary] = []
 var set_parameter_calls: Array[Dictionary] = []
 var notify_calls: Array[CodaEventHandle] = []
@@ -18,6 +19,8 @@ var _policy: CodaMusicTransitionPolicy = CodaMusicTransitionPolicyScript.default
 
 
 func play(path: String, params: Dictionary = {}) -> CodaEventHandle:
+	if bool(play_fail_paths.get(path, false)):
+		return null
 	var h: CodaEventHandle = CodaEventHandleScript.new()
 	h.id = _next_id
 	_next_id += 1
