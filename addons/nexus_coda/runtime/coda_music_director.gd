@@ -141,13 +141,12 @@ func _set_music_immediate(
 		for key in params.keys():
 			_runtime.set_parameter(old_handle, String(key), params[key])
 		return old_handle
-	if old_handle != null and _runtime.is_alive(old_handle):
-		existing["outgoing_handle"] = old_handle
-		_slots[slot_key] = existing
-		_runtime.stop(old_handle, fade_ms)
 	var new_handle: CodaEventHandle = _runtime.play(event_path, params)
 	if new_handle == null:
 		return null
+	if old_handle != null and _runtime.is_alive(old_handle):
+		existing["outgoing_handle"] = old_handle
+		_runtime.stop(old_handle, fade_ms)
 	_slots[slot_key] = {
 		"handle": new_handle,
 		"event_path": event_path,

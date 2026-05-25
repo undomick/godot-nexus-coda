@@ -117,7 +117,6 @@ func apply_segment_change(
 	var current: String = str(d.get("active_segment_id", ""))
 	if current == segment_id:
 		return
-	d["active_segment_id"] = segment_id
 	var tr = info.get("track", null)
 	var clip = info.get("clip", null)
 	if tr == null or clip == null:
@@ -125,13 +124,12 @@ func apply_segment_change(
 	var planned: Array = CodaTimelineSchedulerScript.plan(
 		timeline, handle.param_values, handle.timeline_cursor_seconds, -1.0
 	)
-	var spawned: bool = false
+	var spawned_ok: bool = false
 	for e in planned:
 		if String(e.get("clip_id", "")) == clip.id:
-			runtime.spawn_timeline_segment_voice(handle, d, e, crossfade_ms)
-			spawned = true
+			spawned_ok = runtime.spawn_timeline_segment_voice(handle, d, e, crossfade_ms)
 			break
-	if not spawned:
+	if not spawned_ok:
 		var manual: Dictionary = {
 			"audio_path": clip.audio_path,
 			"volume_db": clip.volume_db + tr.volume_db,
@@ -148,7 +146,10 @@ func apply_segment_change(
 			"track_output_bus_id": tr.output_bus_id,
 			"timeline_clip_end_seconds": clip.end_seconds(),
 		}
-		runtime.spawn_timeline_segment_voice(handle, d, manual, crossfade_ms)
+		spawned_ok = runtime.spawn_timeline_segment_voice(handle, d, manual, crossfade_ms)
+	if not spawned_ok:
+		return
+	d["active_segment_id"] = segment_id
 	var voices: Dictionary = d.get("voices", {})
 	for key in voices.keys():
 		if str(key) == clip.id:
