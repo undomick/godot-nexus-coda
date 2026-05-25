@@ -326,6 +326,8 @@ func stop_all() -> void:
 			graph_handles.append(rh)
 	_stop_all_in_progress = true
 	if _pool != null:
+		if _voice_fader != null:
+			_voice_fader.cancel_players(_pool.all_players())
 		_pool.stop_all()
 	_stop_all_in_progress = false
 	for gh2 in graph_handles:
@@ -746,6 +748,8 @@ func runtime_bump_playback_gen() -> int:
 
 
 func runtime_begin_player_voice(player: AudioStreamPlayer) -> int:
+	if _voice_fader != null:
+		_voice_fader.cancel(player)
 	return CodaPooledVoiceLifecycleScript.begin_player_voice(
 		player,
 		_timeline_dispatchers,

@@ -420,6 +420,8 @@ func stop_voices(d: Dictionary, handle: CodaEventHandle = null) -> void:
 		var pk: int = p.get_instance_id()
 		voice_owner.erase(pk)
 		voice_playback_gen.erase(pk)
+		if _voice_fader != null:
+			_voice_fader.cancel(p)
 		if p.playing:
 			p.stop()
 		clear_voice_player_meta(p)
@@ -448,6 +450,8 @@ func stop_voices_past_clip_end(
 		var end_at: float = float(p.get_meta(&"_coda_clip_timeline_end", -1.0))
 		if cursor_seconds < end_at:
 			continue
+		if _voice_fader != null:
+			_voice_fader.cancel(p)
 		if p.playing:
 			p.stop()
 		var pk: int = p.get_instance_id()
@@ -479,6 +483,8 @@ func retire_lane_voice(d: Dictionary, clip_id: String) -> void:
 	var pk: int = p.get_instance_id()
 	voice_owner.erase(pk)
 	voice_playback_gen.erase(pk)
+	if _voice_fader != null:
+		_voice_fader.cancel(p)
 	if p.playing:
 		p.stop()
 	clear_voice_player_meta(p)

@@ -29,6 +29,11 @@ func cancel(player: AudioStreamPlayer) -> void:
 	_tweens.erase(key)
 
 
+func cancel_players(players: Array) -> void:
+	for item in players:
+		cancel(item as AudioStreamPlayer)
+
+
 func fade_volume_db(
 	player: AudioStreamPlayer, target_db: float, fade_ms: int, on_complete: Callable = Callable()
 ) -> void:

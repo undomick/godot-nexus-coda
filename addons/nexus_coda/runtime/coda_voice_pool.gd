@@ -42,6 +42,10 @@ func active_count() -> int:
 	return n
 
 
+func all_players() -> Array[AudioStreamPlayer]:
+	return _players.duplicate()
+
+
 func stop_all() -> void:
 	for p in _players:
 		if p.playing:

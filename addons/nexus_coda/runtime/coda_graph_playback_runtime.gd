@@ -151,6 +151,8 @@ func stop_parallel_siblings(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 		else:
 			sib._alive = false
 			if sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
+				if _voice_fader != null:
+					_voice_fader.cancel(sib._player)
 				sib._player.stop()
 		if sib._player != null and is_instance_valid(sib._player):
 			active_handles.erase(sib._player.get_instance_id())

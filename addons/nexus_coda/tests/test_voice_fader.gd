@@ -11,6 +11,8 @@ static func run() -> int:
 	var failed: int = 0
 	failed += _test_clip_fade()
 	failed += _test_immediate_fade()
+	failed += _test_cancel_suppresses_fade_callback()
+	failed += _test_cancel_before_reuse()
 	return failed
 
 
@@ -40,6 +42,39 @@ static func _test_immediate_fade() -> int:
 	fader.fade_volume_db(player, -20.0, 0)
 	if abs(player.volume_db - (-20.0)) > 0.001:
 		push_error("fade_ms 0 should set volume immediately")
+		owner.queue_free()
+		return 1
+	owner.queue_free()
+	return 0
+
+
+static func _test_cancel_suppresses_fade_callback() -> int:
+	var owner := Node.new()
+	var player := AudioStreamPlayer.new()
+	owner.add_child(player)
+	var fader := CodaVoiceFaderScript.new(owner)
+	var completed := false
+	fader.fade_volume_db(player, -80.0, 5000, func() -> void: completed = true)
+	fader.cancel(player)
+	if completed:
+		push_error("cancel should suppress fade on_complete callback")
+		owner.queue_free()
+		return 1
+	owner.queue_free()
+	return 0
+
+
+static func _test_cancel_before_reuse() -> int:
+	var owner := Node.new()
+	var player := AudioStreamPlayer.new()
+	owner.add_child(player)
+	player.volume_db = 0.0
+	var fader := CodaVoiceFaderScript.new(owner)
+	fader.fade_volume_db(player, -80.0, 5000)
+	fader.cancel(player)
+	player.volume_db = -6.0
+	if abs(player.volume_db - (-6.0)) > 0.001:
+		push_error("cancel should leave volume at the value set for reuse")
 		owner.queue_free()
 		return 1
 	owner.queue_free()
