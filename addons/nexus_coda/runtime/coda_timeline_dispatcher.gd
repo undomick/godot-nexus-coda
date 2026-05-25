@@ -11,6 +11,9 @@ const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_
 const CodaPooledVoiceLifecycleScript := preload(
 	"res://addons/nexus_coda/runtime/coda_pooled_voice_lifecycle.gd"
 )
+const CodaTimelineSegmentDriverScript := preload(
+	"res://addons/nexus_coda/runtime/coda_timeline_segment_driver.gd"
+)
 
 var _runtime: CodaRuntime = null
 var _voice_fader: CodaVoiceFader = null
@@ -571,6 +574,8 @@ func _heal_orphaned_fired_clips(
 			continue
 		if has_solo and not track.solo:
 			continue
+		if CodaTimelineSegmentDriverScript.is_segments_track(track):
+			continue
 		for clip in track.clips:
 			if not fired.has(clip.id):
 				continue
@@ -639,6 +644,8 @@ func _fire_clips_in_range(
 		if track.mute:
 			continue
 		if has_solo and not track.solo:
+			continue
+		if CodaTimelineSegmentDriverScript.is_segments_track(track):
 			continue
 		for clip in track.clips:
 			if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:

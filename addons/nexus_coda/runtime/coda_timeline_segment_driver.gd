@@ -27,9 +27,13 @@ static func segments_track(timeline):
 	if timeline == null:
 		return null
 	for tr in timeline.tracks:
-		if tr.track_name.to_lower() == SEGMENTS_TRACK_NAME.to_lower():
+		if is_segments_track(tr):
 			return tr
 	return null
+
+
+static func is_segments_track(track) -> bool:
+	return track != null and str(track.track_name).to_lower() == SEGMENTS_TRACK_NAME.to_lower()
 
 
 static func resolve_segment_id(timeline, param_name: String, param_value: Variant) -> String:
@@ -76,6 +80,23 @@ static func should_drive_param(param_name: String, event: CodaBrowserNode = null
 		if lookup == n:
 			return true
 	return false
+
+
+static func _sync_segment_clip_dispatch_state(d: Dictionary, timeline, active_clip_id: String) -> void:
+	var seg_tr = segments_track(timeline)
+	if seg_tr == null or active_clip_id.is_empty():
+		return
+	var fired: Dictionary = d.get("fired_clip_ids", {})
+	var spent: Dictionary = d.get("spent_clip_ids", {})
+	for sc in seg_tr.clips:
+		if sc.id == active_clip_id:
+			fired[sc.id] = true
+			spent.erase(sc.id)
+		else:
+			spent[sc.id] = true
+			fired.erase(sc.id)
+	d["fired_clip_ids"] = fired
+	d["spent_clip_ids"] = spent
 
 
 func apply_segment_change(
@@ -144,4 +165,17 @@ func apply_segment_change(
 				is_segment_voice = true
 				break
 		if is_segment_voice:
-			runtime.fade_out_timeline_voice(p, crossfade_ms, func() -> void: runtime.retire_timeline_voice(d, str(key)))
+			var old_clip_id: String = str(key)
+			runtime.fade_out_timeline_voice(
+				p,
+				crossfade_ms,
+				func() -> void:
+					runtime.retire_timeline_voice(d, old_clip_id)
+					var spent: Dictionary = d.get("spent_clip_ids", {})
+					spent[old_clip_id] = true
+					d["spent_clip_ids"] = spent
+					var fired: Dictionary = d.get("fired_clip_ids", {})
+					fired.erase(old_clip_id)
+					d["fired_clip_ids"] = fired
+			)
+	_sync_segment_clip_dispatch_state(d, timeline, clip.id)
