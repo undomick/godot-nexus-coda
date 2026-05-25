@@ -221,8 +221,6 @@ func finalize_handle(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 				var pl2: AudioStreamPlayer = p as AudioStreamPlayer
 				if pl2 != null and is_instance_valid(pl2) and pl2.playing:
 					_voice_fader.fade_volume_db(pl2, -80.0, fade_ms, on_done)
-				else:
-					on_done.call()
 			return
 	_finish_teardown(handle, was_alive)
 
@@ -539,8 +537,7 @@ func _sync_segment_voice_after_prime(
 	if CodaTimelineSegmentDriverScript.segments_track(timeline) == null:
 		return
 	# Segment lanes are driven by music-state params, not cursor overlap. After stop/seek/prime
-	# the active segment id may still match params while voices were cleared — force respawn.
-	d["active_segment_id"] = ""
+	# voices may be cleared while active_segment_id still matches params — reprime without crossfade.
 	_runtime.notify_music_state_changed(handle)
 
 

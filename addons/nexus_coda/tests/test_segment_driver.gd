@@ -16,6 +16,25 @@ const CodaTimelineSegmentDriverScript := preload(
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
 const CodaBrowserNodeScript := preload("res://addons/nexus_coda/editor/browser/coda_browser_node.gd")
 const CodaTestRuntimeScript := preload("res://addons/nexus_coda/tests/helpers/coda_test_runtime.gd")
+const CodaEventHandleScript := preload("res://addons/nexus_coda/runtime/coda_event_handle.gd")
+const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
+
+
+class SegmentReprimeTestRuntime extends CodaRuntimeScript:
+	var crossfade_used: Array[int] = []
+
+	func spawn_timeline_segment_voice(
+		_h: CodaEventHandle, d: Dictionary, entry: Dictionary, crossfade_ms: int = -1
+	) -> bool:
+		if not crossfade_used.is_empty():
+			crossfade_used[0] = crossfade_ms
+		var clip_id: String = String(entry.get("sound_id", ""))
+		if clip_id.is_empty():
+			return false
+		var voices: Dictionary = d.get("voices", {})
+		voices[clip_id] = AudioStreamPlayer.new()
+		d["voices"] = voices
+		return true
 
 
 static func run() -> int:
@@ -25,6 +44,7 @@ static func run() -> int:
 	failed += _test_custom_segment_param()
 	failed += _test_intensity_not_segment()
 	failed += _test_segment_dispatch_state_sync()
+	failed += _test_same_segment_reprime_uses_zero_crossfade()
 	return failed
 
 
@@ -90,6 +110,42 @@ static func _test_segment_dispatch_state_sync() -> int:
 	if not spent.has(calm.id):
 		push_error("outgoing segment clip should be marked spent")
 		return 1
+	return 0
+
+
+static func _test_same_segment_reprime_uses_zero_crossfade() -> int:
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var timeline = ev.event_timeline
+	var seg_tr = CodaTimelineSegmentDriverScript.segments_track(timeline)
+	if seg_tr == null or seg_tr.clips.is_empty():
+		push_error("reprime test needs Segments track")
+		return 1
+	var calm = seg_tr.clips[0]
+	var crossfade_used: Array[int] = [-1]
+	var runtime := SegmentReprimeTestRuntime.new()
+	runtime.crossfade_used = crossfade_used
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle.event_node = ev
+	handle.param_values = {"music_state": 0}
+	var d: Dictionary = {
+		"timeline": timeline,
+		"active_segment_id": calm.segment_id,
+		"voices": {},
+		"fired_clip_ids": {},
+		"spent_clip_ids": {},
+	}
+	CodaTimelineSegmentDriverScript.new().apply_segment_change(
+		runtime, handle, d, calm.segment_id, 500
+	)
+	if crossfade_used[0] != 0:
+		push_error("same-segment reprime after voice loss should use 0 ms crossfade, got %s" % crossfade_used[0])
+		return 1
+	if not (d.get("voices", {}) as Dictionary).has(calm.id):
+		push_error("same-segment reprime should respawn the segment voice")
+		return 1
+	runtime.free()
 	return 0
 
 

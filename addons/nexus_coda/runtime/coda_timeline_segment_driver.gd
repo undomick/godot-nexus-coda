@@ -58,6 +58,18 @@ static func resolve_segment_id(timeline, param_name: String, param_value: Varian
 	return ""
 
 
+static func _segment_voice_is_live(d: Dictionary, timeline, segment_id: String) -> bool:
+	var info: Dictionary = find_clip_for_segment(timeline, segment_id)
+	if info.is_empty():
+		return false
+	var clip = info.get("clip", null)
+	if clip == null:
+		return false
+	var voices: Dictionary = d.get("voices", {})
+	var p: AudioStreamPlayer = voices.get(clip.id, null) as AudioStreamPlayer
+	return p != null and is_instance_valid(p)
+
+
 static func find_clip_for_segment(timeline, segment_id: String) -> Dictionary:
 	if segment_id.is_empty() or timeline == null:
 		return {}
@@ -116,7 +128,9 @@ func apply_segment_change(
 		return
 	var current: String = str(d.get("active_segment_id", ""))
 	if current == segment_id:
-		return
+		if _segment_voice_is_live(d, timeline, segment_id):
+			return
+		crossfade_ms = 0
 	var tr = info.get("track", null)
 	var clip = info.get("clip", null)
 	if tr == null or clip == null:
