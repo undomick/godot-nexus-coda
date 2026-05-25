@@ -32,7 +32,7 @@ static func run() -> int:
 	failed += _test_timeline_start_uses_music_state_not_cursor_prime()
 	failed += _test_graph_stop_fade_blocks_plan_advance()
 	failed += _test_graph_stop_fade_defers_voice_finished()
-	failed += _test_timeline_seek_ignored_while_paused()
+	failed += _test_timeline_seek_while_paused_updates_cursor_only()
 	failed += _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish()
 	return failed
 
@@ -317,7 +317,7 @@ static func _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish() -
 	return 0
 
 
-static func _test_timeline_seek_ignored_while_paused() -> int:
+static func _test_timeline_seek_while_paused_updates_cursor_only() -> int:
 	var runtime: CodaRuntime = _make_runtime()
 	var state: CodaState = CodaTestRuntimeScript.build_music_state()
 	runtime.set_project(state)
@@ -340,7 +340,15 @@ static func _test_timeline_seek_ignored_while_paused() -> int:
 	runtime._timeline_dispatchers[handle] = d
 	runtime._timeline_dispatcher.tick_dispatchers(0.0)
 	if handle.timeline_pending_seek_seconds >= 0.0:
-		push_error("paused timeline should consume pending seek without applying it")
+		push_error("paused timeline should consume pending seek")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	if abs(handle.timeline_cursor_seconds - 12.0) > 0.001:
+		push_error(
+			"paused timeline seek should move cursor without repriming, got %s"
+			% handle.timeline_cursor_seconds
+		)
 		runtime.stop_all()
 		runtime.free()
 		return 1

@@ -105,9 +105,12 @@ func tick_dispatchers(delta: float) -> void:
 		_runtime.get_parameter_pipeline().advance_smoothing(handle, delta)
 
 		if handle.timeline_pending_seek_seconds >= 0.0:
-			if not handle._paused:
-				_apply_seek(handle, d, handle.timeline_pending_seek_seconds)
+			var seek_target: float = handle.timeline_pending_seek_seconds
 			handle.timeline_pending_seek_seconds = -1.0
+			if handle._paused:
+				_apply_seek_cursor_only(handle, d, seek_target)
+			else:
+				_apply_seek(handle, d, seek_target)
 
 		_refresh_voice_output_levels(handle, d, timeline)
 
@@ -513,6 +516,18 @@ func _finish_teardown(handle: CodaEventHandle, was_alive: bool) -> void:
 		handle._alive = false
 		handle.finished.emit()
 	_runtime.runtime_emit_voice_finished(handle)
+
+
+func _apply_seek_cursor_only(
+	handle: CodaEventHandle, d: Dictionary, target_seconds: float
+) -> void:
+	var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
+	if timeline == null:
+		return
+	handle.timeline_cursor_seconds = clampf(target_seconds, 0.0, timeline.length_seconds)
+	d["fired_clip_ids"] = {}
+	d["fired_marker_ids"] = {}
+	d["spent_clip_ids"] = {}
 
 
 func _apply_seek(handle: CodaEventHandle, d: Dictionary, target_seconds: float) -> void:
