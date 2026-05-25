@@ -34,7 +34,7 @@ func play(path: String, params: Dictionary = {}) -> CodaEventHandle:
 
 func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	stop_calls.append({"handle": handle, "fade_ms": fade_ms})
-	if handle != null:
+	if handle != null and fade_ms <= 0:
 		handle._alive = false
 
 
