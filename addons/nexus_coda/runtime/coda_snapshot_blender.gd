@@ -2,7 +2,7 @@
 class_name CodaSnapshotBlender
 extends RefCounted
 
-## Interpolates [CodaSnapshot] bus volume overrides over time, then applies mute/solo at end.
+## Interpolates [CodaSnapshot] bus volume overrides over time; mute/solo/bypass apply immediately.
 
 var _project: CodaState = null
 var _blend: Dictionary = {}
@@ -55,15 +55,11 @@ func tick(delta: float) -> void:
 		var b: CodaBus = _project.bus_root.find_by_id(bus_id)
 		if b == null:
 			continue
-		var target_db: float = float((snap.bus_overrides[bus_id] as Dictionary).get("volume_db", b.volume_db))
+		var entry: Dictionary = snap.bus_overrides[bus_id] as Dictionary
+		var target_db: float = float(entry.get("volume_db", b.volume_db))
 		var start_db: float = float(from_volumes.get(bus_id, b.volume_db))
 		b.volume_db = lerpf(start_db, target_db, t)
-		if t >= 1.0:
-			var entry: Dictionary = snap.bus_overrides[bus_id] as Dictionary
-			b.mute = bool(entry.get("mute", b.mute))
-			b.solo = bool(entry.get("solo", b.solo))
-			b.bypass = bool(entry.get("bypass", b.bypass))
-			b.send_target_id = str(entry.get("send_target_id", b.send_target_id))
+	_apply_snapshot_discrete_bus_states(snap)
 	_blend["elapsed"] = elapsed
 	if _sync_buses.is_valid():
 		_sync_buses.call()
@@ -111,4 +107,19 @@ func _begin_blend(snapshot_id: String, blend_ms: int) -> void:
 		"duration": maxf(0.001, float(blend_ms) / 1000.0),
 		"from_volumes": from_volumes,
 	}
+	_apply_snapshot_discrete_bus_states(snap)
 	_project.project_dirty.emit()
+
+
+func _apply_snapshot_discrete_bus_states(snap: CodaSnapshot) -> void:
+	if snap == null or _project == null:
+		return
+	for bus_id in snap.bus_overrides.keys():
+		var b: CodaBus = _project.bus_root.find_by_id(bus_id)
+		if b == null:
+			continue
+		var entry: Dictionary = snap.bus_overrides[bus_id] as Dictionary
+		b.mute = bool(entry.get("mute", b.mute))
+		b.solo = bool(entry.get("solo", b.solo))
+		b.bypass = bool(entry.get("bypass", b.bypass))
+		b.send_target_id = str(entry.get("send_target_id", b.send_target_id))

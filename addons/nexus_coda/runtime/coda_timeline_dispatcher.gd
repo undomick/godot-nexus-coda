@@ -650,7 +650,11 @@ func _refresh_voice_output_levels(
 		else:
 			var base_db: float = float(cl.volume_db + tr.volume_db) + override_db
 			base_db += CodaVoiceFaderScript.clip_fade_db_offset(cl, handle.timeline_cursor_seconds)
-			p.volume_db = base_db
+			var levels: Dictionary = _runtime.get_parameter_pipeline().modulation_voice_levels(
+				handle, clip_id, base_db, float(cl.pitch_scale)
+			)
+			p.volume_db = float(levels.get("volume_db", base_db))
+			p.pitch_scale = float(levels.get("pitch_scale", float(cl.pitch_scale)))
 
 
 func _fire_clips_in_range(
