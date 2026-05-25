@@ -21,6 +21,8 @@ static func run() -> int:
 	failed += _test_immediate_stop_cancels_pending_quantized()
 	failed += _test_immediate_set_music_cancels_pending_quantized()
 	failed += _test_fade_stop_then_set_music_stops_outgoing()
+	failed += _test_fade_stop_slot_exposes_outgoing_handle()
+	failed += _test_fade_stop_same_path_updates_outgoing_only()
 	return failed
 
 
@@ -286,6 +288,61 @@ static func _test_fade_stop_then_set_music_stops_outgoing() -> int:
 		return 1
 	if mock.play_calls.size() != 2:
 		push_error("set_music after fade stop should start the new path")
+		mock.queue_free()
+		return 1
+	mock.queue_free()
+	return 0
+
+
+static func _test_fade_stop_slot_exposes_outgoing_handle() -> int:
+	var mock: CodaTestMockRuntime = CodaTestMockRuntimeScript.new()
+	var director: CodaMusicDirector = CodaMusicDirectorScript.new()
+	director.bind_runtime(mock)
+	var h1: CodaEventHandle = director.set_music("music/a", 800)
+	if h1 == null:
+		push_error("set_music should return handle")
+		mock.queue_free()
+		return 1
+	director.stop_music("default", 2000)
+	var exposed: CodaEventHandle = director.get_slot_handle("default")
+	if exposed != h1:
+		push_error("fade stop should expose the outgoing slot handle")
+		mock.queue_free()
+		return 1
+	var slot: Dictionary = director._slots.get("default", {}) as Dictionary
+	if str(slot.get("event_path", "")) != "music/a":
+		push_error("fade stop should retain event_path for same-track updates")
+		mock.queue_free()
+		return 1
+	mock.queue_free()
+	return 0
+
+
+static func _test_fade_stop_same_path_updates_outgoing_only() -> int:
+	var mock: CodaTestMockRuntime = CodaTestMockRuntimeScript.new()
+	var director: CodaMusicDirector = CodaMusicDirectorScript.new()
+	director.bind_runtime(mock)
+	var h1: CodaEventHandle = director.set_music("music/a", 800)
+	if h1 == null:
+		push_error("set_music should return handle")
+		mock.queue_free()
+		return 1
+	director.stop_music("default", 2000)
+	var h2: CodaEventHandle = director.set_music("music/a", 800, "default", {"music_state": 2})
+	if h2 != h1:
+		push_error("same path during fade stop should update the outgoing handle")
+		mock.queue_free()
+		return 1
+	if mock.play_calls.size() != 1:
+		push_error("same path during fade stop must not start a second voice")
+		mock.queue_free()
+		return 1
+	if mock.set_parameter_calls.size() != 1:
+		push_error("same path during fade stop should apply parameter updates")
+		mock.queue_free()
+		return 1
+	if int(mock.set_parameter_calls[0].get("value", -1)) != 2:
+		push_error("parameter update should reach the outgoing handle")
 		mock.queue_free()
 		return 1
 	mock.queue_free()

@@ -158,19 +158,20 @@ func _set_music_immediate(
 ) -> CodaEventHandle:
 	_cancel_pending_quantized_for_slot(slot_key)
 	var existing: Dictionary = _slots.get(slot_key, {}) as Dictionary
+	var active: CodaEventHandle = _slot_handle(slot_key)
+	var old_path: String = str(existing.get("event_path", ""))
+	if active != null and _runtime.is_alive(active) and old_path == event_path:
+		for key in params.keys():
+			_runtime.set_parameter(active, String(key), params[key])
+		return active
 	var fading_out: CodaEventHandle = existing.get("outgoing_handle", null) as CodaEventHandle
 	if fading_out != null and _runtime.is_alive(fading_out):
 		_runtime.stop(fading_out, fade_ms)
 	var old_handle: CodaEventHandle = existing.get("handle", null) as CodaEventHandle
-	var old_path: String = str(existing.get("event_path", ""))
-	if old_handle != null and _runtime.is_alive(old_handle) and old_path == event_path:
-		for key in params.keys():
-			_runtime.set_parameter(old_handle, String(key), params[key])
-		return old_handle
 	var new_handle: CodaEventHandle = _runtime.play(event_path, params)
 	if new_handle == null:
 		return null
-	if old_handle != null and _runtime.is_alive(old_handle):
+	if old_handle != null and _runtime.is_alive(old_handle) and old_handle != new_handle:
 		existing["outgoing_handle"] = old_handle
 		_runtime.stop(old_handle, fade_ms)
 	_slots[slot_key] = {
@@ -197,6 +198,7 @@ func _stop_slot(slot_key: String, fade_ms: int) -> void:
 		if fade_ms > 0:
 			_slots[slot_key] = {
 				"outgoing_handle": handle,
+				"event_path": str(existing.get("event_path", "")),
 				"priority": int(existing.get("priority", 0)),
 				"paused": bool(existing.get("paused", false)),
 			}
@@ -206,7 +208,10 @@ func _stop_slot(slot_key: String, fade_ms: int) -> void:
 
 func _slot_handle(slot_key: String) -> CodaEventHandle:
 	var existing: Dictionary = _slots.get(slot_key, {}) as Dictionary
-	return existing.get("handle", null) as CodaEventHandle
+	var primary: CodaEventHandle = existing.get("handle", null) as CodaEventHandle
+	if primary != null:
+		return primary
+	return existing.get("outgoing_handle", null) as CodaEventHandle
 
 
 func _event_crossfade_ms() -> int:
