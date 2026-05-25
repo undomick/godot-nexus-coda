@@ -29,6 +29,7 @@ static func run() -> int:
 	failed += _test_notify_music_state_changed()
 	failed += _test_stop_all_finalizes_plan_resume_handles()
 	failed += _test_segment_change_keeps_active_on_spawn_failure()
+	failed += _test_timeline_start_uses_music_state_not_cursor_prime()
 	return failed
 
 
@@ -109,6 +110,52 @@ static func _test_stop_all_finalizes_plan_resume_handles() -> int:
 		return 1
 	if not runtime.get_graph_plan_resume_handles().is_empty():
 		push_error("stop_all should clear plan-resume handle list")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_timeline_start_uses_music_state_not_cursor_prime() -> int:
+	var runtime: SegmentSpawnTestRuntime = _make_runtime()
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	runtime.set_project(state)
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var seg_tr = ev.event_timeline.tracks.filter(
+		func(tr): return tr.track_name.to_lower() == "segments"
+	)
+	if seg_tr.is_empty() or seg_tr[0].clips.size() < 2:
+		push_error("music_state start test needs Segments track with two clips")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	var calm = seg_tr[0].clips[0]
+	var tense = seg_tr[0].clips[1]
+	var handle: CodaEventHandle = runtime.play("music/exploration", {"music_state": 1})
+	if handle == null:
+		push_error("timeline play should return a handle")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	var d: Dictionary = runtime.get_timeline_dispatchers().get(handle, {}) as Dictionary
+	if str(d.get("active_segment_id", "")) != "tense":
+		push_error(
+			"timeline start at cursor 0 with music_state=1 should select tense, got %s"
+			% str(d.get("active_segment_id", ""))
+		)
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	var fired: Dictionary = d.get("fired_clip_ids", {}) as Dictionary
+	if fired.has(calm.id) and not fired.has(tense.id):
+		push_error("Segments track must not be primed by cursor overlap")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	if not d.get("voices", {}).has(tense.id):
+		push_error("tense segment voice should spawn from music_state")
 		runtime.stop_all()
 		runtime.free()
 		return 1
