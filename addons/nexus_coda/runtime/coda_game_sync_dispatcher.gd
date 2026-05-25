@@ -68,10 +68,13 @@ static func _condition_passes(rule: CodaGameSyncRule, payload: Dictionary) -> bo
 	if expr.is_empty():
 		return true
 	# Stub: full expression eval later; "zone=forest" matches payload.zone == "forest"
-	if expr.contains("="):
-		var parts: PackedStringArray = expr.split("=", false, 1)
-		if parts.size() == 2:
-			var key: String = parts[0].strip_edges()
-			var want: String = parts[1].strip_edges()
-			return str(payload.get(key, "")) == want
-	return true
+	if not expr.contains("="):
+		return false
+	var parts: PackedStringArray = expr.split("=", false, 1)
+	if parts.size() != 2:
+		return false
+	var key: String = parts[0].strip_edges()
+	var want: String = parts[1].strip_edges()
+	if key.is_empty():
+		return false
+	return str(payload.get(key, "")) == want
