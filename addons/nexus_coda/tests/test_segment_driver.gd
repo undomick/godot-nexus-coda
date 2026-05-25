@@ -18,6 +18,16 @@ const CodaBrowserNodeScript := preload("res://addons/nexus_coda/editor/browser/c
 const CodaTestRuntimeScript := preload("res://addons/nexus_coda/tests/helpers/coda_test_runtime.gd")
 const CodaEventHandleScript := preload("res://addons/nexus_coda/runtime/coda_event_handle.gd")
 const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
+const CodaTimelineDispatcherScript := preload(
+	"res://addons/nexus_coda/runtime/coda_timeline_dispatcher.gd"
+)
+const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
+const CodaEventParameterScript := preload(
+	"res://addons/nexus_coda/editor/browser/coda_event_parameter.gd"
+)
+const CodaRuntimeParameterPipelineScript := preload(
+	"res://addons/nexus_coda/runtime/coda_runtime_parameter_pipeline.gd"
+)
 
 
 class SegmentReprimeTestRuntime extends CodaRuntimeScript:
@@ -45,6 +55,7 @@ static func run() -> int:
 	failed += _test_intensity_not_segment()
 	failed += _test_segment_dispatch_state_sync()
 	failed += _test_same_segment_reprime_uses_zero_crossfade()
+	failed += _test_timeline_refresh_applies_per_voice_modulation()
 	return failed
 
 
@@ -155,4 +166,60 @@ static func _test_intensity_not_segment() -> int:
 	if CodaTimelineSegmentDriverScript.should_drive_param("intensity", ev):
 		push_error("intensity should not drive segments when music_state is configured")
 		return 1
+	return 0
+
+
+static func _test_timeline_refresh_applies_per_voice_modulation() -> int:
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var timeline = ev.event_timeline
+	var intensity: CodaEventParameter = null
+	for p in ev.event_parameters:
+		if p.param_name == "intensity":
+			intensity = p
+			break
+	if intensity == null:
+		push_error("music test event needs intensity parameter")
+		return 1
+	var stem_track: CodaTimelineTrack = CodaTimelineTrackScript.new()
+	stem_track.track_name = "Stems"
+	var stem_clip: CodaTimelineClip = CodaTimelineClipScript.new()
+	stem_clip.id = "stem_low"
+	stem_clip.start_seconds = 0.0
+	stem_clip.duration_seconds = 20.0
+	stem_track.clips.append(stem_clip)
+	timeline.tracks.append(stem_track)
+	var mod := CodaModulationScript.new()
+	mod.source_param_id = intensity.id
+	mod.target_node_id = stem_clip.id
+	mod.target_property = CodaModulationScript.TargetProperty.SOUND_VOLUME_DB
+	mod.range_in_min = 0.0
+	mod.range_in_max = 1.0
+	mod.range_out_min = 0.0
+	mod.range_out_max = -12.0
+	ev.event_modulations.append(mod)
+	var runtime: CodaRuntime = CodaRuntimeScript.new()
+	runtime._parameter_pipeline = CodaRuntimeParameterPipelineScript.new()
+	runtime._parameter_pipeline.setup(runtime)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle._alive = true
+	handle.event_node = ev
+	handle.param_values[intensity.id] = 1.0
+	handle.param_values_smoothed[intensity.id] = 1.0
+	var player: AudioStreamPlayer = AudioStreamPlayer.new()
+	runtime.add_child(player)
+	var d: Dictionary = {
+		"timeline": timeline,
+		"voices": {stem_clip.id: player},
+		"fired_clip_ids": {stem_clip.id: true},
+	}
+	runtime._timeline_dispatchers[handle] = d
+	var dispatcher: CodaTimelineDispatcher = CodaTimelineDispatcherScript.new()
+	dispatcher.setup(runtime, null, null)
+	dispatcher._refresh_voice_output_levels(handle, d, timeline)
+	if abs(player.volume_db - (-12.0)) > 0.05:
+		push_error("timeline refresh should apply RTPC modulation per voice, got %s" % player.volume_db)
+		return 1
+	runtime.free()
 	return 0

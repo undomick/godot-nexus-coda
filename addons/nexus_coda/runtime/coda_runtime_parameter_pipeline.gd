@@ -133,6 +133,30 @@ func advance_smoothing(handle: CodaEventHandle, delta: float) -> void:
 		handle.param_values_smoothed[p.id] = lerp(current, target, alpha)
 
 
+func modulation_voice_levels(
+	handle: CodaEventHandle, sound_id: String, base_volume_db: float, base_pitch_scale: float
+) -> Dictionary:
+	var voice_volume_db: float = base_volume_db
+	var voice_pitch: float = base_pitch_scale
+	var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
+	if event != null and not event.event_modulations.is_empty():
+		for m in event.event_modulations:
+			if m.target_node_id != sound_id:
+				continue
+			var src_val: float = float(handle.param_values_smoothed.get(m.source_param_id, 0.0))
+			var out_val: float = m.evaluate(src_val)
+			match m.target_property:
+				CodaModulationScript.TargetProperty.SOUND_VOLUME_DB:
+					voice_volume_db += out_val
+				CodaModulationScript.TargetProperty.SOUND_PITCH_SCALE:
+					voice_pitch *= out_val
+	if handle.blend_weight < 1.0 and handle.blend_weight > 0.0:
+		voice_volume_db += linear_to_db(handle.blend_weight)
+	elif handle.blend_weight <= 0.0:
+		voice_volume_db = -80.0
+	return {"volume_db": voice_volume_db, "pitch_scale": max(0.05, voice_pitch)}
+
+
 func apply_modulations(handle: CodaEventHandle) -> void:
 	if handle._player == null or not is_instance_valid(handle._player):
 		return
@@ -140,25 +164,14 @@ func apply_modulations(handle: CodaEventHandle) -> void:
 	if event == null or event.event_modulations.is_empty():
 		_apply_voice_base_with_blend(handle)
 		return
-	var sound_id: String = handle.current_sound_id
-	var voice_volume_db: float = handle.base_volume_db
-	var voice_pitch: float = handle.base_pitch_scale
-	for m in event.event_modulations:
-		if m.target_node_id != sound_id:
-			continue
-		var src_val: float = float(handle.param_values_smoothed.get(m.source_param_id, 0.0))
-		var out_val: float = m.evaluate(src_val)
-		match m.target_property:
-			CodaModulationScript.TargetProperty.SOUND_VOLUME_DB:
-				voice_volume_db += out_val
-			CodaModulationScript.TargetProperty.SOUND_PITCH_SCALE:
-				voice_pitch *= out_val
-	if handle.blend_weight < 1.0 and handle.blend_weight > 0.0:
-		voice_volume_db += linear_to_db(handle.blend_weight)
-	elif handle.blend_weight <= 0.0:
-		voice_volume_db = -80.0
-	handle._player.volume_db = voice_volume_db
-	handle._player.pitch_scale = max(0.05, voice_pitch)
+	var levels: Dictionary = modulation_voice_levels(
+		handle,
+		handle.current_sound_id,
+		handle.base_volume_db,
+		handle.base_pitch_scale,
+	)
+	handle._player.volume_db = float(levels.get("volume_db", handle.base_volume_db))
+	handle._player.pitch_scale = float(levels.get("pitch_scale", handle.base_pitch_scale))
 
 
 func _apply_voice_base_with_blend(handle: CodaEventHandle) -> void:

@@ -11,6 +11,7 @@ static func run() -> int:
 	failed += _test_blend_lerp()
 	failed += _test_blend_marks_project_dirty()
 	failed += _test_blend_interrupt_commits_previous()
+	failed += _test_blend_mute_applies_immediately()
 	return failed
 
 
@@ -98,5 +99,34 @@ static func _test_blend_interrupt_commits_previous() -> int:
 		return 1
 	if bus.mute:
 		push_error("interrupted blend should commit the previous snapshot mute state")
+		return 1
+	return 0
+
+
+static func _test_blend_mute_applies_immediately() -> int:
+	var state: CodaState = CodaTestRuntimeScript.build_snapshot_state()
+	var bus: CodaBus = state.bus_root
+	bus.volume_db = 0.0
+	bus.mute = false
+	var snap := CodaSnapshot.new()
+	snap.id = "snap_mute_now"
+	snap.bus_overrides = {
+		bus.id: {"volume_db": -12.0, "mute": true, "solo": false, "bypass": false, "send_target_id": ""},
+	}
+	state.snapshots.append(snap)
+	var blender := CodaSnapshotBlenderScript.new()
+	blender.setup(state, Callable())
+	if not blender.apply(snap.id, 1000):
+		push_error("mute blend apply failed")
+		return 1
+	if not bus.mute:
+		push_error("snapshot mute should apply immediately when blend starts")
+		return 1
+	blender.tick(0.25)
+	if not bus.mute:
+		push_error("snapshot mute should stay applied during volume blend")
+		return 1
+	if bus.volume_db <= -11.999:
+		push_error("volume should still be blending, got %s" % bus.volume_db)
 		return 1
 	return 0
