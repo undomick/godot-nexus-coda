@@ -17,6 +17,7 @@ static func run() -> int:
 	failed += _test_new_path_stops_old()
 	failed += _test_failed_play_keeps_old_music()
 	failed += _test_quantized_queue_supersedes_same_slot()
+	failed += _test_quantized_slot_parameter_targets_pending_play()
 	return failed
 
 
@@ -140,6 +141,58 @@ static func _test_quantized_queue_supersedes_same_slot() -> int:
 		return 1
 	if mock.play_calls[0].get("path", "") != "music/b":
 		push_error("processed quantized request should play the latest path")
+		mock.queue_free()
+		return 1
+	mock.queue_free()
+	return 0
+
+
+static func _test_quantized_slot_parameter_targets_pending_play() -> int:
+	var mock: CodaTestMockRuntime = CodaTestMockRuntimeScript.new()
+	var policy: CodaMusicTransitionPolicy = CodaMusicTransitionPolicyScript.default_policy()
+	policy.quantize_to_bar = true
+	mock._policy = policy
+	var director: CodaMusicDirector = CodaMusicDirectorScript.new()
+	director.bind_runtime(mock)
+	var timeline := CodaEventTimeline.new()
+	timeline.tempo_bpm = 120.0
+	timeline.time_signature = Vector2i(4, 4)
+	var event := CodaBrowserNode.new()
+	event.kind = CodaBrowserNode.Kind.EVENT
+	event.event_timeline = timeline
+	var first: CodaEventHandle = CodaEventHandleScript.new()
+	first._alive = true
+	first.event_node = event
+	first.is_timeline = true
+	first.timeline_cursor_seconds = 1.5
+	director._slots["default"] = {"handle": first, "event_path": "music/a"}
+	director.set_music("music/b", 500, "default", {}, true)
+	if director.set_slot_parameter("default", "music_state", 2):
+		push_error("set_slot_parameter should report no live apply while quantized")
+		mock.queue_free()
+		return 1
+	if mock.set_parameter_calls.size() != 0:
+		push_error("quantized slot parameters must not mutate the outgoing live handle")
+		mock.queue_free()
+		return 1
+	if director._pending_quantized.is_empty():
+		push_error("expected pending quantized set_music")
+		mock.queue_free()
+		return 1
+	var pending_params: Dictionary = director._pending_quantized[0].get("params", {}) as Dictionary
+	if int(pending_params.get("music_state", -1)) != 2:
+		push_error("quantized slot parameters should merge into the pending set_music request")
+		mock.queue_free()
+		return 1
+	director._pending_quantized[0]["fire_at"] = 0
+	director._process(0.0)
+	if mock.play_calls.size() != 1:
+		push_error("pending set_music should play once the bar boundary fires")
+		mock.queue_free()
+		return 1
+	var played_params: Dictionary = mock.play_calls[0].get("params", {}) as Dictionary
+	if int(played_params.get("music_state", -1)) != 2:
+		push_error("played music should receive queued slot parameters")
 		mock.queue_free()
 		return 1
 	mock.queue_free()

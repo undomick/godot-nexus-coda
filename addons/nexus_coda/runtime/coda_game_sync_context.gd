@@ -8,6 +8,7 @@ var play_fn: Callable = Callable()
 var set_music_fn: Callable = Callable()
 var stop_music_fn: Callable = Callable()
 var set_parameter_fn: Callable = Callable()
+var set_slot_parameter_fn: Callable = Callable()
 var apply_snapshot_fn: Callable = Callable()
 var notify_music_state_fn: Callable = Callable()
 var get_slot_handle_fn: Callable = Callable()
@@ -25,5 +26,6 @@ static func from_bridge(runtime: CodaRuntime, music: CodaMusicDirector) -> CodaG
 	if music != null:
 		ctx.set_music_fn = music.set_music
 		ctx.stop_music_fn = music.stop_music
+		ctx.set_slot_parameter_fn = music.set_slot_parameter
 		ctx.get_slot_handle_fn = music.get_slot_handle
 	return ctx

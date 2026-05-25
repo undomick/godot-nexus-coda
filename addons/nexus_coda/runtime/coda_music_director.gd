@@ -109,6 +109,28 @@ func get_slot_handle(slot: String = "default") -> CodaEventHandle:
 	return _slot_handle(slot if not slot.is_empty() else "default")
 
 
+## Routes parameter writes to a queued [method set_music] when bar-quantized, otherwise the live slot handle.
+## Returns true when the value was applied to a live handle (caller may notify segment drivers).
+func set_slot_parameter(slot: String, name_or_id: String, value: Variant) -> bool:
+	if _runtime == null:
+		return false
+	var key: String = String(name_or_id).strip_edges()
+	if key.is_empty():
+		return false
+	var slot_key: String = slot if not slot.is_empty() else "default"
+	var pending: Dictionary = _pending_set_music_item_for_slot(slot_key)
+	if not pending.is_empty():
+		var params: Dictionary = pending.get("params", {}) as Dictionary
+		params[key] = value
+		pending["params"] = params
+		return false
+	var handle: CodaEventHandle = _slot_handle(slot_key)
+	if handle == null or not _runtime.is_alive(handle):
+		return false
+	_runtime.set_parameter(handle, key, value)
+	return true
+
+
 func _process(_delta: float) -> void:
 	if _pending_quantized.is_empty():
 		return
@@ -214,3 +236,12 @@ func _cancel_pending_quantized_for_slot(slot_key: String) -> void:
 		if str(pending.get("slot", "default")) != slot_key:
 			remaining.append(pending)
 	_pending_quantized = remaining
+
+
+func _pending_set_music_item_for_slot(slot_key: String) -> Dictionary:
+	for pending in _pending_quantized:
+		if str(pending.get("kind", "")) != "set_music":
+			continue
+		if str(pending.get("slot", "default")) == slot_key:
+			return pending
+	return {}
