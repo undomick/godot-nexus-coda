@@ -75,7 +75,9 @@ func check_markers_crossed(
 	if timeline == null or timeline.markers.is_empty():
 		return
 	for m in timeline.markers:
-		if m.time_seconds <= prev_cursor or m.time_seconds > next_cursor:
+		# Closed interval [prev_cursor, next_cursor]: markers exactly at prev (timeline start,
+		# loop wrap landing on loop_start) must fire; markers at next are consumed next frame.
+		if m.time_seconds < prev_cursor or m.time_seconds > next_cursor:
 			continue
 		if _marker_reached.is_valid():
 			_marker_reached.call(handle, m.id)

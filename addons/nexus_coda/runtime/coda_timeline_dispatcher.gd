@@ -504,12 +504,17 @@ func _apply_seek(handle: CodaEventHandle, d: Dictionary, target_seconds: float) 
 	var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
 	if timeline == null:
 		return
+	var old_cursor: float = handle.timeline_cursor_seconds
 	var clamped: float = clampf(target_seconds, 0.0, timeline.length_seconds)
 	handle.timeline_cursor_seconds = clamped
 	stop_voices(d, handle)
 	d["fired_clip_ids"] = {}
 	d["spent_clip_ids"] = {}
 	_prime_overlapping_voices(handle, d, timeline, clamped)
+	if _timeline_music != null and absf(old_cursor - clamped) > 0.0001:
+		var lo: float = minf(old_cursor, clamped)
+		var hi: float = maxf(old_cursor, clamped)
+		_timeline_music.check_markers_crossed(handle, timeline, lo, hi, _runtime.get_timeline_dispatchers())
 
 
 func _prime_overlapping_voices(

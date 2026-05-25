@@ -18,6 +18,8 @@ static func run() -> int:
 	var failed: int = 0
 	failed += _test_marker_crossed_once()
 	failed += _test_marker_in_loop_wrap_tail()
+	failed += _test_marker_at_timeline_start()
+	failed += _test_marker_at_loop_start_after_wrap()
 	failed += _test_should_notify_for_param()
 	return failed
 
@@ -74,6 +76,57 @@ static func _test_marker_in_loop_wrap_tail() -> int:
 	ctrl.check_markers_crossed(handle, timeline, 0.0, 0.1, dispatchers)
 	if not markers.is_empty():
 		push_error("post-wrap-only range must not fire tail marker")
+		return 1
+	return 0
+
+
+static func _test_marker_at_timeline_start() -> int:
+	var markers: Array[String] = []
+	var ctrl := CodaTimelineMusicControllerScript.new()
+	ctrl.setup(null, null, CodaTimelineSegmentDriverScript.new(), null, func(_h: CodaEventHandle, mid: String) -> void:
+		markers.append(mid)
+	)
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var timeline = ev.event_timeline
+	timeline.markers.clear()
+	var start_marker := CodaTimelineMarkerScript.new()
+	start_marker.time_seconds = 0.0
+	timeline.markers.append(start_marker)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle.event_node = ev
+	var dispatchers: Dictionary = {handle: {"timeline": timeline}}
+	ctrl.check_markers_crossed(handle, timeline, 0.0, 0.05, dispatchers)
+	if markers.size() != 1 or markers[0] != start_marker.id:
+		push_error("marker at t=0 should fire when cursor advances from timeline start")
+		return 1
+	return 0
+
+
+static func _test_marker_at_loop_start_after_wrap() -> int:
+	var markers: Array[String] = []
+	var ctrl := CodaTimelineMusicControllerScript.new()
+	ctrl.setup(null, null, CodaTimelineSegmentDriverScript.new(), null, func(_h: CodaEventHandle, mid: String) -> void:
+		markers.append(mid)
+	)
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var timeline = ev.event_timeline
+	timeline.loop_enabled = true
+	timeline.loop_start_seconds = 0.0
+	timeline.loop_end_seconds = 10.0
+	timeline.markers.clear()
+	var loop_marker := CodaTimelineMarkerScript.new()
+	loop_marker.time_seconds = 0.0
+	timeline.markers.append(loop_marker)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle.event_node = ev
+	var dispatchers: Dictionary = {handle: {"timeline": timeline}}
+	ctrl.check_markers_crossed(handle, timeline, 0.0, 0.02, dispatchers)
+	if markers.size() != 1 or markers[0] != loop_marker.id:
+		push_error("marker at loop_start should fire after wrap lands on loop_start")
 		return 1
 	return 0
 
