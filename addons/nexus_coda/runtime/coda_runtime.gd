@@ -273,6 +273,11 @@ func stop(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 		return
 	var was_alive: bool = handle._alive
 	_graph_playback.unmark_plan_resume(handle)
+	# Faded graph stops keep the pooled player alive until the tween ends. Without quiescing the
+	# handle, a natural stream-finished during the fade can dequeue the next plan step.
+	handle.params["_coda_plan"] = []
+	if fade_ms > 0:
+		handle._paused = true
 	_graph_playback.stop_parallel_siblings(handle, fade_ms)
 	_fade_out_and_finalize_handle(handle, fade_ms)
 	if was_alive:
