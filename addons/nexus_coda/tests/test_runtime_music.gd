@@ -36,6 +36,7 @@ static func run() -> int:
 	failed += _test_timeline_seek_while_paused_updates_cursor_only()
 	failed += _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish()
 	failed += _test_graph_pause_reserves_pooled_player()
+	failed += _test_graph_stop_after_pause_releases_pool_slot()
 	return failed
 
 
@@ -392,6 +393,53 @@ static func _test_graph_pause_reserves_pooled_player() -> int:
 		return 1
 	if runtime._active_handles.get(pk, null) != handle:
 		push_error("graph resume should restore active_handles mapping")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_graph_stop_after_pause_releases_pool_slot() -> int:
+	var runtime: CodaRuntime = _make_runtime()
+	runtime.stop_all()
+	var pool: CodaVoicePool = runtime.runtime_pool()
+	if pool == null:
+		push_error("graph stop-after-pause test needs a voice pool")
+		runtime.free()
+		return 1
+	pool._ensure_pool_size()
+	var player: AudioStreamPlayer = pool.acquire()
+	if player == null:
+		push_error("graph stop-after-pause test needs a free pooled player")
+		runtime.free()
+		return 1
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 44100.0
+	player.stream = stream
+	runtime.runtime_begin_player_voice(player)
+	player.play()
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle._alive = true
+	handle._bind_player(player)
+	runtime._active_handles[player.get_instance_id()] = handle
+	runtime._graph_playback.pause_graph_preview(handle)
+	runtime.stop(handle)
+	if player.has_meta(&"_coda_graph_paused"):
+		push_error("stop after graph pause must clear _coda_graph_paused")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	for p in pool._players:
+		if p.has_meta(&"_coda_graph_paused"):
+			push_error("stop after graph pause must not leave stale _coda_graph_paused on pool players")
+			runtime.stop_all()
+			runtime.free()
+			return 1
+	var reclaimed: AudioStreamPlayer = pool.acquire()
+	if reclaimed == null:
+		push_error("pool must return a player after stop following graph pause")
 		runtime.stop_all()
 		runtime.free()
 		return 1
