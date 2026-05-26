@@ -217,7 +217,7 @@ static func _test_timeline_refresh_applies_per_voice_modulation() -> int:
 	runtime._timeline_dispatchers[handle] = d
 	var dispatcher: CodaTimelineDispatcher = CodaTimelineDispatcherScript.new()
 	dispatcher.setup(runtime, null, null)
-	dispatcher._refresh_voice_output_levels(handle, d, timeline)
+	dispatcher._clip_dispatch.refresh_voice_output_levels(handle, d, timeline)
 	if abs(player.volume_db - (-12.0)) > 0.05:
 		push_error("timeline refresh should apply RTPC modulation per voice, got %s" % player.volume_db)
 		return 1

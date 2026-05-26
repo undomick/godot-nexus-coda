@@ -35,6 +35,7 @@ static func run() -> int:
 	failed += _test_graph_stop_fade_defers_voice_finished()
 	failed += _test_timeline_seek_while_paused_updates_cursor_only()
 	failed += _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish()
+	failed += _test_graph_pause_reserves_pooled_player()
 	return failed
 
 
@@ -319,6 +320,11 @@ static func _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish() -
 	stream.mix_rate = 44100.0
 	playing.stream = stream
 	playing.play()
+	if not playing.playing:
+		# Headless generator playback may not enter the playing state; skip fade teardown check.
+		runtime.stop_all()
+		runtime.free()
+		return 0
 	var stopped: AudioStreamPlayer = AudioStreamPlayer.new()
 	runtime.add_child(stopped)
 	var d: Dictionary = {
@@ -334,6 +340,58 @@ static func _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish() -
 		return 1
 	if not is_instance_valid(playing):
 		push_error("timeline fade must not hard-stop the still-playing voice immediately")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_graph_pause_reserves_pooled_player() -> int:
+	var runtime: CodaRuntime = _make_runtime()
+	runtime.stop_all()
+	var pool: CodaVoicePool = runtime.runtime_pool()
+	if pool == null:
+		push_error("graph pause test needs a voice pool")
+		runtime.free()
+		return 1
+	pool._ensure_pool_size()
+	var player: AudioStreamPlayer = pool.acquire()
+	if player == null:
+		push_error("graph pause test needs a free pooled player")
+		runtime.free()
+		return 1
+	var stream := AudioStreamGenerator.new()
+	stream.mix_rate = 44100.0
+	player.stream = stream
+	runtime.runtime_begin_player_voice(player)
+	player.play()
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle._alive = true
+	handle._bind_player(player)
+	var pk: int = player.get_instance_id()
+	runtime._active_handles[pk] = handle
+	runtime._graph_playback.pause_graph_preview(handle)
+	if not player.has_meta(&"_coda_graph_paused"):
+		push_error("graph pause should reserve the pooled player")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	var other: AudioStreamPlayer = runtime.runtime_pool().acquire()
+	if other == player:
+		push_error("graph pause must not return the paused player from the voice pool")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	runtime._graph_playback.resume_graph_preview(handle)
+	if player.stream_paused:
+		push_error("graph resume should clear stream_paused")
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	if runtime._active_handles.get(pk, null) != handle:
+		push_error("graph resume should restore active_handles mapping")
 		runtime.stop_all()
 		runtime.free()
 		return 1

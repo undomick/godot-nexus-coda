@@ -29,6 +29,8 @@ func _ensure_pool_size() -> void:
 
 func acquire() -> AudioStreamPlayer:
 	for p in _players:
+		if p.has_meta(&"_coda_graph_paused"):
+			continue
 		if not p.playing:
 			return p
 	return null
