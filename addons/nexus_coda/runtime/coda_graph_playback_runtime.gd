@@ -155,6 +155,7 @@ func get_paused_graph_handles() -> Array[CodaEventHandle]:
 func drop_paused_preview_state(handle: CodaEventHandle) -> void:
 	if handle == null:
 		return
+	_unpause_graph_players(handle)
 	var idx: int = _paused_graph_handles.find(handle)
 	if idx >= 0:
 		_paused_graph_handles.remove_at(idx)
