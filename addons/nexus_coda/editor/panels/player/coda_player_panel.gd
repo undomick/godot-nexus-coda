@@ -102,27 +102,28 @@ func _ready() -> void:
 
 	var transport_row := HBoxContainer.new()
 	transport_row.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
+	transport_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_content.add_child(transport_row)
 
 	_transport_bar = CodaEventTransportBarScript.new()
-	_transport_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	transport_row.add_child(_transport_bar)
+	_transport_bar.set_status_label_visible(false)
 	_transport_bar.play_requested.connect(_on_play_requested)
 	_transport_bar.stop_requested.connect(_on_stop_requested)
 	_transport_bar.pause_toggled.connect(_on_pause_toggled)
 	_transport_bar.loop_toggled.connect(_on_loop_toggled)
-	transport_row.add_child(_transport_bar)
-	_transport_bar.set_status_label_visible(false)
+
+	_time_label = Label.new()
+	_time_label.text = _format_time_pair(0.0, 0.0)
+	_time_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_time_label.add_theme_font_size_override(&"font_size", Tokens.FONT_BODY_SIZE)
+	_time_label.add_theme_color_override(&"font_color", Tokens.TEXT_PRIMARY)
+	transport_row.add_child(_time_label)
 
 	var time_row := HBoxContainer.new()
 	time_row.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
 	_content.add_child(time_row)
-
-	_time_label = Label.new()
-	_time_label.text = _format_time_pair(0.0, 0.0)
-	_time_label.custom_minimum_size = Vector2(150, 0)
-	_time_label.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
-	_time_label.add_theme_color_override(&"font_color", Tokens.TEXT_SECONDARY)
-	time_row.add_child(_time_label)
 
 	_seek_slider = HSlider.new()
 	_seek_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -572,22 +573,29 @@ static func _db_to_meter_norm(db: float) -> float:
 
 
 static func _format_time_pair(current: float, total: float) -> String:
-	return "%s / %s" % [_format_time(current), _format_time(total)]
+	return "%s  /  %s" % [_format_transport_time(current), _format_transport_time(total)]
 
 
-static func _format_time(secs: float) -> String:
+static func _format_transport_time(secs: float) -> String:
 	if not is_finite(secs) or secs < 0.0:
 		secs = 0.0
-	var minutes: int = int(secs) / 60
-	var seconds: int = int(secs) % 60
-	var ms: int = int(round((secs - floor(secs)) * 1000.0))
-	if ms >= 1000:
+	var whole: int = int(secs)
+	var hours: int = whole / 3600
+	var minutes: int = (whole % 3600) / 60
+	var seconds: int = whole % 60
+	var centis: int = int(round((secs - float(whole)) * 100.0))
+	if centis >= 100:
 		seconds += 1
-		ms = 0
+		centis = 0
 		if seconds >= 60:
 			minutes += 1
 			seconds = 0
-	return "%d:%02d.%03d" % [minutes, seconds, ms]
+			if minutes >= 60:
+				hours += 1
+				minutes = 0
+	if hours > 0:
+		return "%dh%02dm%02d.%02ds" % [hours, minutes, seconds, centis]
+	return "00h%02dm%02d.%02ds" % [minutes, seconds, centis]
 
 
 func _set_status(text: String) -> void:

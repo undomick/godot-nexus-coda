@@ -256,6 +256,130 @@ static func move_clip(
 	clip.start_seconds = clamped_start
 
 
+static func clamp_clip_fades(clip: CodaTimelineClip) -> void:
+	if clip == null:
+		return
+	var dur: float = maxf(0.0, clip.duration_seconds)
+	clip.fade_in_seconds = clampf(clip.fade_in_seconds, 0.0, dur * 0.5)
+	clip.fade_out_seconds = clampf(clip.fade_out_seconds, 0.0, dur * 0.5)
+	clip.fade_in_curve = clampf(clip.fade_in_curve, 0.0, 1.0)
+	clip.fade_out_curve = clampf(clip.fade_out_curve, 0.0, 1.0)
+	if clip.fade_in_seconds + clip.fade_out_seconds > dur:
+		var scale: float = dur / maxf(0.0001, clip.fade_in_seconds + clip.fade_out_seconds)
+		clip.fade_in_seconds *= scale
+		clip.fade_out_seconds *= scale
+
+
+static func apply_clip_fades(
+	timeline: CodaEventTimeline,
+	clip_id: String,
+	fade_in: float,
+	fade_out: float,
+	fade_in_curve: float = -1.0,
+	fade_out_curve: float = -1.0
+) -> void:
+	var info: Dictionary = timeline.find_clip(clip_id)
+	if info.is_empty():
+		return
+	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
+	if clip == null:
+		return
+	clip.fade_in_seconds = maxf(0.0, fade_in)
+	clip.fade_out_seconds = maxf(0.0, fade_out)
+	if fade_in_curve >= 0.0:
+		clip.fade_in_curve = clampf(fade_in_curve, 0.0, 1.0)
+	if fade_out_curve >= 0.0:
+		clip.fade_out_curve = clampf(fade_out_curve, 0.0, 1.0)
+	clamp_clip_fades(clip)
+
+
+static func set_clip_fades(
+	timeline: CodaEventTimeline,
+	clip_id: String,
+	fade_in: float,
+	fade_out: float,
+	fade_in_curve: float = -1.0,
+	fade_out_curve: float = -1.0
+) -> CodaEventTimeline:
+	var info: Dictionary = timeline.find_clip(clip_id)
+	if info.is_empty():
+		return null
+	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
+	if clip == null:
+		return null
+	var snap := snapshot(timeline)
+	clip.fade_in_seconds = maxf(0.0, fade_in)
+	clip.fade_out_seconds = maxf(0.0, fade_out)
+	if fade_in_curve >= 0.0:
+		clip.fade_in_curve = clampf(fade_in_curve, 0.0, 1.0)
+	if fade_out_curve >= 0.0:
+		clip.fade_out_curve = clampf(fade_out_curve, 0.0, 1.0)
+	clamp_clip_fades(clip)
+	return snap
+
+
+static func set_clip_fade_curves(
+	timeline: CodaEventTimeline,
+	clip_id: String,
+	fade_in_curve: float,
+	fade_out_curve: float
+) -> CodaEventTimeline:
+	var info: Dictionary = timeline.find_clip(clip_id)
+	if info.is_empty():
+		return null
+	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
+	if clip == null:
+		return null
+	var snap := snapshot(timeline)
+	clip.fade_in_curve = clampf(fade_in_curve, 0.0, 1.0)
+	clip.fade_out_curve = clampf(fade_out_curve, 0.0, 1.0)
+	return snap
+
+
+static func set_clip_volume_db(
+	timeline: CodaEventTimeline, clip_id: String, volume_db: float
+) -> CodaEventTimeline:
+	var info: Dictionary = timeline.find_clip(clip_id)
+	if info.is_empty():
+		return null
+	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
+	if clip == null:
+		return null
+	var snap := snapshot(timeline)
+	clip.volume_db = volume_db
+	return snap
+
+
+static func set_clip_pitch_scale(
+	timeline: CodaEventTimeline, clip_id: String, pitch_scale: float
+) -> CodaEventTimeline:
+	var info: Dictionary = timeline.find_clip(clip_id)
+	if info.is_empty():
+		return null
+	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
+	if clip == null:
+		return null
+	var snap := snapshot(timeline)
+	clip.pitch_scale = maxf(0.01, pitch_scale)
+	return snap
+
+
+static func move_clip_to_track(
+	timeline: CodaEventTimeline, clip_id: String, new_start: float, track_index: int
+) -> CodaEventTimeline:
+	if timeline == null:
+		return null
+	var info: Dictionary = timeline.find_clip(clip_id)
+	if info.is_empty():
+		return null
+	var snap: CodaEventTimeline = null
+	if track_index >= timeline.tracks.size():
+		snap = add_track(timeline)
+		track_index = timeline.tracks.size() - 1
+	move_clip(timeline, clip_id, new_start, track_index)
+	return snap
+
+
 static func resize_clip(
 	timeline: CodaEventTimeline,
 	clip_id: String,
@@ -278,6 +402,7 @@ static func resize_clip(
 	var max_by_tl: float = max(0.0, timeline.length_seconds - clip.start_seconds)
 	var max_d: float = minf(max_by_source, max_by_tl)
 	clip.duration_seconds = clampf(new_duration, 0.0, max_d)
+	clamp_clip_fades(clip)
 
 
 static func delete_clip(timeline: CodaEventTimeline, clip_id: String) -> CodaEventTimeline:

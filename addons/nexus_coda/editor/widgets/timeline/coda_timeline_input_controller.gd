@@ -5,6 +5,7 @@ extends RefCounted
 ## Mutations go out as signals; the host view applies them.
 
 const Renderer := preload("res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_renderer.gd")
+const Chrome := preload("res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_clip_chrome.gd")
 
 const RULER_HEIGHT := Renderer.RULER_HEIGHT
 const MARKER_DRAG_THRESHOLD_PX := 3.0
@@ -13,17 +14,30 @@ const EDGE_RESIZE_THRESHOLD := 6
 const MIN_SECONDS_PER_PIXEL := 1.0 / 1024.0
 const MAX_SECONDS_PER_PIXEL := 0.5
 
+const FADE_HANDLE_HIT_PX := 8.0
+const FADE_START_ZONE_PX := 14.0
+const MIN_CLIP_WIDTH_FOR_FADE_PX := 24.0
+const GHOST_TRACK_ROW_FRACTION := 1.0
+
 enum DragKind {
 	NONE = 0,
 	CLIP_MOVE = 1,
 	CLIP_RESIZE_LEFT = 2,
 	CLIP_RESIZE_RIGHT = 3,
-	MARKER_MOVE = 4,
-	LOOP_START = 5,
-	LOOP_END = 6,
-	PAN = 7,
-	PLAYHEAD_SEEK = 8,
+	CLIP_FADE_IN = 4,
+	CLIP_FADE_OUT = 5,
+	CLIP_FADE_IN_SHAPE = 11,
+	CLIP_FADE_OUT_SHAPE = 12,
+	MARKER_MOVE = 6,
+	LOOP_START = 7,
+	LOOP_END = 8,
+	PAN = 9,
+	PLAYHEAD_SEEK = 10,
 }
+
+signal clip_fade_requested(
+	clip_id: String, fade_in: float, fade_out: float, fade_in_curve: float, fade_out_curve: float
+)
 
 signal clip_move_requested(clip_id: String, new_start: float, new_track_index: int)
 signal clip_resize_requested(
@@ -55,6 +69,13 @@ var _drag_start_seconds: float = 0.0
 var _drag_initial_clip_start: float = 0.0
 var _drag_initial_clip_duration: float = 0.0
 var _drag_initial_clip_offset: float = 0.0
+var _drag_initial_fade_in: float = 0.0
+var _drag_initial_fade_out: float = 0.0
+var _drag_initial_fade_in_curve: float = 0.5
+var _drag_initial_fade_out_curve: float = 0.5
+var _drag_clip_rect_height: float = 64.0
+var _hover_clip_edge: String = "none"
+var _ghost_new_track: bool = false
 var _drag_marker_id: String = ""
 var _drag_pan_initial_scroll: float = 0.0
 var _drag_initial_screen_pos: Vector2 = Vector2.ZERO
@@ -64,6 +85,15 @@ var _marker_press_pos: Vector2 = Vector2.ZERO
 
 func is_dragging() -> bool:
 	return _drag_kind != DragKind.NONE
+
+
+func get_render_hints() -> Dictionary:
+	return {
+		"ghost_new_track": _ghost_new_track,
+		"hover_clip_edge": _hover_clip_edge,
+		"drag_kind": int(_drag_kind),
+		"drag_clip_id": _drag_clip_id,
+	}
 
 
 func handle_unhandled_key(view: CodaTimelineView, event: InputEvent) -> void:
@@ -136,26 +166,92 @@ func hit_test(view: CodaTimelineView, local_pos: Vector2) -> Dictionary:
 		return {"kind": "empty"}
 	var t: float = _x_to_seconds(view, local_pos.x)
 	var track: CodaTimelineTrack = timeline.tracks[track_index]
+	var clips_at_pos: Array[CodaTimelineClip] = []
 	for clip in track.clips:
-		if t < clip.start_seconds or t > clip.end_seconds():
-			continue
-		var clip_x0: float = _seconds_to_x(view, clip.start_seconds)
-		var clip_x1: float = _seconds_to_x(view, clip.end_seconds())
-		var dist_l: float = abs(local_pos.x - clip_x0)
-		var dist_r: float = abs(local_pos.x - clip_x1)
-		var edge: String = "none"
-		if dist_l <= EDGE_RESIZE_THRESHOLD and dist_l < dist_r:
-			edge = "left"
-		elif dist_r <= EDGE_RESIZE_THRESHOLD:
-			edge = "right"
+		if t >= clip.start_seconds and t <= clip.end_seconds():
+			clips_at_pos.append(clip)
+	if clips_at_pos.is_empty():
+		return {"kind": "lane", "track_id": track.id, "track_index": track_index, "time": t}
+
+	var scroll: float = view.get_scroll_seconds()
+	var zoom: float = view.get_zoom()
+	var lane: Rect2 = Renderer.track_lane_rect(
+		track_index, view.size.x, view.get_track_row_height()
+	)
+	var selected_id: String = view.get_selected_clip_id()
+
+	var target_clip: CodaTimelineClip = clips_at_pos[0]
+	for clip in clips_at_pos:
+		if clip.id == selected_id:
+			target_clip = clip
+			break
+
+	var clip_x0: float = _seconds_to_x(view, target_clip.start_seconds)
+	var clip_x1: float = _seconds_to_x(view, target_clip.end_seconds())
+	var dist_l: float = abs(local_pos.x - clip_x0)
+	var dist_r: float = abs(local_pos.x - clip_x1)
+	var trim_outset: float = Chrome.TRIM_OUTSET
+	var trim_left_hit: bool = (
+		local_pos.x >= clip_x0 - trim_outset - 2.0
+		and local_pos.x <= clip_x0 + EDGE_RESIZE_THRESHOLD + 2.0
+	)
+	var trim_right_hit: bool = (
+		local_pos.x <= clip_x1 + trim_outset + 2.0
+		and local_pos.x >= clip_x1 - EDGE_RESIZE_THRESHOLD - 2.0
+	)
+	if trim_left_hit and (not trim_right_hit or dist_l <= dist_r):
 		return {
 			"kind": "clip",
-			"clip_id": clip.id,
+			"clip_id": target_clip.id,
 			"track_id": track.id,
 			"track_index": track_index,
-			"edge": edge,
+			"edge": "left",
 		}
-	return {"kind": "lane", "track_id": track.id, "track_index": track_index, "time": t}
+	if trim_right_hit:
+		return {
+			"kind": "clip",
+			"clip_id": target_clip.id,
+			"track_id": track.id,
+			"track_index": track_index,
+			"edge": "right",
+		}
+
+	# Fade handles after trim strips (crossfade zone checks all overlapping clips).
+	var best_fade_dist: float = 999.0
+	var best_fade_edge: String = "none"
+	var best_fade_clip: CodaTimelineClip = null
+	for clip in clips_at_pos:
+		var clip_rect: Rect2 = Chrome.clip_rect_for_times(clip, lane, scroll, zoom)
+		var selected: bool = clip.id == selected_id
+		var edge: String = Chrome.hit_test_fade_handle(
+			local_pos, clip, clip_rect, scroll, zoom, selected
+		)
+		if edge == "none":
+			continue
+		var handle_pos: Vector2 = Chrome.handle_center_for_edge(
+			edge, clip_rect, clip, scroll, zoom
+		)
+		var dist: float = local_pos.distance_to(handle_pos)
+		if dist < best_fade_dist:
+			best_fade_dist = dist
+			best_fade_edge = edge
+			best_fade_clip = clip
+	if best_fade_clip != null:
+		return {
+			"kind": "clip",
+			"clip_id": best_fade_clip.id,
+			"track_id": track.id,
+			"track_index": track_index,
+			"edge": best_fade_edge,
+		}
+
+	return {
+		"kind": "clip",
+		"clip_id": target_clip.id,
+		"track_id": track.id,
+		"track_index": track_index,
+		"edge": "none",
+	}
 
 
 func apply_snap(view: CodaTimelineView, t: float) -> float:
@@ -215,6 +311,8 @@ func _handle_mouse_button(view: CodaTimelineView, mb: InputEventMouseButton) -> 
 		_begin_drag(view, hit_test(view, mb.position), mb)
 	else:
 		_end_drag()
+		view.update_minimum_size()
+		view.queue_redraw()
 	view.accept_event()
 
 
@@ -250,6 +348,13 @@ func _handle_mouse_motion(view: CodaTimelineView, mm: InputEventMouseMotion) -> 
 			_marker_press_id = ""
 			timeline_interaction_started.emit()
 	if _drag_kind == DragKind.NONE:
+		var hover: Dictionary = hit_test(view, mm.position)
+		if String(hover.get("kind", "")) == "clip":
+			_hover_clip_edge = String(hover.get("edge", "none"))
+		else:
+			_hover_clip_edge = "none"
+		view.update_hover_cursor()
+		view.queue_redraw()
 		return
 	var timeline: CodaEventTimeline = view.get_timeline()
 	var t: float = _x_to_seconds(view, mm.position.x)
@@ -267,10 +372,60 @@ func _handle_mouse_motion(view: CodaTimelineView, mm: InputEventMouseMotion) -> 
 		DragKind.CLIP_MOVE:
 			var raw_start: float = _drag_initial_clip_start + (t - _drag_start_seconds)
 			var snapped_start: float = apply_snap(view, raw_start)
-			var target_idx: int = clampi(
-				_track_index_at_y(view, mm.position.y), 0, max(0, view.track_count() - 1)
-			)
+			var target_idx: int = _resolve_move_target_track_index(view, mm.position.y)
+			_ghost_new_track = target_idx >= view.track_count()
+			view.update_minimum_size()
 			clip_move_requested.emit(_drag_clip_id, snapped_start, target_idx)
+		DragKind.CLIP_FADE_IN:
+			var info_fi: Dictionary = timeline.find_clip(_drag_clip_id)
+			var clip_fi: CodaTimelineClip = info_fi.get("clip") as CodaTimelineClip
+			if clip_fi != null:
+				var max_fi: float = clip_fi.duration_seconds * 0.5
+				var new_fi: float = clampf(
+					apply_snap(view, t) - clip_fi.start_seconds, 0.0, max_fi
+				)
+				clip_fade_requested.emit(
+					_drag_clip_id, new_fi, clip_fi.fade_out_seconds,
+					clip_fi.fade_in_curve, clip_fi.fade_out_curve
+				)
+		DragKind.CLIP_FADE_OUT:
+			var info_fo: Dictionary = timeline.find_clip(_drag_clip_id)
+			var clip_fo: CodaTimelineClip = info_fo.get("clip") as CodaTimelineClip
+			if clip_fo != null:
+				var max_fo: float = clip_fo.duration_seconds * 0.5
+				var new_fo: float = clampf(
+					clip_fo.end_seconds() - apply_snap(view, t), 0.0, max_fo
+				)
+				clip_fade_requested.emit(
+					_drag_clip_id, clip_fo.fade_in_seconds, new_fo,
+					clip_fo.fade_in_curve, clip_fo.fade_out_curve
+				)
+		DragKind.CLIP_FADE_IN_SHAPE:
+			var info_fis: Dictionary = timeline.find_clip(_drag_clip_id)
+			var clip_fis: CodaTimelineClip = info_fis.get("clip") as CodaTimelineClip
+			if clip_fis != null:
+				var dy: float = mm.position.y - _drag_initial_screen_pos.y
+				var curve_delta: float = dy / maxf(32.0, _drag_clip_rect_height) * 1.35
+				var new_curve: float = clampf(
+					_drag_initial_fade_in_curve + curve_delta, 0.0, 1.0
+				)
+				clip_fade_requested.emit(
+					_drag_clip_id, clip_fis.fade_in_seconds, clip_fis.fade_out_seconds,
+					new_curve, clip_fis.fade_out_curve
+				)
+		DragKind.CLIP_FADE_OUT_SHAPE:
+			var info_fos: Dictionary = timeline.find_clip(_drag_clip_id)
+			var clip_fos: CodaTimelineClip = info_fos.get("clip") as CodaTimelineClip
+			if clip_fos != null:
+				var dy_out: float = mm.position.y - _drag_initial_screen_pos.y
+				var curve_delta_out: float = dy_out / maxf(32.0, _drag_clip_rect_height) * 1.35
+				var new_curve_out: float = clampf(
+					_drag_initial_fade_out_curve + curve_delta_out, 0.0, 1.0
+				)
+				clip_fade_requested.emit(
+					_drag_clip_id, clip_fos.fade_in_seconds, clip_fos.fade_out_seconds,
+					clip_fos.fade_in_curve, new_curve_out
+				)
 		DragKind.CLIP_RESIZE_LEFT:
 			var anchor_end: float = _drag_initial_clip_start + _drag_initial_clip_duration
 			var min_start: float = maxf(0.0, _drag_initial_clip_start - _drag_initial_clip_offset)
@@ -360,6 +515,18 @@ func _begin_drag(view: CodaTimelineView, hit: Dictionary, mb: InputEventMouseBut
 		_drag_initial_clip_start = clip.start_seconds
 		_drag_initial_clip_duration = clip.duration_seconds
 		_drag_initial_clip_offset = clip.offset_seconds
+		_drag_initial_fade_in = clip.fade_in_seconds
+		_drag_initial_fade_out = clip.fade_out_seconds
+		_drag_initial_fade_in_curve = clip.fade_in_curve
+		_drag_initial_fade_out_curve = clip.fade_out_curve
+		var track_idx: int = int(hit.get("track_index", 0))
+		var lane: Rect2 = Renderer.track_lane_rect(
+			track_idx, view.size.x, view.get_track_row_height()
+		)
+		var clip_rect: Rect2 = Chrome.clip_rect_for_times(
+			clip, lane, view.get_scroll_seconds(), view.get_zoom()
+		)
+		_drag_clip_rect_height = clip_rect.size.y
 		view.set_selected_clip(clip_id)
 		clip_selected.emit(clip_id)
 		match String(hit.get("edge", "none")):
@@ -367,6 +534,14 @@ func _begin_drag(view: CodaTimelineView, hit: Dictionary, mb: InputEventMouseBut
 				_drag_kind = DragKind.CLIP_RESIZE_LEFT
 			"right":
 				_drag_kind = DragKind.CLIP_RESIZE_RIGHT
+			"fade_in":
+				_drag_kind = DragKind.CLIP_FADE_IN
+			"fade_in_shape":
+				_drag_kind = DragKind.CLIP_FADE_IN_SHAPE
+			"fade_out":
+				_drag_kind = DragKind.CLIP_FADE_OUT
+			"fade_out_shape":
+				_drag_kind = DragKind.CLIP_FADE_OUT_SHAPE
 			_:
 				_drag_kind = DragKind.CLIP_MOVE
 		timeline_interaction_started.emit()
@@ -386,6 +561,24 @@ func _end_drag() -> void:
 	_drag_clip_id = ""
 	_drag_marker_id = ""
 	_marker_press_id = ""
+	_ghost_new_track = false
+	_hover_clip_edge = "none"
+
+
+func _resolve_move_target_track_index(view: CodaTimelineView, y: float) -> int:
+	var n: int = view.track_count()
+	if n <= 0:
+		return 0
+	if y < RULER_HEIGHT:
+		return 0
+	var row: int = _track_row_from_y(view, y)
+	if row < n:
+		return row
+	var ghost_top: float = RULER_HEIGHT + float(n) * float(view.get_track_row_height())
+	var ghost_bottom: float = ghost_top + float(view.get_track_row_height()) * GHOST_TRACK_ROW_FRACTION
+	if y >= ghost_top and y < ghost_bottom:
+		return n
+	return n - 1
 
 
 func _open_context_menu_for_hit(view: CodaTimelineView, hit: Dictionary) -> void:

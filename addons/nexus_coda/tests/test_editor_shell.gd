@@ -290,7 +290,12 @@ static func _test_control_max_size_compat() -> int:
 
 
 static func _test_nan_json_save() -> int:
-	var payload: Dictionary = {"value": NAN, "nested": {"x": INF}}
+	var payload: Dictionary = {
+		"value": NAN,
+		"nested": {"x": INF},
+		"peaks": PackedFloat32Array([NAN, 0.5]),
+		"color": Color(NAN, 0.5, 0.5, 1.0),
+	}
 	var text: String = CodaJsonUtilScript.stringify(payload, "  ")
 	if text.is_empty():
 		push_error("CodaJsonUtil.stringify returned empty for NaN payload")

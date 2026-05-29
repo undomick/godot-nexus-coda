@@ -34,8 +34,7 @@ signal effect_bypass_changed(effect_id: String, on: bool)
 var _title: Label
 var _subtitle: Label
 var _footer: Label
-var _add_btn: Button
-var _add_menu: PopupMenu
+var _add_btn: MenuButton
 var _scroll: ScrollContainer
 var _list: VBoxContainer
 var _empty_hint: Label
@@ -72,23 +71,21 @@ func _ready() -> void:
 	_subtitle.text = ""
 	title_col.add_child(_subtitle)
 
-	_add_btn = Button.new()
+	_add_btn = MenuButton.new()
 	_add_btn.text = "+ Effect"
 	_add_btn.tooltip_text = "Add an effect to this chain"
+	_add_btn.switch_on_hover = true
 	_add_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
-	_add_btn.pressed.connect(_on_add_pressed)
+	var add_popup: PopupMenu = _add_btn.get_popup()
+	add_popup.transient = true
+	add_popup.exclusive = true
+	add_popup.unfocusable = false
+	_build_add_menu(add_popup)
+	if not add_popup.id_pressed.is_connected(_on_add_menu_id_pressed):
+		add_popup.id_pressed.connect(_on_add_menu_id_pressed)
+	if not add_popup.about_to_popup.is_connected(_on_add_menu_about_to_popup):
+		add_popup.about_to_popup.connect(_on_add_menu_about_to_popup)
 	header_row.add_child(_add_btn)
-
-	_add_menu = PopupMenu.new()
-	_add_menu.name = "EffectAddMenu"
-	_add_menu.transient = true
-	_add_menu.exclusive = true
-	_build_add_menu()
-	if not _add_menu.id_pressed.is_connected(_on_add_menu_id_pressed):
-		_add_menu.id_pressed.connect(_on_add_menu_id_pressed)
-	if not _add_menu.index_pressed.is_connected(_on_add_menu_index_pressed):
-		_add_menu.index_pressed.connect(_on_add_menu_index_pressed)
-	add_child(_add_menu)
 
 	_scroll = ScrollContainer.new()
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -169,8 +166,8 @@ func _compute_structure_sig() -> String:
 	return "%d|%s" % [_effects_ref.size(), "|".join(parts)]
 
 
-func _build_add_menu() -> void:
-	_add_menu.clear()
+func _build_add_menu(menu: PopupMenu) -> void:
+	menu.clear()
 	# Group entries by category for a quicker scan; PopupMenu shows them in insertion order.
 	var by_cat: Dictionary = {}
 	var types: Array[CodaTrackEffect.Type] = CodaEffectCatalogScript.all_types_sorted()
@@ -182,31 +179,21 @@ func _build_add_menu() -> void:
 	var first: bool = true
 	for cat in by_cat.keys():
 		if not first:
-			_add_menu.add_separator(str(cat))
+			menu.add_separator(str(cat))
 		else:
-			_add_menu.add_separator(str(cat))
+			menu.add_separator(str(cat))
 			first = false
 		for t in by_cat[cat]:
 			# Menu IDs start at 1 — Godot treats 0 as "unset" for some PopupMenu paths.
-			_add_menu.add_item(CodaEffectCatalogScript.display_name_for_type(t), int(t) + 1)
+			menu.add_item(CodaEffectCatalogScript.display_name_for_type(t), int(t) + 1)
 
 
-func _on_add_pressed() -> void:
+func _on_add_menu_about_to_popup() -> void:
 	effect_add_menu_opened.emit()
-	_add_menu.reset_size()
-	var gp: Vector2 = _add_btn.get_global_rect().position + Vector2(0, _add_btn.size.y)
-	_add_menu.position = Vector2i(int(gp.x), int(gp.y))
-	_add_menu.popup()
 
 
 func _on_add_menu_id_pressed(id: int) -> void:
 	_submit_menu_pick(id)
-
-
-func _on_add_menu_index_pressed(index: int) -> void:
-	if _add_menu == null or index < 0:
-		return
-	_submit_menu_pick(_add_menu.get_item_id(index))
 
 
 func _submit_menu_pick(raw_id: int) -> void:

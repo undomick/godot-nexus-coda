@@ -164,8 +164,6 @@ static func _test_add_track_effect_via_section_chain() -> int:
 		{"event_id": ev.id, "track_id": track.id}
 	)
 	var chain: CodaEffectsChainView = section.get_track_chain_control() as CodaEffectsChainView
-	section._capture_add_snapshot_for_chain(chain)
-	chain.effect_add_menu_opened.emit()
 	chain.effect_add_requested.emit(CodaTrackEffect.Type.GAIN)
 	if track.effects.is_empty():
 		push_error("track effect add via section chain failed")
@@ -190,8 +188,6 @@ static func _test_add_clip_effect_via_section_chain() -> int:
 	if clip_chain == null:
 		push_error("clip chain missing for section add test")
 		return 1
-	section._capture_add_snapshot_for_chain(clip_chain)
-	clip_chain.effect_add_menu_opened.emit()
 	clip_chain.effect_add_requested.emit(CodaTrackEffect.Type.GAIN)
 	if clip.effects.is_empty():
 		push_error("clip effect add via section chain failed")

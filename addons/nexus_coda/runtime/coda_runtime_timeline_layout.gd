@@ -4,6 +4,8 @@ extends RefCounted
 
 ## Timeline layout fingerprints and shared track filtering for runtime dispatch.
 
+const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
+
 
 static func timeline_has_solo(timeline: CodaEventTimeline) -> bool:
 	for tr in timeline.tracks:
@@ -54,7 +56,7 @@ static func fx_chain_signature(effects: Array) -> String:
 			var e: CodaTrackEffect = eff as CodaTrackEffect
 			fx_parts.append(
 				"%s|%d|%s|%s"
-				% [e.id, int(e.type), str(e.bypass), JSON.stringify(e.params)]
+				% [e.id, int(e.type), str(e.bypass), CodaJsonUtilScript.stringify(e.params)]
 			)
 	fx_parts.sort()
 	return ",".join(fx_parts)

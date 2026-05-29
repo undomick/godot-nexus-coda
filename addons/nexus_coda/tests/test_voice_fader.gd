@@ -2,6 +2,7 @@ extends RefCounted
 class_name TestVoiceFader
 
 const CodaVoiceFaderScript := preload("res://addons/nexus_coda/runtime/coda_voice_fader.gd")
+const CodaFadeCurveScript := preload("res://addons/nexus_coda/runtime/coda_fade_curve.gd")
 const CodaTimelineClipScript := preload(
 	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
 )
@@ -10,6 +11,7 @@ const CodaTimelineClipScript := preload(
 static func run() -> int:
 	var failed: int = 0
 	failed += _test_clip_fade()
+	failed += _test_fade_curve_shapes()
 	failed += _test_immediate_fade()
 	return failed
 
@@ -27,6 +29,42 @@ static func _test_clip_fade() -> int:
 	var start: float = CodaVoiceFaderScript.clip_fade_db_offset(clip, 10.5)
 	if start >= mid:
 		push_error("clip fade in should attenuate at start")
+		return 1
+	return 0
+
+
+static func _test_fade_curve_shapes() -> int:
+	var clip_linear = CodaTimelineClipScript.new()
+	clip_linear.start_seconds = 0.0
+	clip_linear.duration_seconds = 4.0
+	clip_linear.fade_in_seconds = 2.0
+	clip_linear.fade_in_curve = 0.5
+
+	var clip_slow = CodaTimelineClipScript.new()
+	clip_slow.start_seconds = 0.0
+	clip_slow.duration_seconds = 4.0
+	clip_slow.fade_in_seconds = 2.0
+	clip_slow.fade_in_curve = 0.2
+
+	var clip_fast = CodaTimelineClipScript.new()
+	clip_fast.start_seconds = 0.0
+	clip_fast.duration_seconds = 4.0
+	clip_fast.fade_in_seconds = 2.0
+	clip_fast.fade_in_curve = 0.8
+
+	var t_mid: float = 1.0
+	var db_linear: float = CodaVoiceFaderScript.clip_fade_db_offset(clip_linear, t_mid)
+	var db_slow: float = CodaVoiceFaderScript.clip_fade_db_offset(clip_slow, t_mid)
+	var db_fast: float = CodaVoiceFaderScript.clip_fade_db_offset(clip_fast, t_mid)
+	if db_slow >= db_linear:
+		push_error("concave fade (0.2) should attenuate more than linear at mid fade-in")
+		return 1
+	if db_fast <= db_linear:
+		push_error("convex fade (0.8) should attenuate less than linear at mid fade-in")
+		return 1
+	var amp: float = CodaFadeCurveScript.apply(0.5, 0.5)
+	if abs(amp - 0.5) > 0.001:
+		push_error("linear curve should map 0.5 to 0.5 amplitude")
 		return 1
 	return 0
 

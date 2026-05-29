@@ -261,6 +261,7 @@ func _build_split_root() -> void:
 	_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_view.clip_move_requested.connect(_on_view_clip_move_requested)
+	_view.clip_fade_requested.connect(_on_view_clip_fade_requested)
 	_view.clip_resize_requested.connect(_on_view_clip_resize_requested)
 	_view.clip_delete_requested.connect(_on_view_clip_delete_requested)
 	_view.browser_asset_dropped.connect(_on_view_browser_asset_dropped)
@@ -385,14 +386,7 @@ func _soft_refresh_timeline_after_param_edit() -> void:
 func _on_project_structure_changed() -> void:
 	if _selected_event == null:
 		return
-	if _selected_event.event_authoring_mode != CodaBrowserNode.AuthoringMode.TIMELINE:
-		return
-	if _selected_event.event_timeline == null or _view == null:
-		return
-	_rebuild_track_headers()
-	_view.queue_redraw()
-	if _split_root != null and _split_root.visible:
-		_notify_timeline_changed()
+	_refresh_view_state()
 
 
 func _refresh_view_state() -> void:
@@ -404,8 +398,7 @@ func _refresh_view_state() -> void:
 		_show_empty(true, "Switch to Timeline")
 		return
 	if _selected_event.event_timeline == null:
-		_show_empty(true, "Switch to Timeline")
-		return
+		_selected_event.event_timeline = CodaEventTimeline.make_default()
 	_show_timeline()
 
 
@@ -803,8 +796,36 @@ func _on_view_clip_move_requested(
 	if _selected_event == null or _selected_event.event_timeline == null:
 		return
 	var t: CodaEventTimeline = _selected_event.event_timeline
-	CodaTimelineCommands.move_clip(t, clip_id, new_start, new_track_index)
+	var prev_count: int = t.tracks.size()
+	var snap: CodaEventTimeline = CodaTimelineCommands.move_clip_to_track(
+		t, clip_id, new_start, new_track_index
+	)
+	if snap != null:
+		_push_snapshot(snap)
+	if t.tracks.size() > prev_count:
+		_selected_track_index = t.tracks.size() - 1
+		_last_track_headers_sig = ""
+		_rebuild_track_headers()
+		if _view != null:
+			_view.set_track_row_highlight(_selected_track_index)
+		_emit_track_selection_changed()
 	CodaTimelineCommands.extend_timeline_if_content_exceeds(t)
+	_notify_timeline_changed()
+
+
+func _on_view_clip_fade_requested(
+	clip_id: String,
+	fade_in: float,
+	fade_out: float,
+	fade_in_curve: float,
+	fade_out_curve: float
+) -> void:
+	if _selected_event == null or _selected_event.event_timeline == null:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	CodaTimelineCommands.apply_clip_fades(
+		t, clip_id, fade_in, fade_out, fade_in_curve, fade_out_curve
+	)
 	_notify_timeline_changed()
 
 

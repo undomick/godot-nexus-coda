@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://c7nxcodalog01"]
+
+[ext_resource type="Script" path="res://addons/nexus_coda/editor/coda_logger.gd" id="1_logger"]
+
+[node name="CodaLogger" type="Node"]
+script = ExtResource("1_logger")

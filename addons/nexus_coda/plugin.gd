@@ -21,6 +21,10 @@ const AUTOLOAD_MUSIC_NAME := "CodaMusic"
 const AUTOLOAD_MUSIC_PATH := "res://addons/nexus_coda/runtime/coda_music_director.gd"
 const AUTOLOAD_BRIDGE_NAME := "CodaGameBridge"
 const AUTOLOAD_BRIDGE_PATH := "res://addons/nexus_coda/runtime/coda_game_bridge.gd"
+const LOGGER_AUTOLOAD_NAME := "CodaLogger"
+const LOGGER_AUTOLOAD_PATH := "res://addons/nexus_coda/editor/coda_logger.tscn"
+
+const CodaLoggerScript := preload("res://addons/nexus_coda/editor/coda_logger.gd")
 
 var _tools_menu: PopupMenu
 var _ncoda_import_plugin: EditorImportPlugin
@@ -30,7 +34,10 @@ var _gameplay_was_active: bool = false
 
 
 func _enter_tree() -> void:
-	NexusCodaLog.print_ready_banner()
+	_register_logger_project_settings()
+	if _needs_autoload_register_named(LOGGER_AUTOLOAD_NAME, LOGGER_AUTOLOAD_PATH):
+		add_autoload_singleton(LOGGER_AUTOLOAD_NAME, LOGGER_AUTOLOAD_PATH)
+	call_deferred(&"_log_plugin_ready")
 	# Re-adding the same autoload rewrites project.godot on every restart, which makes the
 	# editor flag the project as dirty even when nothing meaningful changed. Only touch the
 	# settings when the entry is actually missing or stale.
@@ -53,6 +60,10 @@ func _enter_tree() -> void:
 	# add_tool_submenu_item requires an unparented PopupMenu.
 	add_tool_submenu_item(TOOLS_SUBMENU_NAME, _tools_menu)
 	set_process(true)
+
+
+func _log_plugin_ready() -> void:
+	NexusCodaLog.print_ready_banner()
 
 
 func _process(_delta: float) -> void:
@@ -102,7 +113,61 @@ func _exit_tree() -> void:
 	if _tools_menu != null and is_instance_valid(_tools_menu):
 		_tools_menu.queue_free()
 		_tools_menu = null
-	# Autoload entries stay in project.godot so plugin reload does not break running scenes.
+	# Runtime autoload entries stay in project.godot so plugin reload does not break scenes.
+
+
+func _register_logger_project_settings() -> void:
+	const PREFIX := "nexus/coda/logger/"
+	if not ProjectSettings.has_setting(PREFIX + "categories_enabled"):
+		ProjectSettings.set_setting(
+			PREFIX + "categories_enabled",
+			CodaLoggerScript.get_default_categories_enabled_dict()
+		)
+	else:
+		var ce: Variant = ProjectSettings.get_setting(PREFIX + "categories_enabled")
+		if ce is Dictionary and (ce as Dictionary).is_empty():
+			ProjectSettings.set_setting(
+				PREFIX + "categories_enabled",
+				CodaLoggerScript.get_default_categories_enabled_dict()
+			)
+	ProjectSettings.set_initial_value(
+		PREFIX + "categories_enabled",
+		CodaLoggerScript.get_default_categories_enabled_dict()
+	)
+	ProjectSettings.add_property_info({
+		"name": PREFIX + "categories_enabled",
+		"type": TYPE_DICTIONARY,
+	})
+	if not ProjectSettings.has_setting(PREFIX + "minimum_level"):
+		ProjectSettings.set_setting(PREFIX + "minimum_level", CodaLoggerScript.Level.DEBUG)
+	ProjectSettings.set_initial_value(PREFIX + "minimum_level", CodaLoggerScript.Level.DEBUG)
+	ProjectSettings.add_property_info({
+		"name": PREFIX + "minimum_level",
+		"type": TYPE_INT,
+		"hint": PROPERTY_HINT_ENUM,
+		"hint_string": "Debug,Info,Warn,Error",
+	})
+	if not ProjectSettings.has_setting(PREFIX + "output_to_debug"):
+		ProjectSettings.set_setting(PREFIX + "output_to_debug", true)
+	ProjectSettings.set_initial_value(PREFIX + "output_to_debug", true)
+	ProjectSettings.add_property_info({
+		"name": PREFIX + "output_to_debug",
+		"type": TYPE_BOOL,
+	})
+	if not ProjectSettings.has_setting(PREFIX + "output_to_file"):
+		ProjectSettings.set_setting(PREFIX + "output_to_file", false)
+	ProjectSettings.set_initial_value(PREFIX + "output_to_file", false)
+	ProjectSettings.add_property_info({
+		"name": PREFIX + "output_to_file",
+		"type": TYPE_BOOL,
+	})
+	if not ProjectSettings.has_setting(PREFIX + "file_path"):
+		ProjectSettings.set_setting(PREFIX + "file_path", CodaLoggerScript.DEFAULT_FILE_PATH)
+	ProjectSettings.set_initial_value(PREFIX + "file_path", CodaLoggerScript.DEFAULT_FILE_PATH)
+	ProjectSettings.add_property_info({
+		"name": PREFIX + "file_path",
+		"type": TYPE_STRING,
+	})
 
 
 func get_editor_runtime() -> CodaRuntime:

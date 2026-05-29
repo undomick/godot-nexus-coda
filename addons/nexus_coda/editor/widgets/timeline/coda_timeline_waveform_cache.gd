@@ -3,8 +3,8 @@ extends RefCounted
 ## Editor-only peak envelope for timeline clip drawing. WAV (16-bit PCM) uses decoded
 ## peaks; other [AudioStream] types use a deterministic placeholder curve.
 
-const INTERNAL_BUCKETS := 128
-const MAX_SCAN_BYTES := 400000
+const INTERNAL_BUCKETS := 2048
+const MAX_SCAN_BYTES := 1600000
 
 static var _cache: Dictionary = {}  ## res_path -> PackedFloat32Array (INTERNAL_BUCKETS, 0..1)
 
@@ -30,7 +30,9 @@ static func _full_envelope(res_path: String) -> PackedFloat32Array:
 	if not res_path.begins_with("res://") or not ResourceLoader.exists(res_path):
 		return PackedFloat32Array()
 	if _cache.has(res_path):
-		return _cache[res_path] as PackedFloat32Array
+		var cached: PackedFloat32Array = _cache[res_path] as PackedFloat32Array
+		if cached.size() == INTERNAL_BUCKETS:
+			return cached
 	var res: Resource = ResourceLoader.load(res_path)
 	var peaks: PackedFloat32Array = PackedFloat32Array()
 	if res is AudioStreamWAV:

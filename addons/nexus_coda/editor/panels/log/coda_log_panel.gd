@@ -8,6 +8,7 @@ extends VBoxContainer
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
+const CodaLoggerScript := preload("res://addons/nexus_coda/editor/coda_logger.gd")
 
 const MAX_LINES := 500
 
@@ -64,11 +65,29 @@ func _ready() -> void:
 	add_child(_output)
 
 	NexusCodaLog.subscribe(self, _on_log_event)
+	_hydrate_from_logger_buffer()
 	_refresh()
 
 
 func _exit_tree() -> void:
 	NexusCodaLog.unsubscribe(self)
+
+
+func _hydrate_from_logger_buffer() -> void:
+	var ml: MainLoop = Engine.get_main_loop()
+	if ml is not SceneTree:
+		return
+	var logger: Node = (ml as SceneTree).root.get_node_or_null("CodaLogger")
+	if logger == null or not logger.has_method(&"get_recent_entries"):
+		return
+	for entry in logger.call(&"get_recent_entries", MAX_LINES):
+		if entry is Dictionary:
+			var d: Dictionary = entry as Dictionary
+			_entries.append({
+				"level": int(d.get("level", 0)),
+				"scope": str(d.get("category", "")),
+				"message": str(d.get("message", "")),
+			})
 
 
 func _on_log_event(level: int, scope: String, message: String) -> void:
@@ -88,6 +107,11 @@ func _on_level_changed(_idx: int) -> void:
 
 func _on_clear_pressed() -> void:
 	_entries.clear()
+	var ml: MainLoop = Engine.get_main_loop()
+	if ml is SceneTree:
+		var logger: Node = (ml as SceneTree).root.get_node_or_null("CodaLogger")
+		if logger != null and logger.has_method(&"clear_buffer"):
+			logger.call(&"clear_buffer")
 	_refresh()
 
 
@@ -116,16 +140,16 @@ func _format_entry(level: int, scope: String, message: String) -> String:
 	var color: String
 	var tag: String
 	match level:
-		NexusCodaLog.Level.DEBUG:
+		CodaLoggerScript.Level.DEBUG:
 			color = "#888"
 			tag = "DEBUG"
-		NexusCodaLog.Level.INFO:
+		CodaLoggerScript.Level.INFO:
 			color = "#cdd"
 			tag = "INFO"
-		NexusCodaLog.Level.WARN:
+		CodaLoggerScript.Level.WARN:
 			color = "#e3b35a"
 			tag = "WARN"
-		NexusCodaLog.Level.ERROR:
+		CodaLoggerScript.Level.ERROR:
 			color = "#e25656"
 			tag = "ERROR"
 		_:

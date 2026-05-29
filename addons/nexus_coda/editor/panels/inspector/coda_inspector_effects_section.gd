@@ -22,7 +22,7 @@ var _track_id: String = ""
 var _clip_id: String = ""
 var _bus_id: String = ""
 var _chains_ready: bool = false
-var _add_snapshots: Dictionary = {}
+var _chain_signals_connected: bool = false
 
 
 func _init() -> void:
@@ -53,7 +53,7 @@ func _ready() -> void:
 	_clip_panel.visible = false
 	_bus_panel.visible = false
 	_chains_ready = true
-	_bind_chain_handlers()
+	_connect_chain_signals_once()
 	_apply_scope()
 
 
@@ -68,13 +68,7 @@ func attach_project(project: CodaState) -> void:
 		_project.structure_changed.connect(_sync_active_chain)
 		_project.project_dirty.connect(_sync_active_chain)
 	if _chains_ready:
-		_bind_chain_handlers()
 		_apply_scope()
-
-
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_ENTER_TREE and _chains_ready:
-		_bind_chain_handlers()
 
 
 func set_fx_scope(scope: FxScope, ids: Dictionary = {}) -> void:
@@ -96,7 +90,6 @@ func set_fx_scope(scope: FxScope, ids: Dictionary = {}) -> void:
 	_bus_id = next_bus_id
 	if not _chains_ready:
 		return
-	_bind_chain_handlers()
 	if scope_changed:
 		_apply_scope()
 	else:
@@ -141,74 +134,120 @@ func get_active_mutation_target() -> Dictionary:
 	return _snapshot_for_scope(_active_scope)
 
 
-func _bind_chain_handlers() -> void:
-	if _track_chain == null:
+func _connect_chain_signals_once() -> void:
+	if _chain_signals_connected or _track_chain == null:
 		return
-	_bind_one_chain(_track_chain, FxScope.TIMELINE_TRACK)
-	_bind_one_chain(_clip_chain, FxScope.TIMELINE_CLIP)
-	_bind_one_chain(_bus_chain, FxScope.BUS)
+	_track_chain.effect_add_requested.connect(_on_track_chain_add_requested)
+	_track_chain.effect_remove_requested.connect(_on_track_chain_remove_requested)
+	_track_chain.effect_move_requested.connect(_on_track_chain_move_requested)
+	_track_chain.effect_param_changed.connect(_on_track_chain_param_changed)
+	_track_chain.effect_bypass_changed.connect(_on_track_chain_bypass_changed)
+	_clip_chain.effect_add_requested.connect(_on_clip_chain_add_requested)
+	_clip_chain.effect_remove_requested.connect(_on_clip_chain_remove_requested)
+	_clip_chain.effect_move_requested.connect(_on_clip_chain_move_requested)
+	_clip_chain.effect_param_changed.connect(_on_clip_chain_param_changed)
+	_clip_chain.effect_bypass_changed.connect(_on_clip_chain_bypass_changed)
+	_bus_chain.effect_add_requested.connect(_on_bus_chain_add_requested)
+	_bus_chain.effect_remove_requested.connect(_on_bus_chain_remove_requested)
+	_bus_chain.effect_move_requested.connect(_on_bus_chain_move_requested)
+	_bus_chain.effect_param_changed.connect(_on_bus_chain_param_changed)
+	_bus_chain.effect_bypass_changed.connect(_on_bus_chain_bypass_changed)
+	_chain_signals_connected = true
 
 
-func _bind_one_chain(chain: CodaEffectsChainView, scope: FxScope) -> void:
-	if chain == null:
-		return
-	_disconnect_chain_signals(chain)
-	chain.set_meta(&"coda_fx_scope", scope)
-	var menu_slot := func() -> void:
-		_on_effect_add_menu_opened(chain)
-	var add_slot := func(effect_type: int) -> void:
-		_on_effect_add_requested(chain, effect_type)
-	var remove_slot := func(effect_id: String) -> void:
-		_on_effect_remove_requested(scope, effect_id)
-	var move_slot := func(from_i: int, to_i: int) -> void:
-		_on_effect_move_requested(scope, from_i, to_i)
-	var param_slot := func(effect_id: String, key: String, value: float) -> void:
-		_on_effect_param_changed(scope, effect_id, key, value)
-	var bypass_slot := func(effect_id: String, on: bool) -> void:
-		_on_effect_bypass_changed(scope, effect_id, on)
-	chain.set_meta(&"coda_fx_menu_slot", menu_slot)
-	chain.set_meta(&"coda_fx_add_slot", add_slot)
-	chain.set_meta(&"coda_fx_remove_slot", remove_slot)
-	chain.set_meta(&"coda_fx_move_slot", move_slot)
-	chain.set_meta(&"coda_fx_param_slot", param_slot)
-	chain.set_meta(&"coda_fx_bypass_slot", bypass_slot)
-	chain.effect_add_menu_opened.connect(menu_slot)
-	chain.effect_add_requested.connect(add_slot)
-	chain.effect_remove_requested.connect(remove_slot)
-	chain.effect_move_requested.connect(move_slot)
-	chain.effect_param_changed.connect(param_slot)
-	chain.effect_bypass_changed.connect(bypass_slot)
+func _on_track_chain_add_requested(effect_type: int) -> void:
+	_on_effect_add_requested(_track_chain, effect_type)
 
 
-func _disconnect_chain_signals(chain: CodaEffectsChainView) -> void:
-	if chain == null:
-		return
-	var menu_slot: Callable = chain.get_meta(&"coda_fx_menu_slot", Callable()) as Callable
-	if menu_slot.is_valid() and chain.effect_add_menu_opened.is_connected(menu_slot):
-		chain.effect_add_menu_opened.disconnect(menu_slot)
-	var add_slot: Callable = chain.get_meta(&"coda_fx_add_slot", Callable()) as Callable
-	if add_slot.is_valid() and chain.effect_add_requested.is_connected(add_slot):
-		chain.effect_add_requested.disconnect(add_slot)
-	var remove_slot: Callable = chain.get_meta(&"coda_fx_remove_slot", Callable()) as Callable
-	if remove_slot.is_valid() and chain.effect_remove_requested.is_connected(remove_slot):
-		chain.effect_remove_requested.disconnect(remove_slot)
-	var move_slot: Callable = chain.get_meta(&"coda_fx_move_slot", Callable()) as Callable
-	if move_slot.is_valid() and chain.effect_move_requested.is_connected(move_slot):
-		chain.effect_move_requested.disconnect(move_slot)
-	var param_slot: Callable = chain.get_meta(&"coda_fx_param_slot", Callable()) as Callable
-	if param_slot.is_valid() and chain.effect_param_changed.is_connected(param_slot):
-		chain.effect_param_changed.disconnect(param_slot)
-	var bypass_slot: Callable = chain.get_meta(&"coda_fx_bypass_slot", Callable()) as Callable
-	if bypass_slot.is_valid() and chain.effect_bypass_changed.is_connected(bypass_slot):
-		chain.effect_bypass_changed.disconnect(bypass_slot)
+func _on_clip_chain_add_requested(effect_type: int) -> void:
+	_on_effect_add_requested(_clip_chain, effect_type)
 
 
-func _capture_add_snapshot_for_chain(chain: CodaEffectsChainView) -> void:
-	_on_effect_add_menu_opened(chain)
+func _on_bus_chain_add_requested(effect_type: int) -> void:
+	_on_effect_add_requested(_bus_chain, effect_type)
+
+
+func _on_track_chain_remove_requested(effect_id: String) -> void:
+	_on_effect_remove_requested(FxScope.TIMELINE_TRACK, effect_id)
+
+
+func _on_clip_chain_remove_requested(effect_id: String) -> void:
+	_on_effect_remove_requested(FxScope.TIMELINE_CLIP, effect_id)
+
+
+func _on_bus_chain_remove_requested(effect_id: String) -> void:
+	_on_effect_remove_requested(FxScope.BUS, effect_id)
+
+
+func _on_track_chain_move_requested(from_i: int, to_i: int) -> void:
+	_on_effect_move_requested(FxScope.TIMELINE_TRACK, from_i, to_i)
+
+
+func _on_clip_chain_move_requested(from_i: int, to_i: int) -> void:
+	_on_effect_move_requested(FxScope.TIMELINE_CLIP, from_i, to_i)
+
+
+func _on_bus_chain_move_requested(from_i: int, to_i: int) -> void:
+	_on_effect_move_requested(FxScope.BUS, from_i, to_i)
+
+
+func _on_track_chain_param_changed(effect_id: String, key: String, value: float) -> void:
+	_on_effect_param_changed(FxScope.TIMELINE_TRACK, effect_id, key, value)
+
+
+func _on_clip_chain_param_changed(effect_id: String, key: String, value: float) -> void:
+	_on_effect_param_changed(FxScope.TIMELINE_CLIP, effect_id, key, value)
+
+
+func _on_bus_chain_param_changed(effect_id: String, key: String, value: float) -> void:
+	_on_effect_param_changed(FxScope.BUS, effect_id, key, value)
+
+
+func _on_track_chain_bypass_changed(effect_id: String, on: bool) -> void:
+	_on_effect_bypass_changed(FxScope.TIMELINE_TRACK, effect_id, on)
+
+
+func _on_clip_chain_bypass_changed(effect_id: String, on: bool) -> void:
+	_on_effect_bypass_changed(FxScope.TIMELINE_CLIP, effect_id, on)
+
+
+func _on_bus_chain_bypass_changed(effect_id: String, on: bool) -> void:
+	_on_effect_bypass_changed(FxScope.BUS, effect_id, on)
+
+
+func _capture_add_snapshot_for_chain(_chain: CodaEffectsChainView) -> void:
+	pass
 
 
 func _effect_add_from_chain(chain: CodaEffectsChainView, effect_type: int) -> void:
 	_on_effect_add_requested(chain, effect_type)
+
+
+func _mutation_context_for_chain(chain: CodaEffectsChainView) -> Dictionary:
+	var scope: FxScope = _scope_for_chain(chain)
+	match scope:
+		FxScope.TIMELINE_TRACK:
+			if _timeline_event_id.is_empty() or _track_id.is_empty():
+				return {}
+			return {
+				"scope": &"track",
+				"event_id": _timeline_event_id,
+				"track_id": _track_id,
+			}
+		FxScope.TIMELINE_CLIP:
+			if _timeline_event_id.is_empty() or _clip_id.is_empty():
+				return {}
+			return {
+				"scope": &"clip",
+				"event_id": _timeline_event_id,
+				"clip_id": _clip_id,
+			}
+		FxScope.BUS:
+			if _bus_id.is_empty():
+				return {}
+			return {"scope": &"bus", "bus_id": _bus_id}
+		_:
+			return {}
 
 
 func _snapshot_for_scope(scope: FxScope) -> Dictionary:
@@ -231,41 +270,31 @@ func _snapshot_for_scope(scope: FxScope) -> Dictionary:
 			return {}
 
 
-func _on_effect_add_menu_opened(chain: CodaEffectsChainView) -> void:
-	if chain == null:
-		return
-	var scope: FxScope = _scope_for_chain(chain)
-	_add_snapshots[chain.get_instance_id()] = _snapshot_for_scope(scope)
-
-
 func _scope_for_chain(chain: CodaEffectsChainView) -> FxScope:
-	if chain == null:
-		return FxScope.NONE
-	var stored: Variant = chain.get_meta(&"coda_fx_scope", _active_scope)
-	if stored is int:
-		return stored as FxScope
-	if stored is FxScope:
-		return stored
-	return _active_scope
+	if chain == _track_chain:
+		return FxScope.TIMELINE_TRACK
+	if chain == _clip_chain:
+		return FxScope.TIMELINE_CLIP
+	if chain == _bus_chain:
+		return FxScope.BUS
+	return FxScope.NONE
 
 
 func _on_effect_add_requested(chain: CodaEffectsChainView, effect_type: int) -> void:
 	if chain == null:
 		return
-	var chain_id: int = chain.get_instance_id()
-	if not _add_snapshots.has(chain_id):
-		_on_effect_add_menu_opened(chain)
-	_apply_effect_add(chain_id, effect_type)
+	var ctx: Dictionary = _mutation_context_for_chain(chain)
+	if ctx.is_empty():
+		push_warning("Coda: effect add skipped (missing target context)")
+		return
+	_apply_effect_add(ctx, effect_type)
 
 
-func _apply_effect_add(chain_instance_id: int, effect_type: int) -> void:
+func _apply_effect_add(ctx: Dictionary, effect_type: int) -> void:
 	if _project == null:
 		return
-	var ctx: Dictionary = _add_snapshots.get(chain_instance_id, {}) as Dictionary
-	if ctx.is_empty() and _active_scope != FxScope.NONE:
-		ctx = _snapshot_for_scope(_active_scope)
 	if ctx.is_empty():
-		push_warning("Coda: effect add skipped (missing target snapshot)")
+		push_warning("Coda: effect add skipped (missing target context)")
 		return
 	var scope: StringName = ctx.get("scope", &"") as StringName
 	match scope:
@@ -307,6 +336,10 @@ func _apply_effect_add(chain_instance_id: int, effect_type: int) -> void:
 		_:
 			push_warning("Coda: effect add skipped (unknown scope)")
 			return
+	call_deferred("_finish_effect_add_refresh", ctx.duplicate(true))
+
+
+func _finish_effect_add_refresh(ctx: Dictionary) -> void:
 	_refresh_chain_from_context(ctx)
 	_sync_active_chain()
 
@@ -383,7 +416,7 @@ func _sync_chain(scope: FxScope) -> void:
 	var panel: PanelContainer = null
 	var chain: CodaEffectsChainView = null
 	var title: String = ""
-	var effects: Array = []
+	var effects: Array[CodaTrackEffect] = []
 
 	match scope:
 		FxScope.TIMELINE_TRACK:

@@ -18,6 +18,9 @@ var volume_db: float = 0.0
 var pitch_scale: float = 1.0
 var fade_in_seconds: float = 0.0
 var fade_out_seconds: float = 0.0
+## 0 = concave / slow start, 0.5 = linear, 1 = convex / fast start (Audacity-style).
+var fade_in_curve: float = 0.5
+var fade_out_curve: float = 0.5
 ## Optional segment key for interactive music on a "Segments" track (Phase: game music).
 var segment_id: String = ""
 var effects: Array[CodaTrackEffect] = []
@@ -61,6 +64,8 @@ func clone_keep_id() -> CodaTimelineClip:
 	c.pitch_scale = pitch_scale
 	c.fade_in_seconds = fade_in_seconds
 	c.fade_out_seconds = fade_out_seconds
+	c.fade_in_curve = fade_in_curve
+	c.fade_out_curve = fade_out_curve
 	c.segment_id = segment_id
 	for e in effects:
 		c.effects.append(e.clone_keep_id())
@@ -78,6 +83,8 @@ func to_dictionary() -> Dictionary:
 		"pitch_scale": pitch_scale,
 		"fade_in": fade_in_seconds,
 		"fade_out": fade_out_seconds,
+		"fade_in_curve": fade_in_curve,
+		"fade_out_curve": fade_out_curve,
 		"segment_id": segment_id,
 		"effects": effects.map(func(e: CodaTrackEffect) -> Dictionary: return e.to_dictionary()),
 	}
@@ -96,6 +103,8 @@ static func from_dictionary(data: Dictionary) -> CodaTimelineClip:
 	c.pitch_scale = max(0.01, float(data.get("pitch_scale", 1.0)))
 	c.fade_in_seconds = max(0.0, float(data.get("fade_in", 0.0)))
 	c.fade_out_seconds = max(0.0, float(data.get("fade_out", 0.0)))
+	c.fade_in_curve = clampf(float(data.get("fade_in_curve", 0.5)), 0.0, 1.0)
+	c.fade_out_curve = clampf(float(data.get("fade_out_curve", 0.5)), 0.0, 1.0)
 	c.segment_id = str(data.get("segment_id", ""))
 	for e_raw in data.get("effects", []) as Array:
 		if e_raw is Dictionary:

@@ -122,7 +122,7 @@ static func write_recent_paths(plugin: EditorPlugin, paths: PackedStringArray) -
 	)
 	DirAccess.make_dir_recursive_absolute(dir_path)
 	var payload := {"paths": Array(paths)}
-	var text: String = JSON.stringify(payload, "  ")
+	var text: String = CodaJsonUtilScript.stringify(payload, "  ")
 	var target: String = recent_store_path(plugin)
 	var file := FileAccess.open(target, FileAccess.WRITE)
 	if file == null:

@@ -5,6 +5,7 @@ extends RefCounted
 ## and a state dictionary assembled by the view each frame.
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
+const Chrome := preload("res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_clip_chrome.gd")
 const CodaTimelineWaveformCacheScript := preload(
 	"res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_waveform_cache.gd"
 )
@@ -26,6 +27,7 @@ static func draw(canvas: CanvasItem, state: Dictionary) -> void:
 		return
 
 	draw_track_lanes(canvas, state)
+	draw_ghost_track_lane(canvas, state)
 	draw_loop_region(canvas, state)
 	draw_clips(canvas, state)
 	draw_ruler(canvas, state)
@@ -81,41 +83,45 @@ static func draw_clips(canvas: CanvasItem, state: Dictionary) -> void:
 		return
 	var widget_size: Vector2 = state.get("size", Vector2.ZERO)
 	var track_row_height: int = int(state.get("track_row_height", 92))
+	var scroll: float = state.get("scroll_seconds", 0.0)
+	var spp: float = state.get("seconds_per_pixel", 1.0 / 80.0)
 	for i in timeline.tracks.size():
 		var track: CodaTimelineTrack = timeline.tracks[i]
 		var lane: Rect2 = track_lane_rect(i, widget_size.x, track_row_height)
+		var clip_rects: Array = []
 		for clip in track.clips:
-			draw_one_clip(canvas, state, clip, lane)
+			var rect: Rect2 = Chrome.clip_rect_for_times(clip, lane, scroll, spp)
+			if rect.position.x + rect.size.x < lane.position.x:
+				continue
+			if rect.position.x > lane.position.x + lane.size.x:
+				continue
+			clip_rects.append({"clip": clip, "clip_id": clip.id, "rect": rect})
+			draw_one_clip(canvas, state, clip, rect)
+		Chrome.draw_track_crossfades(canvas, state, clip_rects)
+		for item in clip_rects:
+			var clip: CodaTimelineClip = item.get("clip") as CodaTimelineClip
+			var rect: Rect2 = item.get("rect", Rect2())
+			if clip == null:
+				continue
+			var selected: bool = clip.id == String(state.get("selected_clip_id", ""))
+			Chrome.draw_clip_fades(canvas, state, clip, rect, selected)
+			Chrome.draw_trim_handles(
+				canvas,
+				rect,
+				selected,
+				String(state.get("hover_clip_edge", "")),
+				String(state.get("drag_clip_id", "")),
+				clip.id,
+				int(state.get("drag_kind", 0))
+			)
 
 
 static func draw_one_clip(
-	canvas: CanvasItem, state: Dictionary, clip: CodaTimelineClip, lane: Rect2
+	canvas: CanvasItem, state: Dictionary, clip: CodaTimelineClip, rect: Rect2
 ) -> void:
-	var x_start: float = seconds_to_x(
-		clip.start_seconds,
-		state.get("scroll_seconds", 0.0),
-		state.get("seconds_per_pixel", 1.0 / 80.0)
-	)
-	var x_end: float = seconds_to_x(
-		clip.start_seconds + clip.duration_seconds,
-		state.get("scroll_seconds", 0.0),
-		state.get("seconds_per_pixel", 1.0 / 80.0)
-	)
-	if x_end < lane.position.x or x_start > lane.position.x + lane.size.x:
-		return
-	var rect: Rect2 = Rect2(
-		Vector2(x_start, lane.position.y + CLIP_INNER_PADDING),
-		Vector2(max(MIN_CLIP_WIDTH_PX, x_end - x_start), lane.size.y - 2 * CLIP_INNER_PADDING)
-	)
 	var selected_clip_id: String = String(state.get("selected_clip_id", ""))
-	var fill: Color = Tokens.ACCENT_DIM
-	var border: Color = Tokens.ACCENT
-	if clip.id == selected_clip_id:
-		fill = Tokens.ACCENT
-		border = Tokens.ACCENT
-	canvas.draw_rect(rect, Color(fill.r, fill.g, fill.b, 0.55), true)
-	var border_w: float = 2.0 if clip.id == selected_clip_id else 1.0
-	canvas.draw_rect(rect, border, false, border_w)
+	var selected: bool = clip.id == selected_clip_id
+	Chrome.draw_clip_body(canvas, clip, rect, selected)
 	draw_clip_waveform(canvas, clip, rect)
 	var font: Font = state.get("theme_font", null)
 	if font != null and rect.size.x > 24:
@@ -126,6 +132,20 @@ static func draw_one_clip(
 			font, pos, label, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 8, size_px,
 			Tokens.TEXT_PRIMARY
 		)
+
+
+static func draw_ghost_track_lane(canvas: CanvasItem, state: Dictionary) -> void:
+	if not bool(state.get("ghost_new_track", false)):
+		return
+	var timeline: CodaEventTimeline = state.get("timeline", null)
+	if timeline == null:
+		return
+	var widget_size: Vector2 = state.get("size", Vector2.ZERO)
+	var track_row_height: int = int(state.get("track_row_height", 92))
+	var idx: int = timeline.tracks.size()
+	var rect: Rect2 = track_lane_rect(idx, widget_size.x, track_row_height)
+	canvas.draw_rect(rect, Color(Tokens.ACCENT.r, Tokens.ACCENT.g, Tokens.ACCENT.b, 0.08), true)
+	canvas.draw_rect(rect, Tokens.ACCENT, false, 1.0)
 
 
 static func draw_loop_region(canvas: CanvasItem, state: Dictionary) -> void:
@@ -261,12 +281,12 @@ static func draw_playhead(canvas: CanvasItem, state: Dictionary) -> void:
 static func draw_clip_waveform(canvas: CanvasItem, clip: CodaTimelineClip, rect: Rect2) -> void:
 	if clip.audio_path.is_empty():
 		return
-	var h_wave: float = maxf(4.0, rect.size.y * 0.32)
+	var h_wave: float = maxf(4.0, rect.size.y * 0.36)
 	var top: float = rect.position.y + rect.size.y - h_wave - 2.0
-	var wave_rect := Rect2(Vector2(rect.position.x + 2.0, top), Vector2(rect.size.x - 4.0, h_wave))
+	var wave_rect := Rect2(Vector2(rect.position.x + 1.0, top), Vector2(rect.size.x - 2.0, h_wave))
 	if wave_rect.size.x < 10.0:
 		return
-	var bucket_count: int = clampi(int(wave_rect.size.x / 3.0), 8, 128)
+	var bucket_count: int = clampi(int(wave_rect.size.x), 64, 2048)
 	var peaks: PackedFloat32Array = CodaTimelineWaveformCacheScript.peaks_for_clip_segment(
 		clip.audio_path, clip.offset_seconds, clip.duration_seconds, bucket_count
 	)
@@ -275,18 +295,15 @@ static func draw_clip_waveform(canvas: CanvasItem, clip: CodaTimelineClip, rect:
 	var n: int = peaks.size()
 	if n <= 0:
 		return
-	var step_x: float = wave_rect.size.x / float(max(1, n - 1))
 	var mid_y: float = wave_rect.position.y + wave_rect.size.y * 0.5
-	var col := Color(Tokens.TEXT_PRIMARY.r, Tokens.TEXT_PRIMARY.g, Tokens.TEXT_PRIMARY.b, 0.4)
+	var col := Color(Tokens.TEXT_PRIMARY.r, Tokens.TEXT_PRIMARY.g, Tokens.TEXT_PRIMARY.b, 0.48)
+	var x_step: float = wave_rect.size.x / float(max(1, n - 1))
 	for i in n:
 		var pk: float = peaks[i]
-		var bar_h: float = maxf(1.0, wave_rect.size.y * pk)
-		var x0: float = wave_rect.position.x + float(i) * step_x
-		var bar_w: float = maxf(1.0, step_x * 0.72)
-		canvas.draw_rect(
-			Rect2(Vector2(x0 - bar_w * 0.5, mid_y - bar_h * 0.5), Vector2(bar_w, bar_h)),
-			col,
-			true
+		var bar_h: float = maxf(0.5, wave_rect.size.y * pk * 0.5)
+		var x: float = wave_rect.position.x + float(i) * x_step
+		canvas.draw_line(
+			Vector2(x, mid_y - bar_h), Vector2(x, mid_y + bar_h), col, 1.0
 		)
 
 

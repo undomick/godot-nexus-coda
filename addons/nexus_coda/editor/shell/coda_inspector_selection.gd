@@ -110,6 +110,7 @@ func build_view_state() -> Dictionary:
 		"show_asset": false,
 		"show_bank": false,
 		"show_game_sync": false,
+		"show_clip": false,
 		"show_context_banner": false,
 		"bank_id": bank_id,
 		"game_sync_payload": game_sync_payload,
@@ -162,6 +163,7 @@ func build_view_state() -> Dictionary:
 			state["subtitle"] = " · ".join(crumbs) if not crumbs.is_empty() else ""
 			if clip != null:
 				state["fx_scope"] = FxSectionScript.FxScope.TIMELINE_CLIP
+				state["show_clip"] = true
 		Subject.MIXER_BUS:
 			var bus: CodaBus = _resolve_bus()
 			state["show_context_banner"] = bus != null

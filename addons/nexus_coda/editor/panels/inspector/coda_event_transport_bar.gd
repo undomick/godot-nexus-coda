@@ -12,7 +12,8 @@ signal loop_toggled(loop: bool)
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 
-const _TRANSPORT_ICON_MAX_PX := 32
+const _TRANSPORT_ICON_MAX_PX := 38
+const _TRANSPORT_SECONDARY_PX := 32
 const _ICON_PLAY := preload("res://addons/nexus_coda/icons/player_play.svg")
 const _ICON_STOP := preload("res://addons/nexus_coda/icons/player_stop.svg")
 const _ICON_PAUSE := preload("res://addons/nexus_coda/icons/player_pause.svg")
@@ -34,6 +35,7 @@ func _ready() -> void:
 	_play_button.expand_icon = true
 	_play_button.custom_minimum_size = Vector2(_TRANSPORT_ICON_MAX_PX, _TRANSPORT_ICON_MAX_PX)
 	_play_button.add_theme_constant_override(&"icon_max_width", _TRANSPORT_ICON_MAX_PX)
+	_play_button.self_modulate = Tokens.SUCCESS
 	_play_button.tooltip_text = "Audition this event"
 	_play_button.pressed.connect(_on_play_pressed)
 	add_child(_play_button)
@@ -42,8 +44,9 @@ func _ready() -> void:
 	_stop_button.text = ""
 	_stop_button.icon = _ICON_STOP
 	_stop_button.expand_icon = true
-	_stop_button.custom_minimum_size = Vector2(_TRANSPORT_ICON_MAX_PX, _TRANSPORT_ICON_MAX_PX)
-	_stop_button.add_theme_constant_override(&"icon_max_width", _TRANSPORT_ICON_MAX_PX)
+	_stop_button.custom_minimum_size = Vector2(_TRANSPORT_SECONDARY_PX, _TRANSPORT_SECONDARY_PX)
+	_stop_button.add_theme_constant_override(&"icon_max_width", _TRANSPORT_SECONDARY_PX)
+	_stop_button.add_theme_color_override(&"font_color", Tokens.TEXT_PRIMARY)
 	_stop_button.disabled = true
 	_stop_button.tooltip_text = "Stop preview"
 	_stop_button.pressed.connect(_on_stop_pressed)
@@ -54,8 +57,8 @@ func _ready() -> void:
 	_pause_button.text = ""
 	_pause_button.icon = _ICON_PAUSE
 	_pause_button.expand_icon = true
-	_pause_button.custom_minimum_size = Vector2(_TRANSPORT_ICON_MAX_PX, _TRANSPORT_ICON_MAX_PX)
-	_pause_button.add_theme_constant_override(&"icon_max_width", _TRANSPORT_ICON_MAX_PX)
+	_pause_button.custom_minimum_size = Vector2(_TRANSPORT_SECONDARY_PX, _TRANSPORT_SECONDARY_PX)
+	_pause_button.add_theme_constant_override(&"icon_max_width", _TRANSPORT_SECONDARY_PX)
 	_pause_button.tooltip_text = "Pause / resume the active voice"
 	_pause_button.disabled = true
 	_pause_button.toggled.connect(_on_pause_toggled)

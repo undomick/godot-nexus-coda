@@ -16,6 +16,13 @@ const TestTimelineMusicControllerScript := preload(
 )
 const TestTransitionPolicyScript := preload("res://addons/nexus_coda/tests/test_transition_policy.gd")
 const TestRuntimeMusicScript := preload("res://addons/nexus_coda/tests/test_runtime_music.gd")
+const TestTimelineCommandsScript := preload(
+	"res://addons/nexus_coda/tests/test_timeline_commands.gd"
+)
+const TestTimelineClipChromeScript := preload(
+	"res://addons/nexus_coda/tests/test_timeline_clip_chrome.gd"
+)
+const TestRuntimeNodesScript := preload("res://addons/nexus_coda/tests/test_runtime_nodes.gd")
 
 
 func _initialize() -> void:
@@ -29,6 +36,9 @@ func _initialize() -> void:
 	failed += TestTimelineMusicControllerScript.run()
 	failed += TestTransitionPolicyScript.run()
 	failed += TestRuntimeMusicScript.run()
+	failed += TestTimelineCommandsScript.run()
+	failed += TestTimelineClipChromeScript.run()
+	failed += TestRuntimeNodesScript.run()
 	if failed == 0:
 		print("Coda game music tests: OK")
 		quit(0)

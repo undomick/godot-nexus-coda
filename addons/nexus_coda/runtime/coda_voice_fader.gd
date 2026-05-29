@@ -4,6 +4,8 @@ extends RefCounted
 
 ## Volume tweens for pooled timeline/graph voices. Cancels stale fades on player reuse.
 
+const CodaFadeCurveScript := preload("res://addons/nexus_coda/runtime/coda_fade_curve.gd")
+
 var _owner: Node
 var _tweens: Dictionary = {}
 
@@ -60,10 +62,12 @@ static func clip_fade_db_offset(clip: CodaTimelineClip, cursor_seconds: float) -
 	if rel < 0.0:
 		return -80.0
 	if fade_in > 0.0 and rel < fade_in:
-		return linear_to_db(clampf(rel / fade_in, 0.0, 1.0))
+		var lin_in: float = CodaFadeCurveScript.apply(rel / fade_in, clip.fade_in_curve)
+		return linear_to_db(lin_in)
 	var time_to_end: float = end_seconds - cursor_seconds
 	if fade_out > 0.0 and time_to_end < fade_out:
-		return linear_to_db(clampf(time_to_end / fade_out, 0.0, 1.0))
+		var lin_out: float = CodaFadeCurveScript.apply(time_to_end / fade_out, clip.fade_out_curve)
+		return linear_to_db(lin_out)
 	return 0.0
 
 

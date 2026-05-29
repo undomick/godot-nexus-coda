@@ -87,6 +87,21 @@ func connect_game_signals(root: Node) -> void:
 	_connect_node_signals_recursive(root)
 
 
+func connect_game_signals_from(root: Node) -> void:
+	connect_game_signals(root)
+
+
+func emit_from_area(signal_name: String, body: Node, extra: Dictionary = {}) -> void:
+	var payload: Dictionary = extra.duplicate(true)
+	if body != null:
+		payload["body"] = body.name
+		if body.is_inside_tree():
+			payload["body_path"] = str(body.get_path())
+		else:
+			payload["body_path"] = body.name
+	emit_game_signal(signal_name, payload)
+
+
 func disconnect_game_signals() -> void:
 	for entry in _signal_connections:
 		var source: Object = entry.get("source", null) as Object

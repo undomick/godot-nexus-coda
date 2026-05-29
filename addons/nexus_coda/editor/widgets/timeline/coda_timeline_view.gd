@@ -36,6 +36,9 @@ signal clip_move_requested(clip_id: String, new_start: float, new_track_index: i
 signal clip_resize_requested(
 	clip_id: String, new_start: float, new_duration: float, new_offset_seconds: float
 )
+signal clip_fade_requested(
+	clip_id: String, fade_in: float, fade_out: float, fade_in_curve: float, fade_out_curve: float
+)
 signal clip_delete_requested(clip_id: String)
 signal marker_changed(marker_id: String, new_time: float)
 signal marker_double_clicked(marker_id: String)
@@ -113,6 +116,18 @@ func _wire_input_controller() -> void:
 			clip_id: String, new_start: float, new_duration: float, new_offset_seconds: float
 		) -> void:
 			clip_resize_requested.emit(clip_id, new_start, new_duration, new_offset_seconds)
+	)
+	_input.clip_fade_requested.connect(
+		func(
+			clip_id: String,
+			fade_in: float,
+			fade_out: float,
+			fade_in_curve: float,
+			fade_out_curve: float
+		) -> void:
+			clip_fade_requested.emit(
+				clip_id, fade_in, fade_out, fade_in_curve, fade_out_curve
+			)
 	)
 	_input.clip_delete_requested.connect(
 		func(clip_id: String) -> void:
@@ -336,6 +351,7 @@ func _draw() -> void:
 
 
 func _build_render_state() -> Dictionary:
+	var hints: Dictionary = _input.get_render_hints()
 	return {
 		"size": size,
 		"timeline": _timeline,
@@ -349,6 +365,10 @@ func _build_render_state() -> Dictionary:
 		"snap_mode": int(_snap_mode),
 		"has_focus": has_focus(),
 		"theme_font": get_theme_default_font(),
+		"ghost_new_track": hints.get("ghost_new_track", false),
+		"hover_clip_edge": hints.get("hover_clip_edge", "none"),
+		"drag_kind": hints.get("drag_kind", 0),
+		"drag_clip_id": hints.get("drag_clip_id", ""),
 	}
 
 
@@ -364,6 +384,19 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _gui_input(event: InputEvent) -> void:
 	_input.handle_gui_input(self, event)
+
+
+func update_hover_cursor() -> void:
+	var edge: String = String(_input.get_render_hints().get("hover_clip_edge", "none"))
+	match edge:
+		"left", "right":
+			mouse_default_cursor_shape = Control.CURSOR_HSIZE
+		"fade_in", "fade_out":
+			mouse_default_cursor_shape = Control.CURSOR_HSIZE
+		"fade_in_shape", "fade_out_shape":
+			mouse_default_cursor_shape = Control.CURSOR_VSIZE
+		_:
+			mouse_default_cursor_shape = Control.CURSOR_ARROW
 
 
 func _ensure_clip_menu() -> void:
@@ -440,4 +473,7 @@ func _on_marker_menu_id_pressed(id: int) -> void:
 
 func _get_minimum_size() -> Vector2:
 	var n: int = max(1, track_count())
-	return Vector2(200, RULER_HEIGHT + n * _track_row_height)
+	var extra_rows: int = 0
+	if bool(_input.get_render_hints().get("ghost_new_track", false)):
+		extra_rows = 1
+	return Vector2(200, RULER_HEIGHT + (n + extra_rows) * _track_row_height)

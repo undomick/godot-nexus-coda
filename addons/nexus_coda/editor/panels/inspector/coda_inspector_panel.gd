@@ -37,6 +37,9 @@ const CodaBankInspectorSectionScript := preload(
 const CodaInspectorEffectsSectionScript := preload(
 	"res://addons/nexus_coda/editor/panels/inspector/coda_inspector_effects_section.gd"
 )
+const CodaClipInspectorSectionScript := preload(
+	"res://addons/nexus_coda/editor/panels/inspector/coda_clip_inspector_section.gd"
+)
 const CodaInspectorContextBannerScript := preload(
 	"res://addons/nexus_coda/editor/panels/inspector/coda_inspector_context_banner.gd"
 )
@@ -63,6 +66,7 @@ var _asset_section: CodaAssetInspectorSection
 var _game_sync_section: CodaGameSyncInspectorSection
 var _bank_section: CodaBankInspectorSection
 var _fx_section: CodaInspectorEffectsSection
+var _clip_section: CodaClipInspectorSection
 var _selected_node: CodaBrowserNode = null
 var _suppress_authoring_mode_writeback: bool = false
 
@@ -167,6 +171,11 @@ func _ready() -> void:
 	_fx_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_child(_fx_section)
 
+	_clip_section = CodaClipInspectorSectionScript.new()
+	_clip_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_clip_section.visible = false
+	_content.add_child(_clip_section)
+
 	_asset_section = CodaAssetInspectorSectionScript.new()
 	_asset_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_asset_section.visible = false
@@ -205,6 +214,8 @@ func attach_project(project: CodaState) -> void:
 		_bank_section.attach_project(project)
 	if _fx_section != null:
 		_fx_section.attach_project(project)
+	if _clip_section != null:
+		_clip_section.attach_project(project)
 
 
 func apply_view_state(state: Dictionary) -> void:
@@ -228,6 +239,7 @@ func apply_view_state(state: Dictionary) -> void:
 	var show_asset: bool = bool(state.get("show_asset", false))
 	var show_bank: bool = bool(state.get("show_bank", false))
 	var show_game_sync: bool = bool(state.get("show_game_sync", false))
+	var show_clip: bool = bool(state.get("show_clip", false))
 
 	_header.visible = show_event_stack or show_asset
 	if show_event_stack or show_asset:
@@ -270,6 +282,13 @@ func apply_view_state(state: Dictionary) -> void:
 		if show_game_sync:
 			_game_sync_section.set_rule_payload(
 				(state.get("game_sync_payload", {}) as Dictionary).duplicate(true)
+			)
+
+	if _clip_section != null:
+		_clip_section.visible = show_clip
+		if show_clip:
+			_clip_section.set_clip_context(
+				str(state.get("event_id", "")), str(state.get("clip_id", ""))
 			)
 
 	var fx_scope: int = int(
@@ -397,6 +416,8 @@ func _show_empty() -> void:
 		_game_sync_section.visible = false
 	if _bank_section != null:
 		_bank_section.visible = false
+	if _clip_section != null:
+		_clip_section.visible = false
 	if _header != null:
 		_header.visible = false
 	set_fx_scope(CodaInspectorEffectsSection.FxScope.NONE)

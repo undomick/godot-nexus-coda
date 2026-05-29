@@ -18,6 +18,18 @@ const DANGER := Color(0.95, 0.40, 0.40, 1.0)
 const WARN := Color(0.95, 0.70, 0.30, 1.0)
 const SUCCESS := Color(0.50, 0.85, 0.55, 1.0)
 
+const CLIP_FILL := Color(0.88, 0.52, 0.44, 0.82)
+const CLIP_FILL_SELECTED := Color(0.94, 0.60, 0.50, 0.92)
+const CLIP_BORDER := Color(0.68, 0.38, 0.32, 1.0)
+const CLIP_BORDER_SELECTED := Color(0.98, 0.94, 0.90, 1.0)
+const FADE_LINE := Color(0.96, 0.97, 0.99, 0.95)
+const FADE_SHADE := Color(0.04, 0.05, 0.08, 0.42)
+const HANDLE_DIAMOND_FILL := Color(0.97, 0.98, 1.0, 1.0)
+const HANDLE_DIAMOND_BORDER := Color(0.22, 0.26, 0.32, 1.0)
+const TRIM_HANDLE := Color(0.98, 0.98, 1.0, 0.82)
+const TRIM_HANDLE_HOT := Color(1.0, 1.0, 1.0, 1.0)
+const CROSSFADE_HIGHLIGHT := Color(0.95, 0.95, 0.98, 0.12)
+
 const SPACING_XS := 4
 const SPACING_SM := 8
 const SPACING_MD := 12
