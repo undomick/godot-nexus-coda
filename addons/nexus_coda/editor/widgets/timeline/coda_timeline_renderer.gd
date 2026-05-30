@@ -29,10 +29,12 @@ static func draw(canvas: CanvasItem, state: Dictionary) -> void:
 	draw_track_lanes(canvas, state)
 	draw_ghost_track_lane(canvas, state)
 	draw_loop_region(canvas, state)
+	draw_work_area(canvas, state)
 	draw_clips(canvas, state)
 	draw_timeline_end(canvas, state)
 	draw_ruler(canvas, state)
 	draw_markers(canvas, state)
+	draw_work_points(canvas, state)
 	draw_playhead(canvas, state)
 	if state.get("has_focus", false):
 		canvas.draw_rect(area, Tokens.ACCENT_DIM, false, 1.0)
@@ -194,6 +196,60 @@ static func draw_loop_region(canvas: CanvasItem, state: Dictionary) -> void:
 	)
 	canvas.draw_line(Vector2(x0, RULER_HEIGHT), Vector2(x0, widget_size.y), Tokens.SUCCESS, 1.0)
 	canvas.draw_line(Vector2(x1, RULER_HEIGHT), Vector2(x1, widget_size.y), Tokens.SUCCESS, 1.0)
+
+
+static func draw_work_area(canvas: CanvasItem, state: Dictionary) -> void:
+	var timeline: CodaEventTimeline = state.get("timeline", null)
+	if timeline == null or not timeline.has_work_area():
+		return
+	var widget_size: Vector2 = state.get("size", Vector2.ZERO)
+	var scroll_seconds: float = state.get("scroll_seconds", 0.0)
+	var seconds_per_pixel: float = state.get("seconds_per_pixel", 1.0 / 80.0)
+	var x0: float = seconds_to_x(timeline.work_area_start(), scroll_seconds, seconds_per_pixel)
+	var x1: float = seconds_to_x(timeline.work_area_end(), scroll_seconds, seconds_per_pixel)
+	if x1 <= x0:
+		return
+	var rect_full: Rect2 = Rect2(
+		Vector2(x0, RULER_HEIGHT), Vector2(x1 - x0, widget_size.y - RULER_HEIGHT)
+	)
+	canvas.draw_rect(
+		rect_full, Color(Tokens.DANGER.r, Tokens.DANGER.g, Tokens.DANGER.b, 0.08), true
+	)
+
+
+static func draw_work_points(canvas: CanvasItem, state: Dictionary) -> void:
+	var timeline: CodaEventTimeline = state.get("timeline", null)
+	if timeline == null:
+		return
+	var widget_size: Vector2 = state.get("size", Vector2.ZERO)
+	var scroll_seconds: float = state.get("scroll_seconds", 0.0)
+	var seconds_per_pixel: float = state.get("seconds_per_pixel", 1.0 / 80.0)
+	var selected: String = String(state.get("selected_work_point", ""))
+	var font: Font = state.get("theme_font", null)
+	if timeline.has_in_point():
+		var x_in: float = seconds_to_x(timeline.in_point_seconds, scroll_seconds, seconds_per_pixel)
+		if x_in >= 0 and x_in <= widget_size.x:
+			draw_marker_flag(
+				canvas,
+				x_in,
+				Tokens.DANGER,
+				selected == "in",
+				"I",
+				font,
+				widget_size.y
+			)
+	if timeline.has_out_point():
+		var x_out: float = seconds_to_x(timeline.out_point_seconds, scroll_seconds, seconds_per_pixel)
+		if x_out >= 0 and x_out <= widget_size.x:
+			draw_marker_flag(
+				canvas,
+				x_out,
+				Tokens.DANGER,
+				selected == "out",
+				"O",
+				font,
+				widget_size.y
+			)
 
 
 static func draw_ruler(canvas: CanvasItem, state: Dictionary) -> void:

@@ -167,14 +167,13 @@ func _ready() -> void:
 	_output_bus_picker.item_selected.connect(_on_output_bus_picked)
 	_event_stack.add_child(_output_bus_picker)
 
+	_clip_section = CodaClipInspectorSectionScript.new()
+	_clip_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_clip_section.visible = true
+
 	_fx_section = CodaInspectorEffectsSectionScript.new()
 	_fx_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_child(_fx_section)
-
-	_clip_section = CodaClipInspectorSectionScript.new()
-	_clip_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_clip_section.visible = false
-	_content.add_child(_clip_section)
 
 	_asset_section = CodaAssetInspectorSectionScript.new()
 	_asset_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -285,11 +284,14 @@ func apply_view_state(state: Dictionary) -> void:
 			)
 
 	if _clip_section != null:
-		_clip_section.visible = show_clip
 		if show_clip:
+			if _context_banner != null:
+				_context_banner.set_properties_content(_clip_section)
 			_clip_section.set_clip_context(
 				str(state.get("event_id", "")), str(state.get("clip_id", ""))
 			)
+		elif _context_banner != null:
+			_context_banner.set_properties_content(null)
 
 	var fx_scope: int = int(
 		state.get("fx_scope", CodaInspectorEffectsSection.FxScope.NONE)
@@ -416,8 +418,8 @@ func _show_empty() -> void:
 		_game_sync_section.visible = false
 	if _bank_section != null:
 		_bank_section.visible = false
-	if _clip_section != null:
-		_clip_section.visible = false
+	if _clip_section != null and _context_banner != null:
+		_context_banner.set_properties_content(null)
 	if _header != null:
 		_header.visible = false
 	set_fx_scope(CodaInspectorEffectsSection.FxScope.NONE)

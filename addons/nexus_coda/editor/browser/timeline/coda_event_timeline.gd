@@ -21,6 +21,8 @@ const CodaTimelineClipScript := preload(
 
 const DEFAULT_LENGTH_SECONDS := 8.0
 const MIN_SPLIT_SEGMENT_SECONDS := 0.02
+const UNSET_WORK_POINT := -1.0
+const MIN_WORK_AREA_GAP_SECONDS := 0.01
 
 var length_seconds: float = DEFAULT_LENGTH_SECONDS
 var tempo_bpm: float = 0.0
@@ -30,6 +32,9 @@ var loop_start_seconds: float = 0.0
 var loop_end_seconds: float = 0.0
 var tracks: Array[CodaTimelineTrack] = []
 var markers: Array[CodaTimelineMarker] = []
+## Editor work-area bounds (not serialized). -1 means unset.
+var in_point_seconds: float = UNSET_WORK_POINT
+var out_point_seconds: float = UNSET_WORK_POINT
 
 
 func _init() -> void:
@@ -83,6 +88,49 @@ func reorder_tracks_move(from_index: int, to_index: int) -> void:
 	var tr: CodaTimelineTrack = tracks[from_index]
 	tracks.remove_at(from_index)
 	tracks.insert(clampi(to_index, 0, tracks.size()), tr)
+
+
+func has_in_point() -> bool:
+	return in_point_seconds >= 0.0
+
+
+func has_out_point() -> bool:
+	return out_point_seconds >= 0.0
+
+
+func has_work_area() -> bool:
+	return has_in_point() or has_out_point()
+
+
+func work_area_start() -> float:
+	return in_point_seconds if has_in_point() else 0.0
+
+
+func work_area_end() -> float:
+	return minf(out_point_seconds, length_seconds) if has_out_point() else length_seconds
+
+
+func clamp_time_to_work_area(t: float) -> float:
+	return clampf(t, work_area_start(), work_area_end())
+
+
+func clear_in_point() -> void:
+	in_point_seconds = UNSET_WORK_POINT
+
+
+func clear_out_point() -> void:
+	out_point_seconds = UNSET_WORK_POINT
+
+
+func clamp_work_points_to_length() -> void:
+	if has_in_point():
+		in_point_seconds = clampf(in_point_seconds, 0.0, length_seconds)
+	if has_out_point():
+		out_point_seconds = clampf(out_point_seconds, 0.0, length_seconds)
+	if has_in_point() and has_out_point() and out_point_seconds <= in_point_seconds:
+		out_point_seconds = minf(
+			length_seconds, in_point_seconds + MIN_WORK_AREA_GAP_SECONDS
+		)
 
 
 func remove_marker(marker_id: String) -> bool:
@@ -238,6 +286,12 @@ func validate() -> String:
 	for m in markers:
 		if m.time_seconds < 0.0 or m.time_seconds > length_seconds:
 			return 'Marker "%s" time is outside [0, length].' % m.marker_name
+	if has_in_point() and (in_point_seconds < 0.0 or in_point_seconds > length_seconds):
+		return "In point is outside [0, length]."
+	if has_out_point() and (out_point_seconds < 0.0 or out_point_seconds > length_seconds):
+		return "Out point is outside [0, length]."
+	if has_in_point() and has_out_point() and out_point_seconds <= in_point_seconds:
+		return "Out point must be after in point."
 	return ""
 
 
@@ -253,6 +307,8 @@ func clone_keep_ids() -> CodaEventTimeline:
 		n.tracks.append(t.clone_keep_id())
 	for m in markers:
 		n.markers.append(m.clone_keep_id())
+	n.in_point_seconds = in_point_seconds
+	n.out_point_seconds = out_point_seconds
 	return n
 
 

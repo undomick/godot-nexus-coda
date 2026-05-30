@@ -168,6 +168,10 @@ static func _test_add_track_effect_via_section_chain() -> int:
 	if track.effects.is_empty():
 		push_error("track effect add via section chain failed")
 		return 1
+	chain.bind_effects_array(track.effects)
+	if chain.get_effect_card_count() != 1:
+		push_error("track chain should show one effect card")
+		return 1
 	return 0
 
 
@@ -191,6 +195,10 @@ static func _test_add_clip_effect_via_section_chain() -> int:
 	clip_chain.effect_add_requested.emit(CodaTrackEffect.Type.GAIN)
 	if clip.effects.is_empty():
 		push_error("clip effect add via section chain failed")
+		return 1
+	clip_chain.bind_effects_array(clip.effects)
+	if clip_chain.get_effect_card_count() != 1:
+		push_error("clip chain should show one effect card")
 		return 1
 	return 0
 

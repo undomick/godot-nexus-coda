@@ -82,7 +82,10 @@ func seek_playhead(time_seconds: float) -> void:
 		return
 	var h: CodaEventHandle = _runtime.get_active_timeline_handle_for_event(_selected_event.id)
 	if h != null and h.is_timeline:
-		h.seek(clampf(time_seconds, 0.0, h.timeline_length_seconds))
+		var t: float = time_seconds
+		if _selected_event.event_timeline != null and _selected_event.event_timeline.has_work_area():
+			t = _selected_event.event_timeline.clamp_time_to_work_area(t)
+		h.seek(clampf(t, 0.0, h.timeline_length_seconds))
 
 
 func resync_preview_for_event(event_id: String) -> void:
@@ -125,11 +128,15 @@ func toggle_audition() -> void:
 		_runtime.stop(_live_handle)
 	_live_handle = null
 	var ph: float = clampf(_view.get_playhead(), 0.0, t.length_seconds)
+	if t.has_work_area():
+		ph = t.clamp_time_to_work_area(ph)
 	var params: Dictionary = {
 		"loop": t.loop_enabled,
 		"timeline_cursor_start": ph,
 		"_coda_exclusive_preview": true,
 	}
+	if t.has_work_area():
+		params["_coda_loop_region"] = [t.work_area_start(), t.work_area_end()]
 	var h: CodaEventHandle = _runtime.play_event_node(_selected_event, params)
 	if h == null:
 		NexusCodaLog.warn(

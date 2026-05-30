@@ -5,9 +5,6 @@ extends VBoxContainer
 ## Timeline clip properties: fade, volume, pitch.
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
-const CodaSectionHeaderScript := preload(
-	"res://addons/nexus_coda/editor/theme/coda_section_header.gd"
-)
 const CodaTimelineCommandsScript := preload(
 	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_commands.gd"
 )
@@ -32,10 +29,6 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	var header := CodaSectionHeaderScript.new()
-	header.heading = "Clip"
-	add_child(header)
-
 	_fade_in_spin = _add_labeled_spin("Fade In (s)", 0.0, 600.0, 0.01, 3)
 	_fade_out_spin = _add_labeled_spin("Fade Out (s)", 0.0, 600.0, 0.01, 3)
 	_fade_in_curve_spin = _add_labeled_spin("Fade In Curve", 0.0, 1.0, 0.01, 2)
@@ -52,7 +45,14 @@ func _ready() -> void:
 
 
 func attach_project(project: CodaState) -> void:
+	if _project != null and is_instance_valid(_project):
+		if _project.project_dirty.is_connected(_sync_from_clip):
+			_project.project_dirty.disconnect(_sync_from_clip)
 	_project = project
+	if _project != null:
+		_project.project_dirty.connect(_sync_from_clip)
+	if not _clip_id.is_empty():
+		_sync_from_clip()
 
 
 func set_clip_context(event_id: String, clip_id: String) -> void:

@@ -47,6 +47,11 @@ signal marker_delete_requested(marker_id: String)
 signal marker_rename_requested(marker_id: String)
 signal marker_go_to_time_requested(marker_id: String)
 signal marker_selection_cleared
+signal work_point_changed(kind: String, new_time: float)
+signal work_point_toggle_requested(kind: String)
+signal work_point_delete_requested(kind: String)
+signal work_point_selected(kind: String)
+signal work_point_selection_cleared
 signal loop_region_changed(start_seconds: float, end_seconds: float)
 signal playhead_seek_requested(time_seconds: float)
 signal selection_cleared
@@ -64,6 +69,7 @@ var _snap_mode: SnapMode = SnapMode.NONE
 var _track_row_height: int = DEFAULT_TRACK_ROW_HEIGHT
 var _selected_clip_id: String = ""
 var _selected_marker_id: String = ""
+var _selected_work_point: String = ""
 var _highlight_track_index: int = 0
 
 var _input: InputController
@@ -79,6 +85,10 @@ const _CTX_MARKER_RENAME := 1
 const _CTX_MARKER_DELETE := 2
 const _CTX_MARKER_GO_TO := 3
 var _menu_marker_id: String = ""
+
+var _work_point_menu: PopupMenu
+const _CTX_WORK_POINT_DELETE := 1
+var _menu_work_point_kind: String = ""
 
 
 func _init() -> void:
@@ -168,6 +178,26 @@ func _wire_input_controller() -> void:
 	_input.marker_selection_cleared.connect(
 		func() -> void:
 			marker_selection_cleared.emit()
+	)
+	_input.work_point_changed.connect(
+		func(kind: String, new_time: float) -> void:
+			work_point_changed.emit(kind, new_time)
+	)
+	_input.work_point_toggle_requested.connect(
+		func(kind: String) -> void:
+			work_point_toggle_requested.emit(kind)
+	)
+	_input.work_point_delete_requested.connect(
+		func(kind: String) -> void:
+			work_point_delete_requested.emit(kind)
+	)
+	_input.work_point_selected.connect(
+		func(kind: String) -> void:
+			work_point_selected.emit(kind)
+	)
+	_input.work_point_selection_cleared.connect(
+		func() -> void:
+			work_point_selection_cleared.emit()
 	)
 	_input.loop_region_changed.connect(
 		func(start_seconds: float, end_seconds: float) -> void:
@@ -274,6 +304,10 @@ func get_selected_marker_id() -> String:
 	return _selected_marker_id
 
 
+func get_selected_work_point() -> String:
+	return _selected_work_point
+
+
 func set_selected_clip(clip_id: String) -> void:
 	_selected_clip_id = clip_id
 	queue_redraw()
@@ -284,7 +318,26 @@ func set_selected_marker(marker_id: String) -> void:
 		return
 	_selected_marker_id = marker_id
 	if not marker_id.is_empty():
+		clear_work_point_selection()
 		marker_selected.emit(marker_id)
+	queue_redraw()
+
+
+func set_selected_work_point(kind: String) -> void:
+	if _selected_work_point == kind:
+		return
+	_selected_work_point = kind
+	if not kind.is_empty():
+		clear_marker_selection()
+		work_point_selected.emit(kind)
+	queue_redraw()
+
+
+func clear_work_point_selection() -> void:
+	if _selected_work_point.is_empty():
+		return
+	_selected_work_point = ""
+	work_point_selection_cleared.emit()
 	queue_redraw()
 
 
@@ -344,6 +397,15 @@ func open_marker_context_menu(marker_id: String, global_pos: Vector2i) -> void:
 	_marker_menu.popup(Rect2i(global_pos, Vector2i(1, 1)))
 
 
+func open_work_point_context_menu(kind: String, global_pos: Vector2i) -> void:
+	if kind.is_empty():
+		return
+	set_selected_work_point(kind)
+	_ensure_work_point_menu(kind)
+	_menu_work_point_kind = kind
+	_work_point_menu.popup(Rect2i(global_pos, Vector2i(1, 1)))
+
+
 # ---------- Drawing ----------
 
 func _draw() -> void:
@@ -361,6 +423,7 @@ func _build_render_state() -> Dictionary:
 		"highlight_track_index": _highlight_track_index,
 		"selected_clip_id": _selected_clip_id,
 		"selected_marker_id": _selected_marker_id,
+		"selected_work_point": _selected_work_point,
 		"playhead_seconds": _playhead_seconds,
 		"snap_mode": int(_snap_mode),
 		"has_focus": has_focus(),
@@ -467,6 +530,26 @@ func _on_marker_menu_id_pressed(id: int) -> void:
 		_CTX_MARKER_GO_TO:
 			marker_go_to_time_requested.emit(_menu_marker_id)
 	_menu_marker_id = ""
+
+
+func _ensure_work_point_menu(kind: String) -> void:
+	if _work_point_menu != null:
+		_work_point_menu.clear()
+	else:
+		_work_point_menu = PopupMenu.new()
+		_work_point_menu.name = "TimelineWorkPointMenu"
+		_work_point_menu.id_pressed.connect(_on_work_point_menu_id_pressed)
+		add_child(_work_point_menu)
+	var label: String = "Clear in point" if kind == "in" else "Clear out point"
+	_work_point_menu.add_item(label, _CTX_WORK_POINT_DELETE)
+
+
+func _on_work_point_menu_id_pressed(id: int) -> void:
+	if _menu_work_point_kind.is_empty():
+		return
+	if id == _CTX_WORK_POINT_DELETE:
+		work_point_delete_requested.emit(_menu_work_point_kind)
+	_menu_work_point_kind = ""
 
 
 # ---------- Sizing ----------

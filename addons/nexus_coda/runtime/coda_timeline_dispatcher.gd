@@ -249,6 +249,7 @@ func resync_preview_for_event(event_id: String) -> void:
 	var d: Dictionary = dispatchers[handle]
 	d["timeline"] = timeline
 	handle.timeline_length_seconds = timeline.length_seconds
+	_apply_work_area_loop_override(d, timeline)
 	var sig: String = CodaRuntimeTimelineLayoutScript.layout_signature(timeline)
 	if String(d.get("layout_sig", "")) == sig:
 		return
@@ -381,7 +382,6 @@ func _apply_seek_cursor_only(
 	if timeline == null:
 		return
 	handle.timeline_cursor_seconds = clampf(target_seconds, 0.0, timeline.length_seconds)
-	CodaTimelineClipDispatchScript.reset_bookkeeping(d)
 
 
 func _apply_seek(handle: CodaEventHandle, d: Dictionary, target_seconds: float) -> void:
@@ -405,3 +405,12 @@ func _sync_segment_voice_after_prime(
 		return
 	# Segment lanes follow music-state params, not cursor overlap.
 	_runtime.notify_music_state_changed(handle)
+
+
+static func _apply_work_area_loop_override(d: Dictionary, timeline: CodaEventTimeline) -> void:
+	if timeline.has_work_area():
+		d["loop_override_start"] = timeline.work_area_start()
+		d["loop_override_end"] = timeline.work_area_end()
+	else:
+		d["loop_override_start"] = -1.0
+		d["loop_override_end"] = -1.0

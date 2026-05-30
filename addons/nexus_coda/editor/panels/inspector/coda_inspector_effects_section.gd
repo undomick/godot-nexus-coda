@@ -27,6 +27,7 @@ var _chain_signals_connected: bool = false
 
 func _init() -> void:
 	add_theme_constant_override(&"separation", Tokens.SPACING_MD)
+	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	visible = false
 
 
@@ -417,6 +418,7 @@ func _sync_chain(scope: FxScope) -> void:
 	var chain: CodaEffectsChainView = null
 	var title: String = ""
 	var effects: Array[CodaTrackEffect] = []
+	var source_missing: bool = false
 
 	match scope:
 		FxScope.TIMELINE_TRACK:
@@ -426,28 +428,37 @@ func _sync_chain(scope: FxScope) -> void:
 				_project, _timeline_event_id, _track_id
 			)
 			title = "Track: %s" % (tr.track_name if tr != null else "Track")
-			effects = tr.effects if tr != null else []
+			if tr != null:
+				effects = tr.effects
+			else:
+				source_missing = true
 		FxScope.TIMELINE_CLIP:
 			panel = _clip_panel
 			chain = _clip_chain
 			var clip: CodaTimelineClip = BindingScript.resolve_clip(
 				_project, _timeline_event_id, _clip_id
 			)
-			var label: String = (
-				clip.audio_path.get_file()
-				if clip != null and not clip.audio_path.is_empty()
-				else "Clip"
-			)
-			title = "Clip: %s" % label
-			effects = clip.effects if clip != null else []
+			title = "Effects"
+			if clip != null:
+				effects = clip.effects
+			else:
+				source_missing = true
 		FxScope.BUS:
 			panel = _bus_panel
 			chain = _bus_chain
 			var bus: CodaBus = BindingScript.resolve_bus(_project, _bus_id)
 			title = "Bus: %s" % (bus.bus_name if bus != null else "Bus")
-			effects = bus.effects if bus != null else []
+			if bus != null:
+				effects = bus.effects
+			else:
+				source_missing = true
 		_:
 			return
+
+	if source_missing:
+		_active_scope = FxScope.NONE
+		_apply_scope()
+		return
 
 	_track_panel.visible = scope == FxScope.TIMELINE_TRACK
 	_clip_panel.visible = scope == FxScope.TIMELINE_CLIP

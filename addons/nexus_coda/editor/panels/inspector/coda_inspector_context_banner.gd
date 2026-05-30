@@ -6,6 +6,8 @@ const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens
 
 var _title: Label
 var _subtitle: Label
+var _properties_slot: VBoxContainer
+var _properties_content: Control = null
 
 
 func _init() -> void:
@@ -19,7 +21,7 @@ func _init() -> void:
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(margin)
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override(&"separation", 2)
+	col.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.add_child(col)
 	_title = Label.new()
@@ -31,7 +33,28 @@ func _init() -> void:
 	_subtitle.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
 	_subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(_subtitle)
+	_properties_slot = VBoxContainer.new()
+	_properties_slot.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
+	_properties_slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_properties_slot.visible = false
+	col.add_child(_properties_slot)
 	visible = false
+
+
+func set_properties_content(content: Control) -> void:
+	if _properties_content != null and is_instance_valid(_properties_content):
+		if _properties_content.get_parent() == _properties_slot:
+			_properties_slot.remove_child(_properties_content)
+	_properties_content = content
+	if _properties_slot == null:
+		return
+	for child in _properties_slot.get_children():
+		_properties_slot.remove_child(child)
+	if content != null and is_instance_valid(content):
+		_properties_slot.add_child(content)
+		_properties_slot.visible = true
+	else:
+		_properties_slot.visible = false
 
 
 func set_context(title: String, subtitle: String, highlighted: bool) -> void:

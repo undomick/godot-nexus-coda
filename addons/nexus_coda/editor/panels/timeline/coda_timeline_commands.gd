@@ -97,6 +97,7 @@ static func set_timeline_length(timeline: CodaEventTimeline, value: float) -> Co
 			timeline.loop_start_seconds + 0.01,
 			timeline.length_seconds
 		)
+	timeline.clamp_work_points_to_length()
 	return snap
 
 
@@ -107,6 +108,7 @@ static func fit_timeline_length(timeline: CodaEventTimeline, margin: float = 0.2
 	clamp_clips_to_timeline_length(timeline)
 	if timeline.loop_enabled:
 		timeline.loop_end_seconds = minf(timeline.loop_end_seconds, timeline.length_seconds)
+	timeline.clamp_work_points_to_length()
 	return snap
 
 
@@ -493,6 +495,50 @@ static func delete_marker(timeline: CodaEventTimeline, marker_id: String) -> Dic
 	var snap := snapshot(timeline)
 	var ok: bool = CodaTimelineMarkerUiScript.delete_marker(timeline, marker_id)
 	return {"snapshot": snap, "success": ok}
+
+
+static func toggle_in_point(timeline: CodaEventTimeline, playhead: float) -> CodaEventTimeline:
+	var snap := snapshot(timeline)
+	var t: float = clampf(playhead, 0.0, timeline.length_seconds)
+	if timeline.has_in_point() and is_equal_approx(timeline.in_point_seconds, t):
+		timeline.clear_in_point()
+	else:
+		timeline.in_point_seconds = t
+		if timeline.has_out_point() and timeline.out_point_seconds <= t:
+			timeline.out_point_seconds = minf(
+				timeline.length_seconds, t + CodaEventTimeline.MIN_WORK_AREA_GAP_SECONDS
+			)
+	return snap
+
+
+static func toggle_out_point(timeline: CodaEventTimeline, playhead: float) -> CodaEventTimeline:
+	var snap := snapshot(timeline)
+	var t: float = clampf(playhead, 0.0, timeline.length_seconds)
+	if timeline.has_out_point() and is_equal_approx(timeline.out_point_seconds, t):
+		timeline.clear_out_point()
+	else:
+		timeline.out_point_seconds = t
+		if timeline.has_in_point() and timeline.in_point_seconds >= t:
+			timeline.in_point_seconds = maxf(
+				0.0, t - CodaEventTimeline.MIN_WORK_AREA_GAP_SECONDS
+			)
+	return snap
+
+
+static func delete_in_point(timeline: CodaEventTimeline) -> CodaEventTimeline:
+	if not timeline.has_in_point():
+		return null
+	var snap := snapshot(timeline)
+	timeline.clear_in_point()
+	return snap
+
+
+static func delete_out_point(timeline: CodaEventTimeline) -> CodaEventTimeline:
+	if not timeline.has_out_point():
+		return null
+	var snap := snapshot(timeline)
+	timeline.clear_out_point()
+	return snap
 
 
 static func track_index_by_id(timeline: CodaEventTimeline, track_id: String) -> int:

@@ -34,6 +34,8 @@ enum DragKind {
 	LOOP_END = 8,
 	PAN = 9,
 	PLAYHEAD_SEEK = 10,
+	IN_POINT_MOVE = 13,
+	OUT_POINT_MOVE = 14,
 }
 
 signal clip_fade_requested(
@@ -58,6 +60,11 @@ signal marker_delete_requested(marker_id: String)
 signal marker_rename_requested(marker_id: String)
 signal marker_go_to_time_requested(marker_id: String)
 signal marker_selection_cleared
+signal work_point_changed(kind: String, new_time: float)
+signal work_point_toggle_requested(kind: String)
+signal work_point_delete_requested(kind: String)
+signal work_point_selected(kind: String)
+signal work_point_selection_cleared
 signal loop_region_changed(start_seconds: float, end_seconds: float)
 signal playhead_seek_requested(time_seconds: float)
 signal selection_cleared
@@ -82,6 +89,8 @@ var _drag_pan_initial_scroll: float = 0.0
 var _drag_initial_screen_pos: Vector2 = Vector2.ZERO
 var _marker_press_id: String = ""
 var _marker_press_pos: Vector2 = Vector2.ZERO
+var _work_point_press_kind: String = ""
+var _work_point_press_pos: Vector2 = Vector2.ZERO
 
 
 func is_dragging() -> bool:
@@ -107,6 +116,16 @@ func handle_unhandled_key(view: CodaTimelineView, event: InputEvent) -> void:
 		if k.pressed and not k.echo and k.keycode == KEY_SPACE:
 			audition_requested.emit()
 			view.get_viewport().set_input_as_handled()
+			return
+		if k.pressed and not k.echo and not k.ctrl_pressed and not k.alt_pressed:
+			if k.keycode == KEY_I:
+				work_point_toggle_requested.emit("in")
+				view.get_viewport().set_input_as_handled()
+				return
+			if k.keycode == KEY_O:
+				work_point_toggle_requested.emit("out")
+				view.get_viewport().set_input_as_handled()
+				return
 
 
 func handle_gui_input(view: CodaTimelineView, event: InputEvent) -> void:
@@ -149,6 +168,9 @@ func drop_data(view: CodaTimelineView, at_position: Vector2, data: Variant) -> v
 func hit_test(view: CodaTimelineView, local_pos: Vector2) -> Dictionary:
 	var timeline: CodaEventTimeline = view.get_timeline()
 	if local_pos.y < RULER_HEIGHT:
+		var work_kind: String = _hit_work_point_near(view, local_pos.x)
+		if not work_kind.is_empty():
+			return {"kind": "work_point", "work_point_kind": work_kind}
 		var marker := _hit_marker_near(view, local_pos.x)
 		if marker != null:
 			return {"kind": "marker", "marker_id": marker.id}
@@ -350,6 +372,14 @@ func _handle_wheel(view: CodaTimelineView, mb: InputEventMouseButton) -> bool:
 
 
 func _handle_mouse_motion(view: CodaTimelineView, mm: InputEventMouseMotion) -> void:
+	if _drag_kind == DragKind.NONE and not _work_point_press_kind.is_empty():
+		if mm.position.distance_to(_work_point_press_pos) >= MARKER_DRAG_THRESHOLD_PX:
+			_drag_kind = (
+				DragKind.IN_POINT_MOVE if _work_point_press_kind == "in"
+				else DragKind.OUT_POINT_MOVE
+			)
+			_work_point_press_kind = ""
+			timeline_interaction_started.emit()
 	if _drag_kind == DragKind.NONE and not _marker_press_id.is_empty():
 		if mm.position.distance_to(_marker_press_pos) >= MARKER_DRAG_THRESHOLD_PX:
 			_drag_kind = DragKind.MARKER_MOVE
@@ -473,6 +503,16 @@ func _handle_mouse_motion(view: CodaTimelineView, mm: InputEventMouseMotion) -> 
 			var marker_t: float = apply_snap(view, t)
 			_apply_marker_move(view, _drag_marker_id, marker_t)
 			marker_changed.emit(_drag_marker_id, marker_t)
+		DragKind.IN_POINT_MOVE:
+			var in_t: float = _clamp_in_point_time(timeline, apply_snap(view, t))
+			timeline.in_point_seconds = in_t
+			work_point_changed.emit("in", in_t)
+			view.queue_redraw()
+		DragKind.OUT_POINT_MOVE:
+			var out_t: float = _clamp_out_point_time(timeline, apply_snap(view, t))
+			timeline.out_point_seconds = out_t
+			work_point_changed.emit("out", out_t)
+			view.queue_redraw()
 		DragKind.LOOP_START:
 			var ls: float = clampf(apply_snap(view, t), 0.0, timeline.loop_end_seconds - 0.01)
 			timeline.loop_start_seconds = ls
@@ -492,10 +532,25 @@ func _begin_drag(view: CodaTimelineView, hit: Dictionary, mb: InputEventMouseBut
 	_drag_start_seconds = _x_to_seconds(view, mb.position.x)
 	if k == "ruler":
 		view.clear_marker_selection()
+		view.clear_work_point_selection()
 		_drag_kind = DragKind.PLAYHEAD_SEEK
 		var snapped: float = apply_snap(view, _drag_start_seconds)
 		view.set_playhead(snapped)
 		playhead_seek_requested.emit(snapped)
+		return
+	if k == "work_point":
+		var wp_kind: String = String(hit.get("work_point_kind", ""))
+		view.clear_marker_selection()
+		var was_selected: bool = view.get_selected_work_point() == wp_kind
+		view.set_selected_work_point(wp_kind)
+		work_point_selected.emit(wp_kind)
+		if was_selected:
+			_drag_kind = DragKind.IN_POINT_MOVE if wp_kind == "in" else DragKind.OUT_POINT_MOVE
+			timeline_interaction_started.emit()
+		else:
+			_work_point_press_kind = wp_kind
+			_work_point_press_pos = mb.position
+			_drag_kind = DragKind.NONE
 		return
 	if k == "marker":
 		var marker_id: String = String(hit.get("marker_id", ""))
@@ -506,6 +561,7 @@ func _begin_drag(view: CodaTimelineView, hit: Dictionary, mb: InputEventMouseBut
 			return
 		var was_selected: bool = view.get_selected_marker_id() == marker_id
 		view.set_selected_marker(marker_id)
+		view.clear_work_point_selection()
 		if was_selected:
 			_drag_kind = DragKind.MARKER_MOVE
 			_drag_marker_id = marker_id
@@ -567,6 +623,7 @@ func _begin_drag(view: CodaTimelineView, hit: Dictionary, mb: InputEventMouseBut
 			track_row_selected.emit(lane_idx)
 		view.set_selected_clip("")
 		view.clear_marker_selection()
+		view.clear_work_point_selection()
 		selection_cleared.emit()
 		_drag_kind = DragKind.NONE
 
@@ -576,6 +633,7 @@ func _end_drag() -> void:
 	_drag_clip_id = ""
 	_drag_marker_id = ""
 	_marker_press_id = ""
+	_work_point_press_kind = ""
 	_ghost_new_track = false
 	_hover_clip_edge = "none"
 
@@ -606,6 +664,8 @@ func _open_context_menu_for_hit(view: CodaTimelineView, hit: Dictionary) -> void
 			view.open_clip_context_menu(String(hit.get("clip_id", "")), menu_pos)
 		"marker":
 			view.open_marker_context_menu(String(hit.get("marker_id", "")), menu_pos)
+		"work_point":
+			view.open_work_point_context_menu(String(hit.get("work_point_kind", "")), menu_pos)
 
 
 func _track_index_at_y(view: CodaTimelineView, y: float) -> int:
@@ -648,6 +708,39 @@ func _hit_marker_near(view: CodaTimelineView, x: float) -> CodaTimelineMarker:
 	return best_marker
 
 
+func _hit_work_point_near(view: CodaTimelineView, x: float) -> String:
+	var timeline: CodaEventTimeline = view.get_timeline()
+	if timeline == null:
+		return ""
+	var best_kind: String = ""
+	var best_dist: float = 6.0
+	if timeline.has_in_point():
+		var d_in: float = abs(_seconds_to_x(view, timeline.in_point_seconds) - x)
+		if d_in < best_dist:
+			best_dist = d_in
+			best_kind = "in"
+	if timeline.has_out_point():
+		var d_out: float = abs(_seconds_to_x(view, timeline.out_point_seconds) - x)
+		if d_out < best_dist:
+			best_kind = "out"
+	return best_kind
+
+
+func _clamp_in_point_time(timeline: CodaEventTimeline, t: float) -> float:
+	var lo: float = 0.0
+	var hi: float = timeline.length_seconds
+	if timeline.has_out_point():
+		hi = timeline.out_point_seconds - CodaEventTimeline.MIN_WORK_AREA_GAP_SECONDS
+	return clampf(t, lo, maxf(lo, hi))
+
+
+func _clamp_out_point_time(timeline: CodaEventTimeline, t: float) -> float:
+	var lo: float = CodaEventTimeline.MIN_WORK_AREA_GAP_SECONDS
+	if timeline.has_in_point():
+		lo = timeline.in_point_seconds + CodaEventTimeline.MIN_WORK_AREA_GAP_SECONDS
+	return clampf(t, minf(lo, timeline.length_seconds), timeline.length_seconds)
+
+
 func _snap_candidate_times(view: CodaTimelineView, for_time: float) -> Array[float]:
 	var out: Array[float] = []
 	var timeline: CodaEventTimeline = view.get_timeline()
@@ -660,6 +753,10 @@ func _snap_candidate_times(view: CodaTimelineView, for_time: float) -> Array[flo
 		out.append(timeline.loop_end_seconds)
 	for m in timeline.markers:
 		out.append(m.time_seconds)
+	if timeline.has_in_point():
+		out.append(timeline.in_point_seconds)
+	if timeline.has_out_point():
+		out.append(timeline.out_point_seconds)
 	for tr in timeline.tracks:
 		for cl in tr.clips:
 			out.append(cl.start_seconds)

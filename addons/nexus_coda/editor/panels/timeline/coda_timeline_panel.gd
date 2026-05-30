@@ -274,6 +274,9 @@ func _build_split_root() -> void:
 	_view.marker_delete_requested.connect(_on_view_marker_delete_requested)
 	_view.marker_rename_requested.connect(_on_view_marker_rename_requested)
 	_view.marker_go_to_time_requested.connect(_on_view_marker_go_to_time_requested)
+	_view.work_point_changed.connect(_on_view_work_point_changed)
+	_view.work_point_toggle_requested.connect(_on_view_work_point_toggle_requested)
+	_view.work_point_delete_requested.connect(_on_view_work_point_delete_requested)
 	_view.track_row_selected.connect(_on_view_track_row_selected)
 	_view.clip_audio_assign_requested.connect(_on_view_clip_audio_assign_requested)
 	_view.timeline_interaction_started.connect(_on_view_timeline_interaction_started)
@@ -872,6 +875,39 @@ func _on_view_marker_changed(_marker_id: String, _new_time: float) -> void:
 	_notify_timeline_changed()
 
 
+func _on_view_work_point_changed(_kind: String, _new_time: float) -> void:
+	_notify_timeline_changed()
+
+
+func _on_view_work_point_toggle_requested(kind: String) -> void:
+	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	var ph: float = _view.get_playhead()
+	var snap: CodaEventTimeline = null
+	if kind == "in":
+		snap = CodaTimelineCommands.toggle_in_point(t, ph)
+	else:
+		snap = CodaTimelineCommands.toggle_out_point(t, ph)
+	_apply_mutation(snap)
+
+
+func _on_view_work_point_delete_requested(kind: String) -> void:
+	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
+		return
+	var t: CodaEventTimeline = _selected_event.event_timeline
+	var snap: CodaEventTimeline = null
+	if kind == "in":
+		snap = CodaTimelineCommands.delete_in_point(t)
+	else:
+		snap = CodaTimelineCommands.delete_out_point(t)
+	if snap == null:
+		return
+	_apply_mutation(snap)
+	if _view.get_selected_work_point() == kind:
+		_view.clear_work_point_selection()
+
+
 func _on_view_loop_region_changed(_start: float, _end: float) -> void:
 	_notify_timeline_changed()
 
@@ -1121,7 +1157,6 @@ func _paste_clip_at_playhead() -> void:
 	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
 		return
 	if _clip_clipboard.is_empty():
-		NexusCodaLog.warn("timeline", "Clipboard is empty. Copy or cut a clip first.")
 		return
 	var result: Dictionary = CodaTimelineCommands.paste_clip_at_playhead(
 		_selected_event.event_timeline,

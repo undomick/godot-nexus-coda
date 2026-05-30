@@ -35,7 +35,6 @@ var _title: Label
 var _subtitle: Label
 var _footer: Label
 var _add_btn: MenuButton
-var _scroll: ScrollContainer
 var _list: VBoxContainer
 var _empty_hint: Label
 
@@ -48,6 +47,7 @@ var _pending_bind: bool = false
 
 
 func _ready() -> void:
+	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	add_theme_constant_override(&"separation", Tokens.SPACING_SM)
 
 	var header_row := HBoxContainer.new()
@@ -87,16 +87,11 @@ func _ready() -> void:
 		add_popup.about_to_popup.connect(_on_add_menu_about_to_popup)
 	header_row.add_child(_add_btn)
 
-	_scroll = ScrollContainer.new()
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	add_child(_scroll)
-
 	_list = VBoxContainer.new()
 	_list.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_scroll.add_child(_list)
+	_list.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	add_child(_list)
 
 	_empty_hint = Label.new()
 	_empty_hint.text = "No effects yet. Use + Effect to add one."
@@ -146,6 +141,16 @@ func bind_effects_array(effects: Array[CodaTrackEffect]) -> void:
 		_pending_bind = true
 		return
 	_apply_bind()
+
+
+func get_effect_card_count() -> int:
+	if _list == null:
+		return 0
+	var count: int = 0
+	for child in _list.get_children():
+		if child is PanelContainer:
+			count += 1
+	return count
 
 
 func _apply_bind() -> void:
@@ -225,6 +230,7 @@ func _rebuild_rows() -> void:
 		var eff: CodaTrackEffect = _effects_ref[i]
 		var card: PanelContainer = _make_effect_card(eff, i)
 		_list.add_child(card)
+	_list.update_minimum_size()
 
 
 func _sync_rows_from_data() -> void:
