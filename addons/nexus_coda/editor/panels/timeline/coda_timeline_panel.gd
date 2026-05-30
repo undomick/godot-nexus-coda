@@ -55,6 +55,7 @@ var _track_select_group: ButtonGroup
 var _track_reorder_from: int = -1
 var _track_drag_watch_running: bool = false
 var _marker_rename_dialog_ref: Array = []
+var _clip_clipboard: Dictionary = {}
 
 
 func _ready() -> void:
@@ -957,6 +958,19 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_redo_timeline()
 			get_viewport().set_input_as_handled()
 			return
+		if _view != null and not _view.get_selected_clip_id().is_empty():
+			if k.ctrl_pressed and not k.alt_pressed and k.keycode == KEY_C:
+				_copy_selected_clip()
+				get_viewport().set_input_as_handled()
+				return
+			if k.ctrl_pressed and not k.alt_pressed and k.keycode == KEY_X:
+				_cut_selected_clip()
+				get_viewport().set_input_as_handled()
+				return
+		if k.ctrl_pressed and not k.alt_pressed and k.keycode == KEY_V:
+			_paste_clip_at_playhead()
+			get_viewport().set_input_as_handled()
+			return
 		if _view != null and not _view.get_selected_marker_id().is_empty():
 			if k.keycode == KEY_F2:
 				_open_marker_rename(_view.get_selected_marker_id())
@@ -1067,3 +1081,66 @@ func _apply_split_or_duplicate_result(result: Dictionary) -> void:
 
 func _on_view_audition_requested() -> void:
 	_preview.toggle_audition()
+
+
+func _copy_selected_clip() -> void:
+	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
+		return
+	var cid: String = _view.get_selected_clip_id()
+	if cid.is_empty():
+		return
+	var data: Dictionary = CodaTimelineCommands.clip_copy_data(
+		_selected_event.event_timeline, cid
+	)
+	if data.is_empty():
+		return
+	_clip_clipboard = data
+
+
+func _cut_selected_clip() -> void:
+	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
+		return
+	var cid: String = _view.get_selected_clip_id()
+	if cid.is_empty():
+		return
+	var result: Dictionary = CodaTimelineCommands.cut_clip(
+		_selected_event.event_timeline, cid
+	)
+	var data: Dictionary = result.get("data", {}) as Dictionary
+	if data.is_empty():
+		return
+	_clip_clipboard = data
+	var snap: CodaEventTimeline = result.get("snapshot") as CodaEventTimeline
+	if snap != null:
+		_push_snapshot(snap)
+	_view.clear_selection()
+	_notify_timeline_changed()
+
+
+func _paste_clip_at_playhead() -> void:
+	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
+		return
+	if _clip_clipboard.is_empty():
+		NexusCodaLog.warn("timeline", "Clipboard is empty. Copy or cut a clip first.")
+		return
+	var result: Dictionary = CodaTimelineCommands.paste_clip_at_playhead(
+		_selected_event.event_timeline,
+		_selected_track_index,
+		_view.get_playhead(),
+		_clip_clipboard
+	)
+	var snap: CodaEventTimeline = result.get("snapshot") as CodaEventTimeline
+	var err: String = String(result.get("error", ""))
+	if snap != null:
+		_push_snapshot(snap)
+	if not err.is_empty():
+		if snap != null:
+			_undo_timeline()
+		NexusCodaLog.warn("timeline", err)
+		return
+	var new_id: String = String(result.get("clip_id", ""))
+	if not new_id.is_empty():
+		_view.set_selected_clip(new_id)
+		clip_selection_changed.emit(_selected_event.id, new_id)
+	CodaTimelineCommands.extend_timeline_if_content_exceeds(_selected_event.event_timeline)
+	_notify_timeline_changed()

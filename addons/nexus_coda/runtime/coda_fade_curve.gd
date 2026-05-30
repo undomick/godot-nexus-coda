@@ -18,3 +18,8 @@ static func apply(linear_t: float, curve: float) -> float:
 	if t <= 0.0:
 		return 0.0
 	return pow(t, curve_to_exponent(curve))
+
+
+## Fade-out uses the same 0=slow / 1=fast handle semantics as the editor; invert before shaping.
+static func apply_fade_out(linear_t: float, curve: float) -> float:
+	return apply(linear_t, 1.0 - clampf(curve, 0.0, 1.0))

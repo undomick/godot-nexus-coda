@@ -13,11 +13,13 @@ const APEX_IDLE_HIT_RADIUS := 8.0
 const DIAMOND_HALF := 6.0
 const APEX_HALF := 4.0
 const TRIM_HANDLE_WIDTH := 7.0
-const TRIM_OUTSET := 5.0
+const TRIM_OUTSET := 6.0
+const TRIM_HIT_EXTRA := 8.0
 const FADE_APEX_IDLE_INSET := 12.0
 const CORNER_RADIUS := 5.0
 const FADE_CURVE_SEGMENTS := 24
-const SHAPE_BULGE_FRAC := 0.44
+const CURVE_SHAPE_MIN := 0.01
+const CURVE_SHAPE_MAX := 0.99
 
 
 static func clip_rect_for_times(
@@ -83,7 +85,7 @@ static func fade_in_bezier(rect: Rect2, clip: CodaTimelineClip, scroll: float, s
 	var top: float = rect.position.y
 	var p0 := Vector2(rect.position.x, bottom)
 	var p2 := Vector2(x_end, top)
-	var p1 := _shape_control_point(p0, p2, clip.fade_in_curve, rect)
+	var p1 := _shape_control_point(p0, p2, clip.fade_in_curve, rect, true)
 	return PackedVector2Array([p0, p1, p2])
 
 
@@ -93,20 +95,45 @@ static func fade_out_bezier(rect: Rect2, clip: CodaTimelineClip, scroll: float, 
 	var top: float = rect.position.y
 	var p0 := Vector2(x_start, top)
 	var p2 := Vector2(rect.position.x + rect.size.x, bottom)
-	var p1 := _shape_control_point(p0, p2, clip.fade_out_curve, rect)
+	var p1 := _shape_control_point(p0, p2, clip.fade_out_curve, rect, false)
 	return PackedVector2Array([p0, p1, p2])
 
 
-## Control point stays on the vertical midline; only Y shifts with curve (no degenerate loops).
-static func _shape_control_point(p0: Vector2, p2: Vector2, curve: float, rect: Rect2) -> Vector2:
-	var mid_x: float = lerpf(p0.x, p2.x, 0.5)
-	var mid_y: float = lerpf(p0.y, p2.y, 0.5)
-	var bulge: float = rect.size.y * SHAPE_BULGE_FRAC
-	var offset_y: float = (0.5 - clampf(curve, 0.0, 1.0)) * bulge
-	return Vector2(
-		mid_x,
-		clampf(mid_y + offset_y, rect.position.y, rect.position.y + rect.size.y)
-	)
+## Audacity-style: slow (0) stays on the loud edge; fast (1) pulls toward the quiet edge.
+static func _shape_control_point(
+	p0: Vector2, p2: Vector2, curve: float, rect: Rect2, fade_in: bool
+) -> Vector2:
+	var t: float = clampf(curve, CURVE_SHAPE_MIN, CURVE_SHAPE_MAX)
+	var chord_mid: Vector2 = p0.lerp(p2, 0.5)
+	var top: float = rect.position.y
+	var bottom: float = rect.position.y + rect.size.y
+	var slow_ctl: Vector2
+	var fast_ctl: Vector2
+	if fade_in:
+		slow_ctl = Vector2(lerpf(p0.x, p2.x, 0.88), bottom)
+		fast_ctl = Vector2(lerpf(p0.x, p2.x, 0.12), top)
+	else:
+		slow_ctl = Vector2(lerpf(p0.x, p2.x, 0.88), top)
+		fast_ctl = Vector2(lerpf(p0.x, p2.x, 0.12), bottom)
+	if t <= 0.5:
+		return slow_ctl.lerp(chord_mid, t / 0.5)
+	return chord_mid.lerp(fast_ctl, (t - 0.5) / 0.5)
+
+
+static func curve_from_vertical_position(y: float, rect: Rect2) -> float:
+	return curve_from_shape_drag_y(y, rect, true)
+
+
+## Map pointer Y inside the clip rect to a curve value (0 = slow, 1 = fast).
+static func curve_from_shape_drag_y(
+	mouse_y: float,
+	rect: Rect2,
+	fade_in: bool
+) -> float:
+	var t: float = (mouse_y - rect.position.y) / maxf(1.0, rect.size.y)
+	if fade_in:
+		return clampf(1.0 - t, CURVE_SHAPE_MIN, CURVE_SHAPE_MAX)
+	return clampf(t, CURVE_SHAPE_MIN, CURVE_SHAPE_MAX)
 
 
 static func quad_bezier_point(p0: Vector2, p1: Vector2, p2: Vector2, t: float) -> Vector2:

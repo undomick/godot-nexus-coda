@@ -181,6 +181,36 @@ func duplicate_clip(clip_id: String, gap_seconds: float = 0.05) -> String:
 	return ""
 
 
+## Insert a clip copied from [data] at [start_seconds] on [track_index]. Returns result dict.
+func paste_clip_at(track_index: int, start_seconds: float, data: Dictionary) -> Dictionary:
+	if data.is_empty():
+		return {"error": "Nothing to paste.", "clip_id": ""}
+	if tracks.is_empty():
+		return {"error": "No tracks on timeline.", "clip_id": ""}
+	var tr_i: int = clampi(track_index, 0, tracks.size() - 1)
+	var tr: CodaTimelineTrack = tracks[tr_i]
+	var d: Dictionary = data.duplicate(true)
+	d.erase("id")
+	var clip: CodaTimelineClip = CodaTimelineClipScript.from_dictionary(d)
+	for i in range(clip.effects.size()):
+		clip.effects[i] = clip.effects[i].clone_new_id()
+	clip.start_seconds = maxf(0.0, start_seconds)
+	var room: float = length_seconds - clip.start_seconds
+	var max_src: float = clip.max_source_playable_seconds()
+	var max_d: float = minf(clip.duration_seconds, minf(room, max_src))
+	if max_d < MIN_SPLIT_SEGMENT_SECONDS:
+		return {"error": "Not enough timeline space at the playhead.", "clip_id": ""}
+	clip.duration_seconds = max_d
+	tr.clips.append(clip)
+	_sort_track_clips(tr)
+	var err: String = validate()
+	if not err.is_empty():
+		tr.clips.erase(clip)
+		_sort_track_clips(tr)
+		return {"error": err, "clip_id": ""}
+	return {"error": "", "clip_id": clip.id}
+
+
 ## Validates timeline state and returns "" if OK, or a human-readable error string.
 ## Mirrors the existing String-error pattern used across CodaState.set_event_*.
 func validate() -> String:

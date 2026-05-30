@@ -13,7 +13,23 @@ static func run() -> int:
 	var failed: int = 0
 	failed += _test_overlap_pairs()
 	failed += _test_bezier_midpoint()
+	failed += _test_shape_drag_tracks_mouse()
 	return failed
+
+
+static func _test_shape_drag_tracks_mouse() -> int:
+	var rect := Rect2(0.0, 0.0, 200.0, 80.0)
+	var top_in: float = ChromeScript.curve_from_shape_drag_y(0.0, rect, true)
+	var bottom_in: float = ChromeScript.curve_from_shape_drag_y(80.0, rect, true)
+	if top_in < bottom_in:
+		push_error("fade-in curve should decrease when dragging down")
+		return 1
+	var top_out: float = ChromeScript.curve_from_shape_drag_y(0.0, rect, false)
+	var bottom_out: float = ChromeScript.curve_from_shape_drag_y(80.0, rect, false)
+	if top_out > bottom_out:
+		push_error("fade-out curve should increase when dragging down")
+		return 1
+	return 0
 
 
 static func _test_overlap_pairs() -> int:

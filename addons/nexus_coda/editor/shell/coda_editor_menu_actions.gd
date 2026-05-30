@@ -203,9 +203,7 @@ func complete_audio_bus_layout_export(saved_path: String, err: Error) -> void:
 func action_open_sample_async() -> void:
 	if session == null:
 		return
-	var ok: bool = await session.confirm_unsaved_async()
-	if not ok:
-		return
+	session.autosave_for_navigation()
 	var sample: CodaState = CodaSampleProjectScript.build()
 	session.apply_loaded_state(sample)
 	session.current_path = ""

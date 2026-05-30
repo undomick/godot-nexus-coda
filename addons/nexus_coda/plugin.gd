@@ -104,6 +104,8 @@ func _exit_tree() -> void:
 	_prune_invalid_windows()
 	for w in _editor_windows:
 		if is_instance_valid(w):
+			if w.has_method(&"_teardown_before_close"):
+				w.call(&"_teardown_before_close")
 			w.queue_free()
 	_editor_windows.clear()
 	if _tools_menu != null:
@@ -246,6 +248,8 @@ func _on_tools_menu_id_pressed(id: int) -> void:
 func spawn_new_coda_editor_window() -> void:
 	_prune_invalid_windows()
 	var w: Window = _create_editor_window()
+	if w.has_method(&"set_restore_autosave_on_start"):
+		w.set_restore_autosave_on_start(false)
 	_attach_window_to_editor_host(w)
 	_editor_windows.append(w)
 	_show_window_on_editor(w)

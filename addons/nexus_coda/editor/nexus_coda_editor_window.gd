@@ -142,6 +142,8 @@ var _layout_persistence: CodaEditorLayoutPersistence
 
 const UNSAVED_LAYER_NODEPATH := NodePath("UnsavedPromptLayer")
 
+var _restore_autosave_on_start: bool = true
+
 var _teardown_done: bool = false
 var _fs_asset_import_boot_attempts: int = 0
 var _selection_router: CodaEditorSelectionRouter
@@ -180,6 +182,10 @@ func import_fs_paths_into_assets(paths: PackedStringArray) -> void:
 
 func setup_editor_plugin(plugin: EditorPlugin) -> void:
 	_plugin = plugin
+
+
+func set_restore_autosave_on_start(enabled: bool) -> void:
+	_restore_autosave_on_start = enabled
 
 
 func _ready() -> void:
@@ -397,7 +403,7 @@ func _on_recent_menu_about_to_popup() -> void:
 
 func _session_initial_bind() -> void:
 	if _project_session != null:
-		_project_session.initial_bind()
+		_project_session.initial_bind(_restore_autosave_on_start)
 	_refresh_view_menu_check_marks()
 
 
@@ -430,7 +436,7 @@ func _on_session_title_changed(path: String, dirty: bool) -> void:
 	var doc_name: String = "Untitled"
 	if not path.is_empty():
 		doc_name = path.get_file()
-	title = "Nexus Coda â€” %s%s" % [doc_name, " *" if dirty else ""]
+	title = "Nexus Coda - %s%s" % [doc_name, " *" if dirty else ""]
 	if _status_bar != null:
 		_status_bar.set_project_state(path, dirty)
 
@@ -955,7 +961,7 @@ func _select_event_by_id(event_id: String) -> void:
 	elif _browser_panel.has_method(&"focus_event"):
 		_browser_panel.focus_event(event_id)
 	else:
-		NexusCodaLog.info("palette", "Event id=%s â€” open the Browser to select it." % event_id)
+		NexusCodaLog.info("palette", "Event id=%s - open the Browser to select it." % event_id)
 
 
 func _on_view_id_pressed(id: int) -> void:
@@ -1058,10 +1064,6 @@ func _refresh_editor_filesystem_after_save(path: String) -> void:
 
 
 func _on_close_requested() -> void:
-	if _project_session != null and _project_session.dirty:
-		var ok: bool = await _project_session.confirm_unsaved_async()
-		if not ok:
-			return
 	_teardown_before_close()
 	queue_free()
 
@@ -1078,6 +1080,8 @@ func _notification(what: int) -> void:
 func _teardown_before_close() -> void:
 	if _teardown_done:
 		return
+	if _project_session != null:
+		_project_session.autosave_if_dirty()
 	_teardown_done = true
 
 	_unwire_runtime_from_panels()

@@ -62,6 +62,36 @@ static func _test_fade_curve_shapes() -> int:
 	if db_fast <= db_linear:
 		push_error("convex fade (0.8) should attenuate less than linear at mid fade-in")
 		return 1
+
+	var clip_out_linear = CodaTimelineClipScript.new()
+	clip_out_linear.start_seconds = 0.0
+	clip_out_linear.duration_seconds = 4.0
+	clip_out_linear.fade_out_seconds = 2.0
+	clip_out_linear.fade_out_curve = 0.5
+
+	var clip_out_slow = CodaTimelineClipScript.new()
+	clip_out_slow.start_seconds = 0.0
+	clip_out_slow.duration_seconds = 4.0
+	clip_out_slow.fade_out_seconds = 2.0
+	clip_out_slow.fade_out_curve = 0.2
+
+	var clip_out_fast = CodaTimelineClipScript.new()
+	clip_out_fast.start_seconds = 0.0
+	clip_out_fast.duration_seconds = 4.0
+	clip_out_fast.fade_out_seconds = 2.0
+	clip_out_fast.fade_out_curve = 0.8
+
+	var out_t_mid: float = 3.0
+	var db_out_linear: float = CodaVoiceFaderScript.clip_fade_db_offset(clip_out_linear, out_t_mid)
+	var db_out_slow: float = CodaVoiceFaderScript.clip_fade_db_offset(clip_out_slow, out_t_mid)
+	var db_out_fast: float = CodaVoiceFaderScript.clip_fade_db_offset(clip_out_fast, out_t_mid)
+	if db_out_slow <= db_out_linear:
+		push_error("concave fade-out (0.2) should stay louder than linear mid fade-out")
+		return 1
+	if db_out_fast >= db_out_linear:
+		push_error("convex fade-out (0.8) should attenuate more than linear mid fade-out")
+		return 1
+
 	var amp: float = CodaFadeCurveScript.apply(0.5, 0.5)
 	if abs(amp - 0.5) > 0.001:
 		push_error("linear curve should map 0.5 to 0.5 amplitude")

@@ -256,12 +256,19 @@ static func move_clip(
 	clip.start_seconds = clamped_start
 
 
+const MIN_CLIP_DURATION_SECONDS := 0.05
+
+
 static func clamp_clip_fades(clip: CodaTimelineClip) -> void:
 	if clip == null:
 		return
 	var dur: float = maxf(0.0, clip.duration_seconds)
-	clip.fade_in_seconds = clampf(clip.fade_in_seconds, 0.0, dur * 0.5)
-	clip.fade_out_seconds = clampf(clip.fade_out_seconds, 0.0, dur * 0.5)
+	clip.fade_in_seconds = clampf(
+		clip.fade_in_seconds, 0.0, maxf(0.0, dur - clip.fade_out_seconds)
+	)
+	clip.fade_out_seconds = clampf(
+		clip.fade_out_seconds, 0.0, maxf(0.0, dur - clip.fade_in_seconds)
+	)
 	clip.fade_in_curve = clampf(clip.fade_in_curve, 0.0, 1.0)
 	clip.fade_out_curve = clampf(clip.fade_out_curve, 0.0, 1.0)
 	if clip.fade_in_seconds + clip.fade_out_seconds > dur:
@@ -401,7 +408,7 @@ static func resize_clip(
 	var max_by_source: float = clip.max_source_playable_seconds()
 	var max_by_tl: float = max(0.0, timeline.length_seconds - clip.start_seconds)
 	var max_d: float = minf(max_by_source, max_by_tl)
-	clip.duration_seconds = clampf(new_duration, 0.0, max_d)
+	clip.duration_seconds = clampf(new_duration, MIN_CLIP_DURATION_SECONDS, max_d)
 	clamp_clip_fades(clip)
 
 
@@ -434,6 +441,44 @@ static func duplicate_clip(timeline: CodaEventTimeline, clip_id: String) -> Dict
 	if err.is_empty():
 		extend_timeline_if_content_exceeds(timeline)
 	return {"snapshot": snap, "error": err}
+
+
+static func clip_copy_data(timeline: CodaEventTimeline, clip_id: String) -> Dictionary:
+	var info: Dictionary = timeline.find_clip(clip_id)
+	if info.is_empty():
+		return {}
+	var clip: CodaTimelineClip = info.get("clip") as CodaTimelineClip
+	if clip == null:
+		return {}
+	return clip.to_dictionary()
+
+
+static func paste_clip_at_playhead(
+	timeline: CodaEventTimeline,
+	track_index: int,
+	start_seconds: float,
+	data: Dictionary
+) -> Dictionary:
+	if timeline == null or data.is_empty():
+		return {"snapshot": null, "error": "Nothing to paste.", "clip_id": ""}
+	var snap := snapshot(timeline)
+	var result: Dictionary = timeline.paste_clip_at(track_index, start_seconds, data)
+	if not String(result.get("error", "")).is_empty():
+		return {"snapshot": snap, "error": result.get("error", ""), "clip_id": ""}
+	extend_timeline_if_content_exceeds(timeline)
+	return {
+		"snapshot": snap,
+		"error": "",
+		"clip_id": String(result.get("clip_id", "")),
+	}
+
+
+static func cut_clip(timeline: CodaEventTimeline, clip_id: String) -> Dictionary:
+	var data: Dictionary = clip_copy_data(timeline, clip_id)
+	if data.is_empty():
+		return {"snapshot": null, "error": "Clip not found.", "data": {}}
+	var snap := delete_clip(timeline, clip_id)
+	return {"snapshot": snap, "error": "", "data": data}
 
 
 static func rename_marker(timeline: CodaEventTimeline, marker: CodaTimelineMarker, new_name: String) -> CodaEventTimeline:

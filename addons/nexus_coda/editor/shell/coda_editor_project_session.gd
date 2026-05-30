@@ -7,6 +7,7 @@ extends RefCounted
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
 const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.gd")
+const CodaProjectAutosave := preload("res://addons/nexus_coda/editor/io/coda_project_autosave.gd")
 const CodaInspectorSelectionScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_inspector_selection.gd"
 )
@@ -67,7 +68,9 @@ func bind_project_signals(state: Variant) -> void:
 	st.project_dirty.connect(_on_structure_changed)
 
 
-func initial_bind() -> void:
+func initial_bind(restore_autosave: bool = true) -> void:
+	if restore_autosave and try_restore_from_autosave():
+		return
 	_suppress_dirty = true
 	if browser_panel != null and browser_panel.has_method(&"get_project"):
 		var st: Variant = browser_panel.get_project()
@@ -168,9 +171,6 @@ func action_new_async() -> void:
 
 
 func action_close_window_async() -> bool:
-	var ok: bool = await confirm_unsaved_async()
-	if not ok:
-		return false
 	NexusCodaLog.info("project_io", "Closing Nexus Coda editor instance")
 	if on_request_close.is_valid():
 		on_request_close.call()
@@ -178,18 +178,14 @@ func action_close_window_async() -> bool:
 
 
 func action_open_async() -> void:
-	var ok: bool = await confirm_unsaved_async()
-	if not ok:
-		return
+	autosave_for_navigation()
 	var p: String = await file_dialogs.pick_project_file(false)
 	if not p.is_empty():
 		open_path_internal(p)
 
 
 func open_path_after_confirm_async(path: String) -> void:
-	var ok: bool = await confirm_unsaved_async()
-	if not ok:
-		return
+	autosave_for_navigation()
 	open_path_internal(path)
 
 
@@ -256,6 +252,7 @@ func write_and_finish_save(path: String) -> String:
 	current_path = path
 	dirty = false
 	CodaProjectIo.remember_opened_path(plugin, path)
+	CodaProjectAutosave.clear(plugin)
 	emit_title_update()
 	NexusCodaLog.info("project_io", 'Saved "%s"' % path)
 	if on_refresh_filesystem.is_valid():
@@ -263,25 +260,46 @@ func write_and_finish_save(path: String) -> String:
 	return ""
 
 
-func confirm_unsaved_async() -> bool:
-	if not dirty:
-		return true
-	var r: int = await file_dialogs.run_three_button_prompt(
-		"Save changes to the current project?",
-		"Save",
-		"Don't Save",
-		"Cancel"
-	)
-	if r == 0:
+func autosave_if_dirty() -> void:
+	if not dirty or plugin == null:
+		return
+	var st: CodaState = get_state()
+	if st == null:
+		return
+	var err: String = CodaProjectAutosave.write(plugin, st, current_path)
+	if err.is_empty():
+		NexusCodaLog.info("project_io", "Autosaved session.")
+	else:
+		NexusCodaLog.warn("project_io", err)
+
+
+func autosave_for_navigation() -> void:
+	autosave_if_dirty()
+
+
+func try_restore_from_autosave() -> bool:
+	if plugin == null:
 		return false
-	if r == 2:
-		return true
-	if r == 1:
-		await action_save_async()
-		if dirty:
-			return false
-		return true
-	return false
+	var result: Dictionary = CodaProjectAutosave.resolve_restore_candidate(plugin)
+	var kind: StringName = result.get("kind", CodaProjectAutosave.KIND_NONE)
+	if kind == CodaProjectAutosave.KIND_NONE:
+		return false
+	var st: Variant = result.get("state")
+	if st == null or not st is CodaState:
+		return false
+	apply_loaded_state(st as CodaState)
+	current_path = str(result.get("source_path", "")).strip_edges()
+	dirty = kind == CodaProjectAutosave.KIND_AUTOSAVE
+	if not current_path.is_empty() and kind != CodaProjectAutosave.KIND_AUTOSAVE:
+		CodaProjectIo.remember_opened_path(plugin, current_path)
+	emit_title_update()
+	var label: String = "autosave"
+	if kind == CodaProjectAutosave.KIND_SOURCE:
+		label = "saved file"
+	elif kind == CodaProjectAutosave.KIND_RECENT:
+		label = "recent project"
+	NexusCodaLog.info("project_io", "Restored session from %s." % label)
+	return true
 
 
 func _on_structure_changed() -> void:

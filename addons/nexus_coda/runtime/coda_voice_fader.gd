@@ -66,7 +66,9 @@ static func clip_fade_db_offset(clip: CodaTimelineClip, cursor_seconds: float) -
 		return linear_to_db(lin_in)
 	var time_to_end: float = end_seconds - cursor_seconds
 	if fade_out > 0.0 and time_to_end < fade_out:
-		var lin_out: float = CodaFadeCurveScript.apply(time_to_end / fade_out, clip.fade_out_curve)
+		var lin_out: float = CodaFadeCurveScript.apply_fade_out(
+			time_to_end / fade_out, clip.fade_out_curve
+		)
 		return linear_to_db(lin_out)
 	return 0.0
 

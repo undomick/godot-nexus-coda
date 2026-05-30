@@ -30,8 +30,11 @@ static func _test_clamp_clip_fades() -> int:
 	if clip.fade_in_seconds + clip.fade_out_seconds > clip.duration_seconds + 0.001:
 		push_error("clamp_clip_fades should keep sum <= duration")
 		return 1
-	if clip.fade_in_seconds > clip.duration_seconds * 0.5 + 0.001:
-		push_error("fade_in should not exceed half duration")
+	clip.fade_in_seconds = 3.8
+	clip.fade_out_seconds = 0.1
+	CodaTimelineCommandsScript.clamp_clip_fades(clip)
+	if clip.fade_in_seconds + clip.fade_out_seconds > clip.duration_seconds + 0.001:
+		push_error("fades should meet without half-duration cap")
 		return 1
 	return 0
 
