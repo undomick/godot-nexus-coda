@@ -78,6 +78,7 @@ func _init() -> void:
 	failed += _test_inspector_fx_stable_on_structure_changed()
 	failed += InspectorSelectionFlowTests.run_all()
 	failed += _test_reverb_damping_build()
+	failed += _test_effect_chain_tail_estimate()
 	if failed > 0:
 		push_error("Editor shell tests failed (%d)" % failed)
 		quit(1)
@@ -514,6 +515,23 @@ static func _test_inspector_fx_stable_on_structure_changed() -> int:
 	section.set_fx_scope(CodaInspectorEffectsSectionScript.FxScope.NONE)
 	if section.visible:
 		push_error("fx section should hide when scope cleared")
+		return 1
+	return 0
+
+
+static func _test_effect_chain_tail_estimate() -> int:
+	var rev: CodaTrackEffect = CodaTrackEffectScript.new()
+	rev.type = CodaTrackEffect.Type.REVERB
+	rev.params = {"wet": 0.3, "room_size": 0.8}
+	var chain: Array = [rev]
+	var tail: float = CodaEffectCatalogScript.estimate_chain_tail_seconds(chain)
+	if tail < 0.05:
+		push_error("reverb chain should estimate a wet tail")
+		return 1
+	var gain_eff: CodaTrackEffect = CodaTrackEffectScript.new()
+	gain_eff.type = CodaTrackEffect.Type.GAIN
+	if CodaEffectCatalogScript.estimate_chain_tail_seconds([gain_eff]) > 0.001:
+		push_error("gain-only chain should not reserve a wet tail")
 		return 1
 	return 0
 

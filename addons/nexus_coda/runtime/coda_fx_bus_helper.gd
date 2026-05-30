@@ -11,6 +11,8 @@ const CodaEffectCatalogScript := preload(
 
 const BUS_NAME_PREFIX := "__CodaFx_"
 
+static var _tail_release_token: Dictionary = {}
+
 
 ## Creates a temporary bus, appends [param effects] (already a CodaTrackEffect chain), and
 ## routes its send to [param send_to_bus_name]. Returns the new bus name, or empty if the
@@ -43,8 +45,72 @@ static func create_effects_bus(send_to_bus_name: String, effects: Array) -> Stri
 
 static func destroy_if_ours(bus_name: String) -> void:
 	var nm: String = String(bus_name).strip_edges()
+	cancel_pending_destroy(nm)
 	if nm.is_empty() or not nm.begins_with(BUS_NAME_PREFIX):
 		return
+	var idx: int = AudioServer.get_bus_index(nm)
+	if idx <= 0:
+		return
+	AudioServer.remove_bus(idx)
+
+
+static func cancel_pending_destroy(bus_name: String) -> void:
+	var nm: String = String(bus_name).strip_edges()
+	if nm.is_empty():
+		return
+	_tail_release_token[nm] = int(_tail_release_token.get(nm, 0)) + 1
+
+
+## Keeps the FX bus alive so wet tails can decay after the dry source stops.
+## Rescheduling extends the deadline (older timer callbacks are ignored via token).
+static func mute_dry_on_bus(bus_name: String) -> void:
+	var idx: int = AudioServer.get_bus_index(String(bus_name).strip_edges())
+	if idx < 0:
+		return
+	var count: int = AudioServer.get_bus_effect_count(idx)
+	for slot in range(count):
+		var ae: AudioEffect = AudioServer.get_bus_effect(idx, slot)
+		if ae is AudioEffectReverb:
+			(ae as AudioEffectReverb).dry = 0.0
+		elif ae is AudioEffectDelay:
+			(ae as AudioEffectDelay).dry = 0.0
+		elif ae is AudioEffectChorus:
+			(ae as AudioEffectChorus).dry = 0.0
+
+
+static func schedule_destroy_after_tail(
+	bus_name: String, tail_seconds: float, owner_node: Node
+) -> void:
+	var nm: String = String(bus_name).strip_edges()
+	if nm.is_empty() or not is_helper_bus(nm):
+		return
+	if AudioServer.get_bus_index(nm) < 0:
+		return
+	var token: int = int(_tail_release_token.get(nm, 0)) + 1
+	_tail_release_token[nm] = token
+	var delay: float = maxf(tail_seconds, 0.05)
+	var tree: SceneTree = _scene_tree(owner_node)
+	if tree == null:
+		push_warning("CodaFxBusHelper: no SceneTree for tail release on '%s'" % nm)
+		destroy_if_ours(nm)
+		return
+	tree.create_timer(delay).timeout.connect(
+		_on_tail_timer_fired.bind(nm, token), CONNECT_ONE_SHOT
+	)
+
+
+static func _scene_tree(owner_node: Node) -> SceneTree:
+	if owner_node != null and is_instance_valid(owner_node):
+		var tree: SceneTree = owner_node.get_tree()
+		if tree != null:
+			return tree
+	return Engine.get_main_loop() as SceneTree
+
+
+static func _on_tail_timer_fired(nm: String, token: int) -> void:
+	if int(_tail_release_token.get(nm, 0)) != token:
+		return
+	_tail_release_token.erase(nm)
 	var idx: int = AudioServer.get_bus_index(nm)
 	if idx <= 0:
 		return

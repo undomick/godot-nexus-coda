@@ -18,6 +18,12 @@ const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens
 const CodaEffectCatalogScript := preload(
 	"res://addons/nexus_coda/domain/effects/coda_effect_catalog.gd"
 )
+const ChainListScript := preload(
+	"res://addons/nexus_coda/editor/panels/effects/coda_effects_chain_list.gd"
+)
+const EffectDragPreviewScript := preload(
+	"res://addons/nexus_coda/editor/panels/effects/coda_effect_drag_preview.gd"
+)
 
 const _LABEL_COL_WIDTH := 140
 const _SPINBOX_COL_WIDTH := 96
@@ -35,7 +41,7 @@ var _title: Label
 var _subtitle: Label
 var _footer: Label
 var _add_btn: MenuButton
-var _list: VBoxContainer
+var _list: ChainListScript
 var _empty_hint: Label
 
 var _effects_ref: Array[CodaTrackEffect] = []
@@ -87,10 +93,12 @@ func _ready() -> void:
 		add_popup.about_to_popup.connect(_on_add_menu_about_to_popup)
 	header_row.add_child(_add_btn)
 
-	_list = VBoxContainer.new()
+	_list = ChainListScript.new()
 	_list.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	if not _list.effect_drop_requested.is_connected(_on_effect_drop_requested):
+		_list.effect_drop_requested.connect(_on_effect_drop_requested)
 	add_child(_list)
 
 	_empty_hint = Label.new()
@@ -210,6 +218,48 @@ func _submit_menu_pick(raw_id: int) -> void:
 	effect_add_requested.emit(effect_type)
 
 
+func _on_effect_drop_requested(effect_id: String, insert_before: int) -> void:
+	var from_i: int = -1
+	for i in _effects_ref.size():
+		if _effects_ref[i].id == effect_id:
+			from_i = i
+			break
+	if from_i < 0:
+		return
+	var to_i: int = insert_before
+	if to_i > from_i:
+		to_i -= 1
+	to_i = clampi(to_i, 0, max(0, _effects_ref.size() - 1))
+	if from_i == to_i:
+		return
+	effect_move_requested.emit(from_i, to_i)
+
+
+func _effect_drag_data(eff: CodaTrackEffect, grip: Control) -> Variant:
+	var preview := EffectDragPreviewScript.new(
+		CodaEffectCatalogScript.display_name_for_type(eff.type)
+	)
+	preview.custom_minimum_size = Vector2(maxf(180.0, size.x - 24.0), 36.0)
+	grip.set_drag_preview(preview)
+	return {"type": ChainListScript.DND_TYPE, "effect_id": eff.id}
+
+
+func _wire_effect_card_drag(grip: Control, eff: CodaTrackEffect, card: PanelContainer) -> void:
+	grip.set_drag_forwarding(
+		func(_at: Vector2) -> Variant:
+			return _effect_drag_data(eff, grip),
+		Callable(),
+		Callable()
+	)
+	card.set_drag_forwarding(
+		Callable(),
+		func(_at: Vector2, data: Variant) -> bool:
+			return ChainListScript.is_effect_drag_data(data),
+		func(_at: Vector2, data: Variant) -> void:
+			_list.drop_effect_at_local_y(data, _list.get_local_mouse_position().y)
+	)
+
+
 # ---------- Rendering ----------
 
 func _rebuild_rows() -> void:
@@ -275,6 +325,10 @@ func _make_effect_card(eff: CodaTrackEffect, index: int) -> PanelContainer:
 	var header: HBoxContainer = _make_card_header(eff, index)
 	body.add_child(header)
 
+	var grip: Control = header.get_meta(&"drag_grip") as Control
+	if grip != null:
+		_wire_effect_card_drag(grip, eff, card)
+
 	body.add_child(_make_hairline_separator())
 
 	var params_box := VBoxContainer.new()
@@ -301,6 +355,21 @@ func _make_card_header(eff: CodaTrackEffect, index: int) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
 	row.custom_minimum_size = Vector2(0, _HEADER_HEIGHT)
+
+	var grip := Label.new()
+	grip.text = "="
+	grip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	grip.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	grip.custom_minimum_size = Vector2(14, _HEADER_HEIGHT)
+	grip.mouse_filter = Control.MOUSE_FILTER_STOP
+	grip.mouse_default_cursor_shape = Control.CURSOR_MOVE
+	grip.focus_mode = Control.FOCUS_NONE
+	grip.tooltip_text = "Drag to reorder"
+	grip.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
+	grip.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
+	grip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(grip)
+	row.set_meta(&"drag_grip", grip)
 
 	var bypass := CheckBox.new()
 	bypass.text = ""

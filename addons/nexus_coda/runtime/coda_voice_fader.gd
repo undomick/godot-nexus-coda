@@ -51,19 +51,28 @@ func fade_volume_db(
 	)
 
 
-static func clip_fade_db_offset(clip: CodaTimelineClip, cursor_seconds: float) -> float:
+static func clip_fade_db_offset(
+	clip: CodaTimelineClip,
+	cursor_seconds: float,
+	audible_end_seconds: float = -1.0,
+	include_fade_out: bool = true,
+) -> float:
 	if clip == null:
 		return 0.0
 	var fade_in: float = maxf(0.0, clip.fade_in_seconds)
 	var fade_out: float = maxf(0.0, clip.fade_out_seconds)
 	var start_seconds: float = clip.start_seconds
 	var end_seconds: float = clip.end_seconds()
+	if audible_end_seconds > 0.0:
+		end_seconds = minf(end_seconds, audible_end_seconds)
 	var rel: float = cursor_seconds - start_seconds
 	if rel < 0.0:
 		return -80.0
 	if fade_in > 0.0 and rel < fade_in:
 		var lin_in: float = CodaFadeCurveScript.apply(rel / fade_in, clip.fade_in_curve)
 		return linear_to_db(lin_in)
+	if not include_fade_out:
+		return 0.0
 	var time_to_end: float = end_seconds - cursor_seconds
 	if fade_out > 0.0 and time_to_end < fade_out:
 		var lin_out: float = CodaFadeCurveScript.apply_fade_out(

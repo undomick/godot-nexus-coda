@@ -245,7 +245,7 @@ func stop_all() -> void:
 		if hh2 == null or not _timeline_dispatchers.has(hh2):
 			continue
 		var d: Dictionary = _timeline_dispatchers[hh2]
-		_timeline_dispatcher.stop_voices(d, hh2)
+		_timeline_dispatcher.stop_voices_dry(d, hh2)
 		hh2.timeline_runtime = null
 		_timeline_dispatchers.erase(hh2)
 		if hh2._alive:

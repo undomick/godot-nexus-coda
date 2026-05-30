@@ -94,6 +94,7 @@ func start_timeline_event(
 		CodaTimelineTransportScript.sync_dispatcher_bounds(handle, dispatch_entry, timeline)
 	_clip_dispatch.prime_overlapping_voices(handle, dispatch_entry, timeline, handle.timeline_cursor_seconds)
 	_sync_segment_voice_after_prime(handle, dispatch_entry, timeline)
+	_clip_dispatch.refresh_voice_output_levels(handle, dispatch_entry, timeline)
 	_runtime.runtime_emit_voice_started(handle)
 	return handle
 
@@ -127,9 +128,8 @@ func tick_dispatchers(delta: float) -> void:
 			else:
 				_apply_seek(handle, d, seek_target)
 
-		_clip_dispatch.refresh_voice_output_levels(handle, d, timeline)
-
 		if handle._paused:
+			_clip_dispatch.refresh_voice_output_levels(handle, d, timeline)
 			continue
 
 		if timeline.has_work_area():
@@ -139,6 +139,7 @@ func tick_dispatchers(delta: float) -> void:
 				handle.timeline_cursor_seconds = wa_lo
 			elif handle.timeline_cursor_seconds > wa_hi and not handle.loop:
 				handle.timeline_cursor_seconds = wa_hi
+				_lane_voice.stop_voices_past_clip_end(d, handle, wa_hi)
 				finalize_handle(handle)
 				continue
 
@@ -167,6 +168,7 @@ func tick_dispatchers(delta: float) -> void:
 						handle, d, timeline, prev_cursor, loop_end
 					)
 					handle.timeline_cursor_seconds = loop_end
+					_lane_voice.stop_voices_past_clip_end(d, handle, loop_end)
 					finalize_handle(handle)
 					continue
 		elif next_cursor >= timeline.length_seconds:
@@ -179,6 +181,7 @@ func tick_dispatchers(delta: float) -> void:
 					handle, d, timeline, prev_cursor, timeline.length_seconds
 				)
 				handle.timeline_cursor_seconds = timeline.length_seconds
+				_lane_voice.stop_voices_past_clip_end(d, handle, timeline.length_seconds)
 				finalize_handle(handle)
 				continue
 
@@ -213,6 +216,7 @@ func tick_dispatchers(delta: float) -> void:
 		_lane_voice.stop_voices_past_clip_end(d, handle, next_cursor)
 		_clip_dispatch.heal_orphaned_fired_clips(handle, d, timeline, next_cursor)
 		_clip_dispatch.fire_clips_in_range(handle, d, timeline, prev_cursor, next_cursor)
+		_clip_dispatch.refresh_voice_output_levels(handle, d, timeline)
 
 
 func active_handle_for_event(event_id: String) -> CodaEventHandle:
@@ -288,6 +292,7 @@ func resync_preview_for_event(event_id: String) -> void:
 	_lane_voice.stop_voices(d, handle)
 	_clip_dispatch.prime_overlapping_voices(handle, d, timeline, handle.timeline_cursor_seconds)
 	_sync_segment_voice_after_prime(handle, d, timeline)
+	_clip_dispatch.refresh_voice_output_levels(handle, d, timeline)
 
 
 func pause_preview(handle: CodaEventHandle) -> void:
@@ -296,7 +301,7 @@ func pause_preview(handle: CodaEventHandle) -> void:
 		return
 	handle._paused = true
 	var d: Dictionary = dispatchers[handle]
-	_lane_voice.stop_voices(d, handle)
+	_lane_voice.stop_voices_dry(d, handle)
 	CodaTimelineClipDispatchScript.reset_bookkeeping(d)
 
 
@@ -373,6 +378,10 @@ func stop_voices(d: Dictionary, handle: CodaEventHandle = null) -> void:
 	_lane_voice.stop_voices(d, handle)
 
 
+func stop_voices_dry(d: Dictionary, handle: CodaEventHandle = null) -> void:
+	_lane_voice.stop_voices_dry(d, handle)
+
+
 func stop_voices_past_clip_end(
 	d: Dictionary, handle: CodaEventHandle, cursor_seconds: float
 ) -> void:
@@ -396,7 +405,7 @@ func _finish_teardown(handle: CodaEventHandle, was_alive: bool) -> void:
 	if not dispatchers.has(handle):
 		return
 	var d: Dictionary = dispatchers[handle]
-	_lane_voice.stop_voices(d, handle)
+	_lane_voice.stop_voices_dry(d, handle)
 	handle.timeline_runtime = null
 	dispatchers.erase(handle)
 	if was_alive:
@@ -424,6 +433,7 @@ func _apply_seek(handle: CodaEventHandle, d: Dictionary, target_seconds: float) 
 	CodaTimelineClipDispatchScript.reset_bookkeeping(d)
 	_clip_dispatch.prime_overlapping_voices(handle, d, timeline, clamped)
 	_sync_segment_voice_after_prime(handle, d, timeline)
+	_clip_dispatch.refresh_voice_output_levels(handle, d, timeline)
 
 
 func _sync_segment_voice_after_prime(

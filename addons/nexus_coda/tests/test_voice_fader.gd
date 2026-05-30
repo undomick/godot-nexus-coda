@@ -11,9 +11,27 @@ const CodaTimelineClipScript := preload(
 static func run() -> int:
 	var failed: int = 0
 	failed += _test_clip_fade()
+	failed += _test_audible_end_fade()
 	failed += _test_fade_curve_shapes()
 	failed += _test_immediate_fade()
 	return failed
+
+
+static func _test_audible_end_fade() -> int:
+	var clip = CodaTimelineClipScript.new()
+	clip.start_seconds = 0.0
+	clip.duration_seconds = 12.0
+	clip.fade_out_seconds = 2.0
+	var audible_end: float = 10.0
+	var at_end: float = CodaVoiceFaderScript.clip_fade_db_offset(clip, audible_end, audible_end)
+	if at_end > -60.0:
+		push_error("fade at audible timeline end should be near silence, got %s dB" % at_end)
+		return 1
+	var without_clamp: float = CodaVoiceFaderScript.clip_fade_db_offset(clip, 9.0)
+	if without_clamp < -10.0:
+		push_error("unclamped fade should still be loud far from clip end, got %s dB" % without_clamp)
+		return 1
+	return 0
 
 
 static func _test_clip_fade() -> int:

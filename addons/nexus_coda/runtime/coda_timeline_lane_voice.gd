@@ -3,6 +3,9 @@ class_name CodaTimelineLaneVoice
 extends RefCounted
 
 const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_bus_helper.gd")
+const CodaEffectCatalogScript := preload(
+	"res://addons/nexus_coda/domain/effects/coda_effect_catalog.gd"
+)
 const CodaAudioStreamCacheScript := preload(
 	"res://addons/nexus_coda/runtime/coda_audio_stream_cache.gd"
 )
@@ -62,6 +65,9 @@ func spawn_lane_voice(handle: CodaEventHandle, d: Dictionary, entry: Dictionary)
 		if not fx_nm.is_empty():
 			route_bus = fx_nm
 			player.set_meta(&"_coda_fx_bus", fx_nm)
+			var tail_s: float = CodaEffectCatalogScript.estimate_chain_tail_seconds(fx_chain)
+			if tail_s > 0.0:
+				player.set_meta(&"_coda_fx_tail_seconds", tail_s)
 	player.bus = route_bus
 	player.stream = stream
 	var override_db: float = float(handle.params.get("volume_db", 0.0))
@@ -96,7 +102,17 @@ func stop_voices(d: Dictionary, handle: CodaEventHandle = null) -> void:
 	var voices: Dictionary = d.get("voices", {})
 	for k in voices.keys():
 		var p: AudioStreamPlayer = voices[k] as AudioStreamPlayer
-		_detach_timeline_player(p, true)
+		_teardown_immediate(p, true)
+	d["voices"] = {}
+	if handle != null:
+		handle.clear_player_binding()
+
+
+func stop_voices_dry(d: Dictionary, handle: CodaEventHandle = null) -> void:
+	var voices: Dictionary = d.get("voices", {})
+	for k in voices.keys():
+		var p: AudioStreamPlayer = voices[k] as AudioStreamPlayer
+		_stop_dry_at_clip_end(p)
 	d["voices"] = {}
 	if handle != null:
 		handle.clear_player_binding()
@@ -119,7 +135,7 @@ func stop_voices_past_clip_end(
 		var end_at: float = float(p.get_meta(&"_coda_clip_timeline_end", -1.0))
 		if cursor_seconds < end_at:
 			continue
-		_detach_timeline_player(p, true)
+		_stop_dry_at_clip_end(p)
 		stale_keys.append(sound_key)
 	for k in stale_keys:
 		voices.erase(k)
@@ -137,7 +153,7 @@ func retire_lane_voice(d: Dictionary, clip_id: String) -> void:
 	var p: AudioStreamPlayer = voices[clip_id] as AudioStreamPlayer
 	voices.erase(clip_id)
 	d["voices"] = voices
-	_detach_timeline_player(p, true)
+	_teardown_immediate(p, true)
 
 
 func finalize_lane_voice(
@@ -147,7 +163,7 @@ func finalize_lane_voice(
 	d: Dictionary,
 	finished_clip_id: String,
 ) -> void:
-	free_player_fx_bus(player)
+	_release_fx_bus_with_tail(player)
 	_runtime.get_timeline_voice_owner().erase(key)
 	_runtime.get_timeline_voice_playback_gen().erase(key)
 	var voices: Dictionary = d.get("voices", {})
@@ -173,10 +189,32 @@ func free_player_fx_bus(player: AudioStreamPlayer) -> void:
 		return
 	var nm: String = String(player.get_meta(&"_coda_fx_bus", ""))
 	player.remove_meta(&"_coda_fx_bus")
+	if player.has_meta(&"_coda_fx_tail_seconds"):
+		player.remove_meta(&"_coda_fx_tail_seconds")
+	CodaFxBusHelperScript.cancel_pending_destroy(nm)
 	CodaFxBusHelperScript.destroy_if_ours(nm)
 
 
-func _detach_timeline_player(p: AudioStreamPlayer, stop_if_playing: bool) -> void:
+func _stop_dry_at_clip_end(p: AudioStreamPlayer) -> void:
+	if p == null or not is_instance_valid(p):
+		return
+	var pk: int = p.get_instance_id()
+	_runtime.get_timeline_voice_owner().erase(pk)
+	_runtime.get_timeline_voice_playback_gen().erase(pk)
+	var fx_nm: String = ""
+	var tail_s: float = 0.0
+	if p.has_meta(&"_coda_fx_bus"):
+		fx_nm = String(p.get_meta(&"_coda_fx_bus", ""))
+		tail_s = float(p.get_meta(&"_coda_fx_tail_seconds", 0.0))
+	if tail_s > 0.0 and not fx_nm.is_empty():
+		CodaFxBusHelperScript.mute_dry_on_bus(fx_nm)
+	if p.playing:
+		p.stop()
+	clear_voice_player_meta(p)
+	_release_fx_bus_with_tail(p)
+
+
+func _teardown_immediate(p: AudioStreamPlayer, stop_if_playing: bool) -> void:
 	if p == null or not is_instance_valid(p):
 		return
 	var pk: int = p.get_instance_id()
@@ -186,6 +224,22 @@ func _detach_timeline_player(p: AudioStreamPlayer, stop_if_playing: bool) -> voi
 		p.stop()
 	clear_voice_player_meta(p)
 	free_player_fx_bus(p)
+
+
+func _release_fx_bus_with_tail(p: AudioStreamPlayer) -> void:
+	if p == null or not is_instance_valid(p):
+		return
+	if not p.has_meta(&"_coda_fx_bus"):
+		return
+	var nm: String = String(p.get_meta(&"_coda_fx_bus", ""))
+	var tail_s: float = float(p.get_meta(&"_coda_fx_tail_seconds", 0.0))
+	p.remove_meta(&"_coda_fx_bus")
+	if p.has_meta(&"_coda_fx_tail_seconds"):
+		p.remove_meta(&"_coda_fx_tail_seconds")
+	if tail_s > 0.0 and _runtime != null:
+		CodaFxBusHelperScript.schedule_destroy_after_tail(nm, tail_s, _runtime)
+	else:
+		CodaFxBusHelperScript.destroy_if_ours(nm)
 
 
 func _send_bus_for_track(handle: CodaEventHandle, track_output_bus_id: String) -> String:

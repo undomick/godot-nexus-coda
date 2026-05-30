@@ -83,6 +83,7 @@ func prime_overlapping_voices(
 			var entry: Dictionary = clip_lane_entry(track, clip, into_clip, clip_end)
 			if _lane_voice.spawn_lane_voice(handle, d, entry):
 				fired[clip.id] = true
+				refresh_voice_output_levels(handle, d, timeline)
 	d["fired_clip_ids"] = fired
 
 
@@ -125,6 +126,7 @@ func fire_clips_in_range(
 			var entry: Dictionary = clip_lane_entry(track, clip, into_clip, clip_end)
 			if _lane_voice.spawn_lane_voice(handle, d, entry):
 				fired[clip.id] = true
+				refresh_voice_output_levels(handle, d, timeline)
 	d["fired_clip_ids"] = fired
 
 
@@ -185,7 +187,13 @@ func refresh_voice_output_levels(
 			p.volume_db = -80.0
 		else:
 			var base_db: float = float(cl.volume_db + tr.volume_db) + override_db
-			base_db += CodaVoiceFaderScript.clip_fade_db_offset(cl, handle.timeline_cursor_seconds)
+			var audible_end: float = audible_clip_end(cl, timeline)
+			var include_fade_out: bool = true
+			if p.has_meta(&"_coda_fx_tail_seconds"):
+				include_fade_out = float(p.get_meta(&"_coda_fx_tail_seconds", 0.0)) <= 0.0
+			base_db += CodaVoiceFaderScript.clip_fade_db_offset(
+				cl, handle.timeline_cursor_seconds, audible_end, include_fade_out
+			)
 			var levels: Dictionary = _runtime.get_parameter_pipeline().modulation_voice_levels(
 				handle, clip_id, base_db, float(cl.pitch_scale)
 			)

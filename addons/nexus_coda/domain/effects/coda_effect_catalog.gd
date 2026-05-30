@@ -365,6 +365,42 @@ static func build_audio_effect(t: CodaTrackEffect.Type, params: Dictionary) -> A
 			return fallback
 
 
+static func estimate_chain_tail_seconds(effects: Array) -> float:
+	var max_tail: float = 0.0
+	for eff in effects:
+		if not eff is CodaTrackEffect:
+			continue
+		var e: CodaTrackEffect = eff as CodaTrackEffect
+		if e.bypass:
+			continue
+		var p: Dictionary = merged_params(e.type, e.params)
+		match e.type:
+			CodaTrackEffect.Type.REVERB:
+				if float(p.get("wet", 0.2)) > 0.001:
+					var room: float = float(p.get("room_size", 0.5))
+					var damp: float = float(p.get("damping", p.get("damp", 0.5)))
+					var rev_tail: float = lerpf(1.5, 3.0, room) * lerpf(1.0, 0.6, damp)
+					max_tail = maxf(max_tail, rev_tail)
+			CodaTrackEffect.Type.DELAY:
+				var tap_ms: float = float(p.get("tap1_delay_ms", 250.0))
+				var fb_ms: float = float(p.get("feedback_delay_ms", 250.0))
+				var delay_s: float = maxf(tap_ms, fb_ms) / 1000.0
+				if bool(p.get("feedback_active", true)):
+					max_tail = maxf(max_tail, delay_s * 4.0 + 0.5)
+				elif bool(p.get("tap1_active", true)):
+					max_tail = maxf(max_tail, delay_s + 0.1)
+			CodaTrackEffect.Type.CHORUS:
+				if float(p.get("wet", 0.5)) > 0.001:
+					max_tail = maxf(max_tail, 0.15)
+			CodaTrackEffect.Type.PHASER:
+				max_tail = maxf(max_tail, 0.1)
+			_:
+				pass
+	if max_tail <= 0.0:
+		return 0.0
+	return clampf(max_tail, 0.05, 5.0)
+
+
 static func _spec(
 	p_name: String, p_min: float, p_max: float, p_step: float, p_unit: String, p_tip: String
 ) -> Dictionary:
