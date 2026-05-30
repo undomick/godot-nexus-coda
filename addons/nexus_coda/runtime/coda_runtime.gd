@@ -714,6 +714,10 @@ func get_bus_sync() -> CodaRuntimeBusSync:
 	return _bus_sync
 
 
+func get_voice_players(handle: CodaEventHandle) -> Array[AudioStreamPlayer]:
+	return _collect_handle_players(handle, true)
+
+
 func get_player_pending_finish_gen() -> Dictionary:
 	return _player_pending_finish_gen
 

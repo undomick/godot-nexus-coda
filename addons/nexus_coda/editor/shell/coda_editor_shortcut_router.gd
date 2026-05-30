@@ -9,10 +9,17 @@ const CodaEditorShortcutsScript := preload(
 ## Routes window keyboard input to editor actions via a handler dictionary.
 
 
-static func match_and_route(key: InputEventKey, handlers: Dictionary) -> bool:
+static func match_and_route(
+	key: InputEventKey, handlers: Dictionary, viewport: Viewport = null
+) -> bool:
 	var action: int = CodaEditorShortcutsScript.match_action(key)
 	if action == CodaEditorShortcutsScript.Action.NONE:
 		return false
+	if viewport != null and _text_input_has_focus(viewport):
+		if action == CodaEditorShortcutsScript.Action.BROWSER_DELETE:
+			return false
+		if action == CodaEditorShortcutsScript.Action.BROWSER_RENAME:
+			return false
 	match action:
 		CodaEditorShortcutsScript.Action.COMMAND_PALETTE:
 			return _call_handler(handlers, &"open_command_palette")
@@ -59,4 +66,15 @@ static func _call_optional_bool(handlers: Dictionary, key: StringName) -> bool:
 	var cb: Variant = handlers.get(key, null)
 	if cb is Callable and (cb as Callable).is_valid():
 		return bool((cb as Callable).call())
+	return false
+
+
+static func _text_input_has_focus(viewport: Viewport) -> bool:
+	var focus: Control = viewport.gui_get_focus_owner()
+	if focus == null:
+		return false
+	if focus is LineEdit or focus is TextEdit:
+		return true
+	if focus is SpinBox:
+		return true
 	return false

@@ -223,12 +223,15 @@ func attach_project(project: CodaState) -> void:
 			_project.structure_changed.disconnect(_on_project_structure_changed)
 		if _project.project_dirty.is_connected(_on_project_dirty_lite):
 			_project.project_dirty.disconnect(_on_project_dirty_lite)
+		if _project.event_parameters_changed.is_connected(_on_event_parameters_changed):
+			_project.event_parameters_changed.disconnect(_on_event_parameters_changed)
 	_project = project
 	if _project != null:
 		_project.structure_changed.connect(_on_project_structure_changed)
 		# Timeline drops fire only `project_dirty` (no structural shape change). Listen for it
 		# so Play enables itself as soon as the first clip lands on a lane.
 		_project.project_dirty.connect(_on_project_dirty_lite)
+		_project.event_parameters_changed.connect(_on_event_parameters_changed)
 
 
 func _on_project_structure_changed() -> void:
@@ -242,6 +245,12 @@ func _on_project_dirty_lite() -> void:
 	# Cheap refresh: drag-dropping a clip, changing track/clip volume, or any other
 	# non-structural mutation runs through here.
 	_refresh_play_enabled()
+
+
+func _on_event_parameters_changed(event_id: String) -> void:
+	if _selected_event == null or String(_selected_event.id) != String(event_id):
+		return
+	_rebuild_param_rows()
 
 
 func attach_runtime(runtime: CodaRuntime) -> void:

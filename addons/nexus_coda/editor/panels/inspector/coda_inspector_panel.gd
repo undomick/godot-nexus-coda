@@ -121,6 +121,12 @@ func _ready() -> void:
 	_context_banner = CodaInspectorContextBannerScript.new()
 	_content.add_child(_context_banner)
 
+	_clip_section = CodaClipInspectorSectionScript.new()
+	_clip_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_clip_section.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_clip_section.visible = false
+	_content.add_child(_clip_section)
+
 	_header = CodaSectionHeaderScript.new()
 	_header.heading = "Event"
 	_content.add_child(_header)
@@ -189,10 +195,6 @@ func _ready() -> void:
 	_output_bus_picker.item_selected.connect(_on_output_bus_picked)
 	_event_stack.add_child(_output_bus_picker)
 
-	_clip_section = CodaClipInspectorSectionScript.new()
-	_clip_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_clip_section.visible = true
-
 	_fx_section = CodaInspectorEffectsSectionScript.new()
 	_fx_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_child(_fx_section)
@@ -254,19 +256,23 @@ func apply_view_state(state: Dictionary) -> void:
 	_empty_state.visible = false
 	_scroll.visible = true
 
-	var show_banner: bool = bool(state.get("show_context_banner", false))
-	if _context_banner != null:
-		_context_banner.set_context(
-			str(state.get("title", "")),
-			str(state.get("subtitle", "")),
-			show_banner
-		)
-
 	var show_event_stack: bool = bool(state.get("show_event_stack", false))
 	var show_asset: bool = bool(state.get("show_asset", false))
 	var show_bank: bool = bool(state.get("show_bank", false))
 	var show_game_sync: bool = bool(state.get("show_game_sync", false))
 	var show_clip: bool = bool(state.get("show_clip", false))
+	var show_banner: bool = bool(state.get("show_context_banner", false))
+	if _context_banner != null:
+		if show_clip:
+			_context_banner.set_context("", "", false)
+			_context_banner.set_properties_content(null)
+		else:
+			_context_banner.set_context(
+				str(state.get("title", "")),
+				str(state.get("subtitle", "")),
+				show_banner
+			)
+			_context_banner.set_properties_content(null)
 
 	_header.visible = show_event_stack or show_asset
 	if show_event_stack or show_asset:
@@ -324,14 +330,11 @@ func apply_view_state(state: Dictionary) -> void:
 			)
 
 	if _clip_section != null:
+		_clip_section.visible = show_clip
 		if show_clip:
-			if _context_banner != null:
-				_context_banner.set_properties_content(_clip_section)
 			_clip_section.set_clip_context(
 				str(state.get("event_id", "")), str(state.get("clip_id", ""))
 			)
-		elif _context_banner != null:
-			_context_banner.set_properties_content(null)
 
 	var fx_scope: int = int(
 		state.get("fx_scope", CodaInspectorEffectsSection.FxScope.NONE)
@@ -459,8 +462,8 @@ func _show_empty() -> void:
 		_game_sync_section.visible = false
 	if _bank_section != null:
 		_bank_section.visible = false
-	if _clip_section != null and _context_banner != null:
-		_context_banner.set_properties_content(null)
+	if _clip_section != null:
+		_clip_section.visible = false
 	if _header != null:
 		_header.visible = false
 	set_fx_scope(CodaInspectorEffectsSection.FxScope.NONE)

@@ -185,7 +185,10 @@ func apply_modulations(handle: CodaEventHandle) -> void:
 		handle.base_volume_db,
 		handle.base_pitch_scale,
 	)
-	handle._player.volume_db = float(levels.get("volume_db", handle.base_volume_db))
+	var vol_db: float = float(levels.get("volume_db", handle.base_volume_db))
+	if handle._player.has_meta(&"_coda_resonance_atten_db"):
+		vol_db += float(handle._player.get_meta(&"_coda_resonance_atten_db"))
+	handle._player.volume_db = vol_db
 	handle._player.pitch_scale = float(levels.get("pitch_scale", handle.base_pitch_scale))
 
 

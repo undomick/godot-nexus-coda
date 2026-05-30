@@ -143,6 +143,20 @@ func get_bus_name() -> String:
 	return _bus_name
 
 
+## All pooled [AudioStreamPlayer]s for this handle (primary, BLEND siblings, timeline lanes).
+func get_voice_players() -> Array[AudioStreamPlayer]:
+	if timeline_runtime != null and is_instance_valid(timeline_runtime):
+		return timeline_runtime.get_voice_players(self)
+	var out: Array[AudioStreamPlayer] = []
+	if _player != null and is_instance_valid(_player):
+		out.append(_player)
+	for sib in graph_parallel_siblings:
+		if sib == null or sib._player == null or not is_instance_valid(sib._player):
+			continue
+		out.append(sib._player)
+	return out
+
+
 func _bind_player(player: AudioStreamPlayer) -> void:
 	_player = player
 

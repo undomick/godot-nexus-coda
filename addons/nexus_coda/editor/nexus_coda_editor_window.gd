@@ -241,7 +241,7 @@ func _input(event: InputEvent) -> void:
 		&"focus_mixer": func() -> void: _focus_panel(PANEL_MIXER),
 		&"focus_player": func() -> void: _focus_panel(PANEL_PLAYER),
 		&"focus_inspector": func() -> void: _focus_panel(PANEL_INSPECTOR),
-	})
+	}, get_viewport())
 	if handled:
 		get_viewport().set_input_as_handled()
 

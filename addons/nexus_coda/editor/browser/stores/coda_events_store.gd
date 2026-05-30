@@ -92,6 +92,7 @@ func set_event_parameters(event_id: String, parameters: Array[CodaEventParameter
 	node.event_parameters.clear()
 	for p in parameters:
 		node.event_parameters.append(p.clone_keep_id())
+	_state.event_parameters_changed.emit(event_id)
 	_state.project_dirty.emit()
 	return ""
 

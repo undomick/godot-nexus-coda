@@ -2,6 +2,7 @@ extends RefCounted
 class_name CodaSpatialVoiceRuntime
 
 ## Applies simple distance attenuation before the output bus (3D routing stage).
+## TODO: delegate to external spatial backend when _coda_resonance_handle meta is set on the player.
 
 const MIN_DISTANCE := 1.0
 const MAX_DISTANCE := 100.0
@@ -22,7 +23,11 @@ static func apply_distance_attenuation(
 
 
 static func apply_from_meta(player: AudioStreamPlayer, base_volume_db: float) -> void:
-	if player == null or not player.has_meta(&"_coda_spatial_distance"):
+	if player == null:
+		return
+	if player.has_meta(&"_coda_resonance_handle"):
+		return
+	if not player.has_meta(&"_coda_spatial_distance"):
 		return
 	var distance: float = float(player.get_meta(&"_coda_spatial_distance", 0.0))
 	apply_distance_attenuation(player, distance, base_volume_db)

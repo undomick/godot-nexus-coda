@@ -98,3 +98,40 @@ CodaMusic.stop_music("default", 1500)
 ## Editor preview vs. gameplay
 
 The Coda editor uses the same `Coda` runtime for timeline preview. In gameplay, bus layout and banks come from loaded `.coda_bank` files (and optional editor project state when testing in the editor).
+
+## Optional: Nexus Resonance (spatial occlusion)
+
+Nexus Resonance can drive room simulation (occlusion, transmission, distance) for Coda event voices without routing PCM through `ResonancePlayer`. This is the **Option A** bridge: one Resonance source handle per Coda voice, attenuation applied as extra `volume_db` on Coda's pooled `AudioStreamPlayer`s.
+
+### Setup
+
+1. Install both addons in the same Godot project (`nexus_coda` + `nexus_resonance` from `C:\__projects__\nexus-resonance\audio_resonance_tool\addons\nexus_resonance`).
+2. Keep autoload `Coda` → `CodaRuntime` (plugin default).
+3. Add a `ResonanceRuntime` node to the scene and enable **Coda Bridge** (`coda_bridge_enabled = true`).
+4. Bake or assign static geometry / probes as usual for Resonance.
+5. For 3D SFX, add `ResonanceCodaEventEmitter` (`Node3D`) instead of a plain `CodaEventEmitter`, or pass an emitter path when calling `play`:
+
+```gdscript
+# From code (ResonanceCodaEventEmitter does this automatically):
+Coda.play("sfx/gunshot", {"_coda_spatial_emitter": $GunshotEmitter.get_path()})
+```
+
+### Scene node
+
+`ResonanceCodaEventEmitter` (Nexus Resonance addon):
+
+- `event_path` — Coda event path (same as `CodaEventEmitter`)
+- `auto_play` — play on `_ready`
+- `source_radius` — Resonance source radius (default `1.0`)
+
+Requires `ResonanceRuntime.coda_bridge_enabled` and a loaded Coda bank.
+
+### Demo scene (Coda test project)
+
+See `project/scenes/coda_resonance_bridge_demo.tscn` after linking the Resonance addon. Enable the Nexus Resonance editor plugin, assign baked geometry, load a bank via `CodaProjectBootstrap`, and press Play.
+
+### Limitations (Phase 1)
+
+- Timeline multi-lane voices and BLEND parallel voices share one Resonance handle per event handle (see TODOs in `resonance_coda_bridge.gd`).
+- Global Resonance reverb and Coda bus wet sends are independent; bus-matrix wiring is planned later.
+- Rebuild the Nexus Resonance GDExtension after updating source-handle GDScript bindings (`create_source_handle`, `update_source`, `get_source_occlusion_data`).

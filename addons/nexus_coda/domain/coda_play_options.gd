@@ -9,6 +9,8 @@ var exclusive_preview: bool = false
 var voice_bus: String = ""
 var loop_region_start: float = -1.0
 var loop_region_end: float = -1.0
+## Optional Node3D path for Nexus Resonance (or other spatial backends) to track this voice.
+var spatial_emitter: NodePath = NodePath()
 
 
 func has_loop_region() -> bool:
@@ -26,6 +28,8 @@ func to_params_dict() -> Dictionary:
 		out["_coda_voice_bus"] = voice_bus
 	if has_loop_region():
 		out["_coda_loop_region"] = [loop_region_start, loop_region_end]
+	if spatial_emitter != NodePath():
+		out["_coda_spatial_emitter"] = spatial_emitter
 	return out
 
 
@@ -39,4 +43,9 @@ static func from_params_dict(params: Dictionary) -> CodaPlayOptions:
 	if region is Array and (region as Array).size() == 2:
 		opts.loop_region_start = float((region as Array)[0])
 		opts.loop_region_end = float((region as Array)[1])
+	var emitter: Variant = params.get("_coda_spatial_emitter", null)
+	if emitter is NodePath:
+		opts.spatial_emitter = emitter as NodePath
+	elif emitter is Node and is_instance_valid(emitter):
+		opts.spatial_emitter = (emitter as Node).get_path()
 	return opts

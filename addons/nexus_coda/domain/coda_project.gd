@@ -13,6 +13,8 @@ const CodaBusSendScript := preload("res://addons/nexus_coda/domain/coda_bus_send
 
 signal structure_changed
 signal project_dirty
+## Emitted when an event's Set Parameters list changes (add/remove/rename/type/default).
+signal event_parameters_changed(event_id: String)
 
 var events_root: CodaBrowserNode
 var assets_root: CodaBrowserNode
