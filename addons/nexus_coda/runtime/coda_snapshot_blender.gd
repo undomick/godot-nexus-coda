@@ -4,15 +4,28 @@ extends RefCounted
 
 ## Interpolates [CodaSnapshot] bus volume overrides over time; mute/solo/bypass apply at blend end.
 
-var _project: CodaState = null
+const CodaAudioBusSyncGateScript := preload(
+	"res://addons/nexus_coda/runtime/coda_audio_bus_sync_gate.gd"
+)
+const CodaAudioServerWriterScript := preload(
+	"res://addons/nexus_coda/runtime/coda_audio_server_writer.gd"
+)
+
+var _project: CodaProject = null
 var _blend: Dictionary = {}
 var _pending_snapshot_id: String = ""
 var _sync_buses: Callable = Callable()
+var _sync_caller: int = CodaAudioBusSyncGateScript.SyncCaller.EditorPreview
 
 
-func setup(project: CodaState, sync_buses: Callable) -> void:
+func setup(
+	project: CodaProject,
+	sync_buses: Callable,
+	sync_caller: int = CodaAudioBusSyncGateScript.SyncCaller.EditorPreview,
+) -> void:
 	_project = project
 	_sync_buses = sync_buses
+	_sync_caller = sync_caller
 
 
 func clear() -> void:
@@ -69,20 +82,7 @@ func _commit_blend_end() -> void:
 	if _blend.is_empty() or _pending_snapshot_id.is_empty() or _project == null:
 		clear()
 		return
-	var snap: CodaSnapshot = _project.find_snapshot_by_id(_pending_snapshot_id)
-	if snap == null:
-		clear()
-		return
-	for bus_id in snap.bus_overrides.keys():
-		var b: CodaBus = _project.bus_root.find_by_id(bus_id)
-		if b == null:
-			continue
-		var entry: Dictionary = snap.bus_overrides[bus_id] as Dictionary
-		b.volume_db = float(entry.get("volume_db", b.volume_db))
-		b.mute = bool(entry.get("mute", b.mute))
-		b.solo = bool(entry.get("solo", b.solo))
-		b.bypass = bool(entry.get("bypass", b.bypass))
-		b.send_target_id = str(entry.get("send_target_id", b.send_target_id))
+	_project.apply_snapshot(_pending_snapshot_id)
 	if _sync_buses.is_valid():
 		_sync_buses.call()
 	clear()
@@ -118,7 +118,4 @@ func _push_blend_volume_to_audio_server(bus: CodaBus) -> void:
 		name = "Master"
 	elif name.is_empty():
 		name = "Bus"
-	var idx: int = AudioServer.get_bus_index(name)
-	if idx < 0:
-		return
-	AudioServer.set_bus_volume_db(idx, bus.volume_db)
+	CodaAudioServerWriterScript.set_bus_volume_db(_sync_caller, name, bus.volume_db)

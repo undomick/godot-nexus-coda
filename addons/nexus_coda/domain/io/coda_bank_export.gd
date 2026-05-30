@@ -65,6 +65,7 @@ static func build_manifest(state: CodaState, bank: CodaBank) -> Dictionary:
 			continue
 		var path: String = CodaEventResolverScript.path_for_event_id(state, event_id)
 		var d: Dictionary = event.to_dictionary()
+		_strip_editor_only_fields(d)
 		d["__path"] = path
 		events.append(d)
 		# Track unique audio refs for asset diagnostics.
@@ -130,3 +131,8 @@ static func read_manifest_from_path(path: String) -> Variant:
 	if typeof(data) != TYPE_DICTIONARY:
 		return "Bank root must be a dictionary."
 	return data
+
+
+static func _strip_editor_only_fields(event_dict: Dictionary) -> void:
+	event_dict.erase("event_tags")
+	event_dict.erase("event_notes")

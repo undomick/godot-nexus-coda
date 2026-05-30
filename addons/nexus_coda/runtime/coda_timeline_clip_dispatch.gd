@@ -56,6 +56,7 @@ static func clip_lane_entry(
 		"clip_effects": clip.effects,
 		"track_effects": track.effects,
 		"track_output_bus_id": track.output_bus_id,
+		"track_wet_sends": track.wet_sends,
 	}
 
 
@@ -64,26 +65,27 @@ func prime_overlapping_voices(
 ) -> void:
 	var has_solo: bool = CodaRuntimeTimelineLayoutScript.timeline_has_solo(timeline)
 	var fired: Dictionary = d.get("fired_clip_ids", {}).duplicate()
-	for track in timeline.tracks:
+	for entry in timeline.clips_active_at(at_seconds):
+		var track: CodaTimelineTrack = entry.get("track", null) as CodaTimelineTrack
+		var clip: CodaTimelineClip = entry.get("clip", null) as CodaTimelineClip
+		if track == null or clip == null:
+			continue
 		if not CodaRuntimeTimelineLayoutScript.track_is_audible(track, has_solo):
 			continue
 		if CodaTimelineSegmentDriverScript.is_segments_track(track):
 			continue
-		for clip in track.clips:
-			if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
-				continue
-			if not clip_starts_before_timeline_end(clip, timeline):
-				continue
-			if fired.has(clip.id):
-				continue
-			var clip_end: float = audible_clip_end(clip, timeline)
-			if at_seconds < clip.start_seconds or at_seconds >= clip_end:
-				continue
-			var into_clip: float = at_seconds - clip.start_seconds
-			var entry: Dictionary = clip_lane_entry(track, clip, into_clip, clip_end)
-			if _lane_voice.spawn_lane_voice(handle, d, entry):
-				fired[clip.id] = true
-				refresh_voice_output_levels(handle, d, timeline)
+		if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
+			continue
+		if not clip_starts_before_timeline_end(clip, timeline):
+			continue
+		if fired.has(clip.id):
+			continue
+		var clip_end: float = audible_clip_end(clip, timeline)
+		var into_clip: float = at_seconds - clip.start_seconds
+		var lane_entry: Dictionary = clip_lane_entry(track, clip, into_clip, clip_end)
+		if _lane_voice.spawn_lane_voice(handle, d, lane_entry):
+			fired[clip.id] = true
+			refresh_voice_output_levels(handle, d, timeline)
 	d["fired_clip_ids"] = fired
 
 
@@ -98,35 +100,36 @@ func fire_clips_in_range(
 		return
 	var has_solo: bool = CodaRuntimeTimelineLayoutScript.timeline_has_solo(timeline)
 	var fired: Dictionary = d.get("fired_clip_ids", {})
-	for track in timeline.tracks:
+	var spent: Dictionary = d.get("spent_clip_ids", {})
+	for entry in timeline.clips_overlapping_range(from_seconds, to_seconds):
+		var track: CodaTimelineTrack = entry.get("track", null) as CodaTimelineTrack
+		var clip: CodaTimelineClip = entry.get("clip", null) as CodaTimelineClip
+		if track == null or clip == null:
+			continue
 		if not CodaRuntimeTimelineLayoutScript.track_is_audible(track, has_solo):
 			continue
 		if CodaTimelineSegmentDriverScript.is_segments_track(track):
 			continue
-		for clip in track.clips:
-			if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
-				continue
-			if not clip_starts_before_timeline_end(clip, timeline):
-				continue
-			if fired.has(clip.id):
-				continue
-			var spent: Dictionary = d.get("spent_clip_ids", {})
-			if spent.has(clip.id):
-				continue
-			var clip_end: float = audible_clip_end(clip, timeline)
-			if clip_end <= from_seconds or clip.start_seconds >= to_seconds:
-				continue
-			var crosses_start: bool = (
-				clip.start_seconds >= from_seconds and clip.start_seconds < to_seconds
-			)
-			var overlaps_unfired: bool = clip.start_seconds < from_seconds and clip_end > from_seconds
-			if not crosses_start and not overlaps_unfired:
-				continue
-			var into_clip: float = maxf(0.0, from_seconds - clip.start_seconds)
-			var entry: Dictionary = clip_lane_entry(track, clip, into_clip, clip_end)
-			if _lane_voice.spawn_lane_voice(handle, d, entry):
-				fired[clip.id] = true
-				refresh_voice_output_levels(handle, d, timeline)
+		if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
+			continue
+		if not clip_starts_before_timeline_end(clip, timeline):
+			continue
+		if fired.has(clip.id):
+			continue
+		if spent.has(clip.id):
+			continue
+		var clip_end: float = audible_clip_end(clip, timeline)
+		var crosses_start: bool = (
+			clip.start_seconds >= from_seconds and clip.start_seconds < to_seconds
+		)
+		var overlaps_unfired: bool = clip.start_seconds < from_seconds and clip_end > from_seconds
+		if not crosses_start and not overlaps_unfired:
+			continue
+		var into_clip: float = maxf(0.0, from_seconds - clip.start_seconds)
+		var lane_entry: Dictionary = clip_lane_entry(track, clip, into_clip, clip_end)
+		if _lane_voice.spawn_lane_voice(handle, d, lane_entry):
+			fired[clip.id] = true
+			refresh_voice_output_levels(handle, d, timeline)
 	d["fired_clip_ids"] = fired
 
 

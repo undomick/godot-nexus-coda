@@ -8,7 +8,7 @@ signal voice_started(handle: CodaEventHandle)
 signal voice_finished(handle: CodaEventHandle)
 signal voice_pool_exhausted(context: Dictionary)
 signal marker_reached(handle: CodaEventHandle, marker_id: String)
-signal project_loaded(state: CodaState)
+signal project_loaded(state: CodaProject)
 
 const CodaVoicePoolScript := preload("res://addons/nexus_coda/runtime/coda_voice_pool.gd")
 const CodaEventResolverScript := preload("res://addons/nexus_coda/runtime/coda_event_resolver.gd")
@@ -39,6 +39,9 @@ const CodaRuntimeParameterPipelineScript := preload(
 const CodaRuntimeBusSyncScript := preload(
 	"res://addons/nexus_coda/runtime/coda_runtime_bus_sync.gd"
 )
+const CodaAudioBusSyncGateScript := preload(
+	"res://addons/nexus_coda/runtime/coda_audio_bus_sync_gate.gd"
+)
 const CodaRuntimeBankRegistryScript := preload(
 	"res://addons/nexus_coda/runtime/coda_runtime_bank_registry.gd"
 )
@@ -53,7 +56,7 @@ const RUNTIME_LOG_SCOPE := "runtime"
 @export var bus_name: String = "Master"
 @export var is_editor_preview: bool = false
 
-var _project: CodaState = null
+var _project: CodaProject = null
 var _pool: CodaVoicePool
 var _active_handles: Dictionary = {}
 var _next_handle_id: int = 1
@@ -95,7 +98,11 @@ func _ready() -> void:
 	_bank_registry = CodaRuntimeBankRegistryScript.new()
 	_bank_registry.setup(self)
 	_snapshot_blender = CodaSnapshotBlenderScript.new()
-	_snapshot_blender.setup(_project, Callable(_bus_sync, "sync_buses"))
+	_snapshot_blender.setup(
+		_project,
+		Callable(_bus_sync, "sync_buses"),
+		_snapshot_sync_caller(),
+	)
 	_timeline_music = CodaTimelineMusicControllerScript.new()
 	_timeline_music.setup(
 		self,
@@ -149,14 +156,18 @@ func set_project(project: Variant) -> void:
 	if project == null:
 		_project = null
 		if _snapshot_blender != null:
-			_snapshot_blender.setup(_project, Callable(_bus_sync, "sync_buses"))
+			_snapshot_blender.setup(
+				_project, Callable(_bus_sync, "sync_buses"), _snapshot_sync_caller()
+			)
 			_snapshot_blender.clear()
 		_bus_sync.apply_loaded_bank_buses()
 		project_loaded.emit(null)
 		return
-	_project = project as CodaState
+	_project = project as CodaProject
 	if _snapshot_blender != null:
-		_snapshot_blender.setup(_project, Callable(_bus_sync, "sync_buses"))
+		_snapshot_blender.setup(
+			_project, Callable(_bus_sync, "sync_buses"), _snapshot_sync_caller()
+		)
 	_bus_sync.sync_buses()
 	if _project != null:
 		if not _project.structure_changed.is_connected(_on_project_bus_structure_changed):
@@ -176,8 +187,87 @@ func resolve_godot_bus_name_for_coda_bus_id(coda_bus_id: String) -> String:
 	return _bus_sync.resolve_godot_bus_name_for_coda_bus_id(coda_bus_id)
 
 
-func get_project() -> CodaState:
+## Live authoring change: sync playback copy routing and reroute active preview voices.
+func apply_event_output_bus_from_authoring(live_event: CodaBrowserNode) -> void:
+	if live_event == null or _project == null:
+		return
+	var playback: CodaBrowserNode = _project.find_node_anywhere(live_event.id) as CodaBrowserNode
+	if playback == null:
+		return
+	playback.event_output_bus_id = live_event.event_output_bus_id
+	var voice_bus: String = resolve_bus_name_for_event(playback)
+	_apply_voice_bus_to_active_handles(live_event.id, voice_bus)
+
+
+func _apply_voice_bus_to_active_handles(event_id: String, voice_bus: String) -> void:
+	if event_id.is_empty():
+		return
+	var timeline_handle: CodaEventHandle = _timeline_dispatcher.active_handle_for_event(event_id)
+	if timeline_handle != null and timeline_handle._alive:
+		timeline_handle.params["_coda_voice_bus"] = voice_bus
+		_timeline_dispatcher.reroute_voices_for_event_output(timeline_handle)
+	for handle in _collect_alive_graph_handles_for_event(event_id):
+		handle.params["_coda_voice_bus"] = voice_bus
+		_graph_playback.reroute_voices_for_output_bus(handle, voice_bus)
+
+
+func _collect_alive_graph_handles_for_event(event_id: String) -> Array[CodaEventHandle]:
+	var out: Array[CodaEventHandle] = []
+	var seen: Dictionary = {}
+	for h in _active_handles.values():
+		var gh: CodaEventHandle = h as CodaEventHandle
+		if gh == null or not gh._alive or gh.is_timeline:
+			continue
+		if not _handle_matches_event_id(gh, event_id):
+			continue
+		if seen.has(gh):
+			continue
+		seen[gh] = true
+		out.append(gh)
+	for h in _graph_plan_resume_handles:
+		if h == null or not h._alive or h.is_timeline:
+			continue
+		if not _handle_matches_event_id(h, event_id):
+			continue
+		if seen.has(h):
+			continue
+		seen[h] = true
+		out.append(h)
+	return out
+
+
+func _handle_matches_event_id(handle: CodaEventHandle, event_id: String) -> bool:
+	if handle == null or handle.event_node == null:
+		return false
+	return String(handle.event_node.id) == event_id
+
+
+func get_project() -> CodaProject:
 	return _project
+
+
+func get_playback_bus_root() -> CodaBus:
+	if _project != null and _project.bus_root != null:
+		return _project.bus_root
+	var banks: Dictionary = _bank_registry.get_loaded_banks()
+	if banks.is_empty():
+		return null
+	for bank_id in banks.keys():
+		var entry: Dictionary = banks[bank_id]
+		var root: Variant = entry.get("bus_root", null)
+		if root is CodaBus:
+			return root as CodaBus
+	return null
+
+
+func get_bus_id_map() -> Dictionary:
+	return _bus_sync.get_bus_id_map()
+
+
+func _snapshot_sync_caller() -> int:
+	if is_editor_preview:
+		return CodaAudioBusSyncGateScript.SyncCaller.EditorPreview
+	return CodaAudioBusSyncGateScript.SyncCaller.GameplayAutoload
 
 
 func play(event_path: String, params: Dictionary = {}) -> CodaEventHandle:
@@ -322,6 +412,36 @@ func set_parameter(handle: CodaEventHandle, name_or_id: String, value: Variant) 
 	handle.param_values[param_id] = clamped
 	var notify_key: String = param.param_name if param != null else name_or_id
 	_maybe_notify_music_state(handle, notify_key)
+
+
+func get_property(handle: CodaEventHandle, key: String, default_value: Variant = null) -> Variant:
+	if handle == null or not is_instance_valid(handle):
+		return default_value
+	var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
+	if event == null:
+		return default_value
+	var val: Variant = CodaEventProperty.resolve_value(event.event_properties, key)
+	if val == null:
+		return default_value
+	return val
+
+
+func get_property_for_path(event_path: String, key: String, default_value: Variant = null) -> Variant:
+	var event: CodaBrowserNode = _resolve_event_node(event_path)
+	if event == null:
+		return default_value
+	var val: Variant = CodaEventProperty.resolve_value(event.event_properties, key)
+	if val == null:
+		return default_value
+	return val
+
+
+func _resolve_event_node(event_path: String) -> CodaBrowserNode:
+	var bank_resolved: Dictionary = _bank_registry.resolve_event(event_path)
+	var event_node: CodaBrowserNode = bank_resolved.get("node", null) as CodaBrowserNode
+	if event_node == null and _project != null:
+		event_node = CodaEventResolverScript.resolve(_project, event_path)
+	return event_node
 
 
 func _maybe_notify_music_state(handle: CodaEventHandle, name_or_id: String) -> void:

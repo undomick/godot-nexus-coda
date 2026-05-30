@@ -79,9 +79,17 @@ CodaGameBridge.emit_from_area("zone_entered", body, {"zone": "cave"})
 
 ## Parameters and music control
 
+Set-Parameters are written by gameplay and drive audio (switches, blends, modulation). Get-Properties are defined by the designer and read by gameplay (subtitles, radius, UI flags).
+
 ```gdscript
 var handle := Coda.play("music/exploration")
 Coda.set_parameter(handle, "intensity", 0.5)
+
+var radius: float = Coda.get_property(handle, "DamageRadius")
+var subtitle: String = str(Coda.get_property(handle, "SubtitleID"))
+
+# Without a running voice:
+var animate: bool = Coda.get_property_for_path("ui/click", "AnimateButton")
 
 CodaMusic.set_music("music/combat", 2000, "default")
 CodaMusic.stop_music("default", 1500)

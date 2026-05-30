@@ -4,6 +4,7 @@ extends RefCounted
 
 ## Parameter smoothing, globals, and per-voice modulation for CodaRuntime.
 
+const CodaBusSendRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_bus_send_runtime.gd")
 const CodaModulationScript := preload("res://addons/nexus_coda/domain/coda_modulation.gd")
 
 var _runtime: CodaRuntime = null
@@ -82,6 +83,7 @@ func apply_global_parameters() -> void:
 			continue
 		for gname in _global_params.keys():
 			apply_parameter_without_segment_notify(hh, String(gname), _global_params[gname])
+			_maybe_resync_send_buses(String(gname))
 	for h in _runtime.get_timeline_dispatchers().keys():
 		var th: CodaEventHandle = h as CodaEventHandle
 		if th == null or not th._alive:
@@ -90,6 +92,32 @@ func apply_global_parameters() -> void:
 			var gkey: String = String(gname)
 			apply_parameter_without_segment_notify(th, gkey, _global_params[gkey])
 			_runtime.notify_global_param_applied(th, gkey)
+			_maybe_resync_send_buses(gkey)
+
+
+func _maybe_resync_send_buses(param_key: String) -> void:
+	var project: CodaProject = _runtime.get_project()
+	if project == null:
+		return
+	var param_id: String = param_key
+	for h in _runtime.get_active_handles().values():
+		var hh: CodaEventHandle = h as CodaEventHandle
+		if hh == null or hh.event_node == null:
+			continue
+		var resolved: String = resolve_param_id(hh.event_node, param_key)
+		if not resolved.is_empty():
+			param_id = resolved
+			break
+	if not CodaBusSendRuntimeScript.project_uses_send_param(project, param_id):
+		return
+	_runtime.get_bus_sync().sync_buses(_collect_global_param_values())
+
+
+func _collect_global_param_values() -> Dictionary:
+	var out: Dictionary = {}
+	for k in _global_params.keys():
+		out[String(k)] = float(_global_params[k])
+	return out
 
 
 func apply_parameter_without_segment_notify(

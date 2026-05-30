@@ -17,11 +17,13 @@ const CodaEffectCatalogScript := preload(
 	"res://addons/nexus_coda/domain/effects/coda_effect_catalog.gd"
 )
 const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_bus_helper.gd")
+const CodaBusSendRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_bus_send_runtime.gd")
+const CodaVcaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_vca_runtime.gd")
 
 ## Returns dictionary { coda_bus_id (String) -> godot_bus_name (String) }.
 ## Pass [code]prune_unclaimed_buses = true[/code] from editor-only callers that own the whole bus list.
 static func sync_to_audio_server(
-	bus_root: CodaBus, prune_unclaimed_buses: bool = false
+	bus_root: CodaBus, prune_unclaimed_buses: bool = false, vcas: Array = [], param_values: Dictionary = {}
 ) -> Dictionary:
 	var map: Dictionary = {}
 	if bus_root == null:
@@ -31,12 +33,38 @@ static func sync_to_audio_server(
 		_prune_unclaimed_buses(claimed)
 	# Master always maps to Godot's index 0 ("Master"), regardless of the Coda bus name.
 	map[bus_root.id] = "Master"
-	_apply_master_settings(bus_root)
+	_apply_master_settings(bus_root, param_values)
 	for child in bus_root.children:
-		_sync_bus_recursive(child, "Master", map, bus_root)
+		_sync_bus_recursive(child, "Master", map, bus_root, param_values)
 	# Apply solo logic at the end (any bus marked solo silences others on the same level via mute).
 	_apply_solo_visibility(bus_root)
+	var vca_list: Array[CodaVca] = []
+	for v in vcas:
+		if v is CodaVca:
+			vca_list.append(v)
+	CodaVcaRuntimeScript.apply_vca_volumes(bus_root, vca_list, map)
 	return map
+
+
+## Id-to-name map only; does not touch AudioServer (safe when bus sync is gate-blocked).
+static func build_id_map(bus_root: CodaBus) -> Dictionary:
+	var map: Dictionary = {}
+	if bus_root == null:
+		return map
+	map[bus_root.id] = "Master"
+	for child in bus_root.children:
+		_map_id_recursive(child, map, bus_root)
+	return map
+
+
+static func godot_bus_name_for(b: CodaBus, bus_root: CodaBus) -> String:
+	return _godot_name_for_coda_bus(b, bus_root)
+
+
+static func _map_id_recursive(bus: CodaBus, map: Dictionary, bus_root: CodaBus) -> void:
+	map[bus.id] = _godot_name_for_coda_bus(bus, bus_root)
+	for child in bus.children:
+		_map_id_recursive(child, map, bus_root)
 
 
 static func _parent_of(root: CodaBus, child_id: String) -> CodaBus:
@@ -107,6 +135,9 @@ static func _prune_unclaimed_buses(claimed: Dictionary) -> void:
 		if CodaFxBusHelperScript.is_helper_bus(nm):
 			i -= 1
 			continue
+		if CodaBusSendRuntimeScript.is_helper_tap_bus(nm):
+			i -= 1
+			continue
 		if not claimed.has(nm):
 			AudioServer.remove_bus(i)
 			i = mini(i, AudioServer.get_bus_count() - 1)
@@ -114,13 +145,13 @@ static func _prune_unclaimed_buses(claimed: Dictionary) -> void:
 			i -= 1
 
 
-static func _apply_master_settings(master: CodaBus) -> void:
+static func _apply_master_settings(master: CodaBus, param_values: Dictionary = {}) -> void:
 	var idx: int = AudioServer.get_bus_index("Master")
 	if idx >= 0:
 		AudioServer.set_bus_volume_db(idx, master.volume_db)
 		AudioServer.set_bus_mute(idx, master.mute)
 		AudioServer.set_bus_bypass_effects(idx, master.bypass)
-	_apply_coda_bus_effects_to_godot_bus(idx, master)
+	_apply_coda_bus_effects_to_godot_bus(idx, master, master, param_values)
 
 
 static func _clear_godot_bus_effects(bus_idx: int) -> void:
@@ -131,7 +162,9 @@ static func _clear_godot_bus_effects(bus_idx: int) -> void:
 		AudioServer.remove_bus_effect(bus_idx, i)
 
 
-static func _apply_coda_bus_effects_to_godot_bus(bus_idx: int, bus: CodaBus) -> void:
+static func _apply_coda_bus_effects_to_godot_bus(
+	bus_idx: int, bus: CodaBus, bus_root: CodaBus, param_values: Dictionary = {}
+) -> void:
 	if bus_idx < 0 or bus == null:
 		return
 	_clear_godot_bus_effects(bus_idx)
@@ -139,11 +172,14 @@ static func _apply_coda_bus_effects_to_godot_bus(bus_idx: int, bus: CodaBus) -> 
 		var ae: AudioEffect = CodaEffectCatalogScript.build_audio_effect_from_slot(eff)
 		AudioServer.add_bus_effect(bus_idx, ae)
 		var slot: int = AudioServer.get_bus_effect_count(bus_idx) - 1
-		# Godot exposes per-slot bypass as the inverse "enabled" flag.
 		AudioServer.set_bus_effect_enabled(bus_idx, slot, not eff.bypass)
+	if bus.bus_kind == CodaBus.BusKind.MIX and bus_root != null:
+		CodaBusSendRuntimeScript.apply_bus_wet_sends(bus, bus_idx, bus_root, param_values)
 
 
-static func _sync_bus_recursive(bus: CodaBus, tree_parent_name: String, map: Dictionary, bus_root: CodaBus) -> void:
+static func _sync_bus_recursive(
+	bus: CodaBus, tree_parent_name: String, map: Dictionary, bus_root: CodaBus, param_values: Dictionary = {}
+) -> void:
 	var name: String = String(bus.bus_name).strip_edges()
 	if name.is_empty():
 		name = "Bus"
@@ -159,9 +195,9 @@ static func _sync_bus_recursive(bus: CodaBus, tree_parent_name: String, map: Dic
 	AudioServer.set_bus_bypass_effects(idx, bus.bypass)
 	map[bus.id] = name
 	var gidx: int = AudioServer.get_bus_index(name)
-	_apply_coda_bus_effects_to_godot_bus(gidx, bus)
+	_apply_coda_bus_effects_to_godot_bus(gidx, bus, bus_root, param_values)
 	for child in bus.children:
-		_sync_bus_recursive(child, name, map, bus_root)
+		_sync_bus_recursive(child, name, map, bus_root, param_values)
 
 
 static func _apply_solo_visibility(root: CodaBus) -> void:

@@ -38,6 +38,7 @@ var out_point_seconds: float = UNSET_WORK_POINT
 
 var _clip_index: Dictionary = {}
 var _clip_index_valid: bool = false
+var _clip_spatial: Array = []
 
 
 func _init() -> void:
@@ -58,8 +59,7 @@ func find_track(track_id: String) -> CodaTimelineTrack:
 
 
 func find_clip(clip_id: String) -> Dictionary:
-	if not _clip_index_valid:
-		_rebuild_clip_index()
+	_ensure_clip_index()
 	return _clip_index.get(clip_id, {}) as Dictionary
 
 
@@ -67,11 +67,45 @@ func invalidate_clip_index() -> void:
 	_clip_index_valid = false
 
 
+func clips_active_at(at_seconds: float) -> Array:
+	_ensure_clip_index()
+	var out: Array = []
+	for entry in _clip_spatial:
+		if at_seconds >= float(entry.get("start", 0.0)) and at_seconds < float(entry.get("end", 0.0)):
+			out.append(entry)
+	return out
+
+
+func clips_overlapping_range(from_seconds: float, to_seconds: float) -> Array:
+	if to_seconds <= from_seconds:
+		return []
+	_ensure_clip_index()
+	var out: Array = []
+	for entry in _clip_spatial:
+		var start: float = float(entry.get("start", 0.0))
+		var end: float = float(entry.get("end", 0.0))
+		if end <= from_seconds or start >= to_seconds:
+			continue
+		out.append(entry)
+	return out
+
+
+func _ensure_clip_index() -> void:
+	if not _clip_index_valid:
+		_rebuild_clip_index()
+
+
 func _rebuild_clip_index() -> void:
 	_clip_index.clear()
+	_clip_spatial.clear()
 	for t in tracks:
 		for c in t.clips:
 			_clip_index[c.id] = {"track": t, "clip": c}
+			var end: float = minf(c.start_seconds + c.duration_seconds, length_seconds)
+			_clip_spatial.append({"track": t, "clip": c, "start": c.start_seconds, "end": end})
+	_clip_spatial.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a.get("start", 0.0)) < float(b.get("start", 0.0))
+	)
 	_clip_index_valid = true
 
 

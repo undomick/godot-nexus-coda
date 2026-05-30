@@ -36,8 +36,11 @@ const PlayerPanelScript := preload(
 const TimelinePanelScript := preload(
 	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_panel.gd"
 )
-const CodaEditorShortcutsScript := preload(
-	"res://addons/nexus_coda/editor/shell/coda_editor_shortcuts.gd"
+const CodaEditorPreviewControllerScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_preview_controller.gd"
+)
+const CodaEditorShortcutRouterScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_shortcut_router.gd"
 )
 const CodaEditorSelectionRouterScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_editor_selection_router.gd"
@@ -65,10 +68,6 @@ const CodaEditorMenuActionsScript := preload(
 )
 const CodaEditorLayoutPersistenceScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_editor_layout_persistence.gd"
-)
-const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
-const CodaAudioBusSyncGateScript := preload(
-	"res://addons/nexus_coda/runtime/coda_audio_bus_sync_gate.gd"
 )
 
 const PANEL_BROWSER := &"browser"
@@ -149,7 +148,7 @@ var _fs_asset_import_boot_attempts: int = 0
 var _selection_router: CodaEditorSelectionRouter
 var _authoring_focus: CodaEditorAuthoringFocus
 var _editor_transport: CodaEditorTransport
-var _editor_runtime: CodaRuntime
+var _preview_controller: CodaEditorPreviewController
 var _pool_exhausted_slot: Callable = Callable()
 var _playhead_sync_slot: Callable = Callable()
 var _focused_panel_id: StringName = &""
@@ -226,58 +225,43 @@ func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey):
 		return
 	var k: InputEventKey = event as InputEventKey
-	var action: int = CodaEditorShortcutsScript.match_action(k)
-	match action:
-		CodaEditorShortcutsScript.Action.COMMAND_PALETTE:
-			_open_command_palette()
-			get_viewport().set_input_as_handled()
-		CodaEditorShortcutsScript.Action.SHORTCUT_SHEET:
-			_open_shortcut_sheet()
-			get_viewport().set_input_as_handled()
-		CodaEditorShortcutsScript.Action.NEW_PROJECT:
-			get_viewport().set_input_as_handled()
-			call_deferred(&"_session_new_async")
-		CodaEditorShortcutsScript.Action.OPEN_PROJECT:
-			get_viewport().set_input_as_handled()
-			call_deferred(&"_session_open_async")
-		CodaEditorShortcutsScript.Action.SAVE_PROJECT:
-			get_viewport().set_input_as_handled()
-			call_deferred(&"_session_save_async")
-		CodaEditorShortcutsScript.Action.SAVE_PROJECT_AS:
-			get_viewport().set_input_as_handled()
-			call_deferred(&"_session_save_as_async")
-		CodaEditorShortcutsScript.Action.BROWSER_RENAME:
-			if _browser_panel != null and _browser_panel.has_method(&"request_browser_rename"):
-				if _browser_panel.request_browser_rename():
-					get_viewport().set_input_as_handled()
-		CodaEditorShortcutsScript.Action.BROWSER_DELETE:
-			if _timeline_panel != null and _timeline_panel.has_method(&"request_timeline_delete"):
-				if _timeline_panel.call(&"request_timeline_delete"):
-					get_viewport().set_input_as_handled()
-					return
-			if _browser_panel != null and _browser_panel.has_method(&"request_browser_delete"):
-				if _browser_panel.request_browser_delete():
-					get_viewport().set_input_as_handled()
-		CodaEditorShortcutsScript.Action.FOCUS_BROWSER:
-			_focus_panel(PANEL_BROWSER)
-			get_viewport().set_input_as_handled()
-		CodaEditorShortcutsScript.Action.FOCUS_GRAPH:
-			_focus_panel(PANEL_GRAPH)
-			get_viewport().set_input_as_handled()
-		CodaEditorShortcutsScript.Action.FOCUS_TIMELINE:
-			_focus_panel(PANEL_TIMELINE)
-			get_viewport().set_input_as_handled()
-		CodaEditorShortcutsScript.Action.FOCUS_MIXER:
-			_focus_panel(PANEL_MIXER)
-			get_viewport().set_input_as_handled()
-		CodaEditorShortcutsScript.Action.FOCUS_PLAYER:
-			_focus_panel(PANEL_PLAYER)
-			get_viewport().set_input_as_handled()
-		CodaEditorShortcutsScript.Action.FOCUS_INSPECTOR:
-			_focus_panel(PANEL_INSPECTOR)
-			get_viewport().set_input_as_handled()
-		_:
-			pass
+	var handled: bool = CodaEditorShortcutRouterScript.match_and_route(k, {
+		&"open_command_palette": Callable(self, &"_open_command_palette"),
+		&"open_shortcut_sheet": Callable(self, &"_open_shortcut_sheet"),
+		&"new_project": Callable(self, &"_session_new_async"),
+		&"open_project": Callable(self, &"_session_open_async"),
+		&"save_project": Callable(self, &"_session_save_async"),
+		&"save_project_as": Callable(self, &"_session_save_as_async"),
+		&"browser_rename": Callable(self, &"_shortcut_browser_rename"),
+		&"timeline_delete": Callable(self, &"_shortcut_timeline_delete"),
+		&"browser_delete": Callable(self, &"_shortcut_browser_delete"),
+		&"focus_browser": func() -> void: _focus_panel(PANEL_BROWSER),
+		&"focus_graph": func() -> void: _focus_panel(PANEL_GRAPH),
+		&"focus_timeline": func() -> void: _focus_panel(PANEL_TIMELINE),
+		&"focus_mixer": func() -> void: _focus_panel(PANEL_MIXER),
+		&"focus_player": func() -> void: _focus_panel(PANEL_PLAYER),
+		&"focus_inspector": func() -> void: _focus_panel(PANEL_INSPECTOR),
+	})
+	if handled:
+		get_viewport().set_input_as_handled()
+
+
+func _shortcut_browser_rename() -> bool:
+	if _browser_panel != null and _browser_panel.has_method(&"request_browser_rename"):
+		return _browser_panel.request_browser_rename()
+	return false
+
+
+func _shortcut_timeline_delete() -> bool:
+	if _timeline_panel != null and _timeline_panel.has_method(&"request_timeline_delete"):
+		return bool(_timeline_panel.call(&"request_timeline_delete"))
+	return false
+
+
+func _shortcut_browser_delete() -> bool:
+	if _browser_panel != null and _browser_panel.has_method(&"request_browser_delete"):
+		return _browser_panel.request_browser_delete()
+	return false
 
 
 func _register_panels() -> void:
@@ -335,6 +319,12 @@ func _register_panels() -> void:
 	_authoring_focus.dock_manager = dm
 	_authoring_focus.graph_panel = _graph_panel
 	_authoring_focus.timeline_panel = _timeline_panel
+
+	_preview_controller = CodaEditorPreviewControllerScript.new()
+	_preview_controller.bind_host(self)
+	_preview_controller.bind_panels(_timeline_panel, _player_panel)
+	_pool_exhausted_slot = Callable(self, &"_on_runtime_voice_pool_exhausted")
+	_preview_controller.set_pool_exhausted_handler(_pool_exhausted_slot)
 
 	_setup_shell_helpers()
 
@@ -496,6 +486,10 @@ func _wire_browser_to_others() -> void:
 			var mode_slot := Callable(self, &"_on_inspector_authoring_mode_changed")
 			if not _inspector_panel.authoring_mode_changed.is_connected(mode_slot):
 				_inspector_panel.authoring_mode_changed.connect(mode_slot)
+		if _inspector_panel.has_signal(&"event_output_bus_changed"):
+			var bus_slot := Callable(_preview_controller, &"on_event_output_bus_changed")
+			if not _inspector_panel.event_output_bus_changed.is_connected(bus_slot):
+				_inspector_panel.event_output_bus_changed.connect(bus_slot)
 	if _player_panel != null:
 		_player_panel.attach_browser_panel(_browser_panel)
 	if _graph_panel != null and _browser_panel.has_method(&"get_project"):
@@ -743,8 +737,7 @@ func _focus_panel(panel_id: StringName) -> void:
 
 
 func _wire_runtime_to_panels() -> void:
-	_ensure_editor_runtime()
-	var rt: CodaRuntime = _editor_runtime
+	var rt: CodaRuntime = _preview_controller.ensure_runtime()
 	if rt == null:
 		return
 	if _graph_panel != null:
@@ -763,10 +756,7 @@ func _wire_runtime_to_panels() -> void:
 			Callable(self, &"pick_audio_bus_layout_export_path_async"),
 			Callable(self, &"complete_audio_bus_layout_export")
 		)
-	if not _pool_exhausted_slot.is_valid():
-		_pool_exhausted_slot = Callable(self, &"_on_runtime_voice_pool_exhausted")
-	if not rt.voice_pool_exhausted.is_connected(_pool_exhausted_slot):
-		rt.voice_pool_exhausted.connect(_pool_exhausted_slot)
+	_preview_controller.wire_pool_exhausted_signal()
 
 
 func _on_runtime_voice_pool_exhausted(_context: Dictionary) -> void:
@@ -774,35 +764,15 @@ func _on_runtime_voice_pool_exhausted(_context: Dictionary) -> void:
 
 
 func _ensure_editor_runtime() -> void:
-	if _editor_runtime != null and is_instance_valid(_editor_runtime):
-		return
-	_editor_runtime = CodaRuntimeScript.new() as CodaRuntime
-	_editor_runtime.name = "CodaEditorRuntime"
-	_editor_runtime.is_editor_preview = true
-	add_child(_editor_runtime)
-	CodaAudioBusSyncGateScript.register_editor_preview(_editor_runtime.get_instance_id())
+	_preview_controller.ensure_runtime()
 
 
 func _dispose_editor_runtime() -> void:
-	if _editor_runtime != null and is_instance_valid(_editor_runtime):
-		if (
-			_pool_exhausted_slot.is_valid()
-			and _editor_runtime.voice_pool_exhausted.is_connected(_pool_exhausted_slot)
-		):
-			_editor_runtime.voice_pool_exhausted.disconnect(_pool_exhausted_slot)
-		CodaAudioBusSyncGateScript.unregister_editor_preview(_editor_runtime.get_instance_id())
-		_editor_runtime.stop_all()
-		_editor_runtime.queue_free()
-	_editor_runtime = null
+	_preview_controller.dispose_runtime()
 
 
 func on_gameplay_play_started() -> void:
-	if _timeline_panel != null and _timeline_panel.has_method(&"stop_all_previews"):
-		_timeline_panel.call(&"stop_all_previews")
-	if _player_panel != null and _player_panel.has_method(&"stop_current_voice"):
-		_player_panel.stop_current_voice()
-	if _editor_runtime != null and is_instance_valid(_editor_runtime):
-		_editor_runtime.stop_all()
+	_preview_controller.on_gameplay_play_started()
 
 
 func on_gameplay_play_stopped() -> void:
@@ -818,24 +788,16 @@ func _unwire_runtime_from_panels() -> void:
 	):
 		_player_panel.playhead_changed.disconnect(_playhead_sync_slot)
 	_playhead_sync_slot = Callable()
-	if _timeline_panel != null and _timeline_panel.has_method(&"stop_all_previews"):
-		_timeline_panel.call(&"stop_all_previews")
-	if _player_panel != null and _player_panel.has_method(&"stop_current_voice"):
-		_player_panel.stop_current_voice()
-	if _editor_runtime != null and is_instance_valid(_editor_runtime):
-		_editor_runtime.stop_all()
+	_preview_controller.stop_panel_previews()
+	_preview_controller.stop_runtime_voices()
 	if _project_session != null:
 		_project_session.bind_project_signals(null)
 
 
 func _push_project_to_runtime(state: Variant) -> void:
-	_ensure_editor_runtime()
-	if _editor_runtime == null:
+	if state == null:
 		return
-	if state is CodaState:
-		_editor_runtime.set_project((state as CodaState).duplicate_for_playback())
-	else:
-		_editor_runtime.set_project(state)
+	_preview_controller.push_project(state)
 
 
 func _build_menus() -> void:

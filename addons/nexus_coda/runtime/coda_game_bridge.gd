@@ -41,12 +41,12 @@ func _connect_project_loaded() -> void:
 		return
 	if not _runtime.project_loaded.is_connected(_on_project_loaded):
 		_runtime.project_loaded.connect(_on_project_loaded)
-	var state: CodaState = _runtime.get_project()
+	var state: CodaProject = _runtime.get_project()
 	if state != null:
 		bind_from_project(state)
 
 
-func _on_project_loaded(state: CodaState) -> void:
+func _on_project_loaded(state: CodaProject) -> void:
 	bind_from_project(state)
 
 
@@ -57,11 +57,11 @@ func bind_rules(rules: Array) -> void:
 			_rules.append(r as CodaGameSyncRule)
 
 
-func bind_from_project(state: CodaState) -> void:
-	if state == null:
+func bind_from_project(project: CodaProject) -> void:
+	if project == null:
 		_rules.clear()
 		return
-	bind_rules(state.game_sync_rules)
+	bind_rules(project.game_sync_rules)
 
 
 func bind_from_loaded_project() -> void:

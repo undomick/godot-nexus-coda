@@ -6,15 +6,22 @@ extends RefCounted
 ## AudioServer buses (one Godot bus per CodaBus, parented appropriately) so voices route correctly.
 
 const CodaTrackEffectScript := preload("res://addons/nexus_coda/domain/effects/coda_track_effect.gd")
+const CodaBusSendScript := preload("res://addons/nexus_coda/domain/coda_bus_send.gd")
+
+enum BusKind { MIX = 0, RETURN = 1, VCA = 2 }
 
 var id: String
 var bus_name: String = "Bus"
+## MIX = group/mix bus, RETURN = effect return (reverb hall), VCA = marker only (see project vcas).
+var bus_kind: BusKind = BusKind.MIX
 var volume_db: float = 0.0
 var mute: bool = false
 var solo: bool = false
 var bypass: bool = false
-## If empty, routing uses the tree parent (same as Godot layout from nesting). Otherwise sends to this bus id (must be a strict ancestor toward Master).
+## Bus link toward Master (Godot set_bus_send). Not a wet send; see [member wet_sends].
 var send_target_id: String = ""
+## Parallel wet sends to return buses (FMOD-style aux).
+var wet_sends: Array[CodaBusSend] = []
 var children: Array[CodaBus] = []
 var effects: Array[CodaTrackEffect] = []
 
@@ -66,6 +73,21 @@ func remove_child_by_id(target_id: String) -> bool:
 	return false
 
 
+func find_wet_send_by_id(send_id: String) -> CodaBusSend:
+	for s in wet_sends:
+		if s.id == send_id:
+			return s
+	return null
+
+
+func collect_return_buses(into: Array[CodaBus] = []) -> Array[CodaBus]:
+	if bus_kind == BusKind.RETURN:
+		into.append(self)
+	for c in children:
+		c.collect_return_buses(into)
+	return into
+
+
 func clone_keep_id() -> CodaBus:
 	var b: CodaBus = CodaBus.new(bus_name)
 	b.id = id
@@ -73,7 +95,10 @@ func clone_keep_id() -> CodaBus:
 	b.mute = mute
 	b.solo = solo
 	b.bypass = bypass
+	b.bus_kind = bus_kind
 	b.send_target_id = send_target_id
+	for ws in wet_sends:
+		b.wet_sends.append(ws.clone_keep_id())
 	for e in effects:
 		b.effects.append(e.clone_keep_id())
 	for c in children:
@@ -89,7 +114,9 @@ func to_dictionary() -> Dictionary:
 		"mute": mute,
 		"solo": solo,
 		"bypass": bypass,
+		"bus_kind": bus_kind,
 		"send_target_id": send_target_id,
+		"wet_sends": CodaBusSendScript.sends_to_array(wet_sends),
 		"effects": effects.map(func(e: CodaTrackEffect) -> Dictionary: return e.to_dictionary()),
 		"children": children.map(func(c: CodaBus) -> Dictionary: return c.to_dictionary()),
 	}
@@ -104,7 +131,9 @@ static func from_dictionary(data: Dictionary) -> CodaBus:
 	b.mute = bool(data.get("mute", false))
 	b.solo = bool(data.get("solo", false))
 	b.bypass = bool(data.get("bypass", false))
+	b.bus_kind = clampi(int(data.get("bus_kind", BusKind.MIX)), 0, BusKind.VCA)
 	b.send_target_id = str(data.get("send_target_id", ""))
+	b.wet_sends = CodaBusSendScript.sends_from_array(data.get("wet_sends", []) as Array)
 	for e_raw in data.get("effects", []) as Array:
 		if e_raw is Dictionary:
 			b.effects.append(CodaTrackEffectScript.from_dictionary(e_raw))

@@ -33,6 +33,8 @@ var _complete_bus_layout_export: Callable = Callable()
 var _strips_by_bus_id: Dictionary = {}
 var _meter_accumulator: float = 0.0
 var _selected_bus_id: String = ""
+var _vca_picker: OptionButton
+var _vca_volume: SpinBox
 
 
 func _ready() -> void:
@@ -86,6 +88,32 @@ func _ready() -> void:
 	export_bus_btn.pressed.connect(_on_export_bus_layout_pressed)
 	_toolbar.add_child(export_bus_btn)
 
+	var sep_vca := VSeparator.new()
+	_toolbar.add_child(sep_vca)
+
+	var vca_label := Label.new()
+	vca_label.text = "VCA:"
+	vca_label.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
+	_toolbar.add_child(vca_label)
+
+	_vca_picker = OptionButton.new()
+	_vca_picker.custom_minimum_size = Vector2(100, 0)
+	_vca_picker.item_selected.connect(_on_vca_picked)
+	_toolbar.add_child(_vca_picker)
+
+	_vca_volume = SpinBox.new()
+	_vca_volume.prefix = "dB "
+	_vca_volume.min_value = -60.0
+	_vca_volume.max_value = 12.0
+	_vca_volume.step = 0.1
+	_vca_volume.value_changed.connect(_on_vca_volume_changed)
+	_toolbar.add_child(_vca_volume)
+
+	var add_vca_btn := Button.new()
+	add_vca_btn.text = "+ VCA"
+	add_vca_btn.pressed.connect(_on_add_vca_pressed)
+	_toolbar.add_child(add_vca_btn)
+
 	_empty_state = CodaEmptyStateScript.new()
 	_empty_state.title_text = "Mixer ready"
 	_empty_state.body_text = "Open or create a project to see its bus tree."
@@ -113,16 +141,13 @@ func attach_project(project: CodaState) -> void:
 	if _project != null and is_instance_valid(_project):
 		if _project.structure_changed.is_connected(_on_mixer_structure_changed):
 			_project.structure_changed.disconnect(_on_mixer_structure_changed)
-		if _project.project_dirty.is_connected(_on_mixer_structure_changed):
-			_project.project_dirty.disconnect(_on_mixer_structure_changed)
 	_project = project
 	if _project != null:
 		if not _project.structure_changed.is_connected(_on_mixer_structure_changed):
 			_project.structure_changed.connect(_on_mixer_structure_changed)
-		if not _project.project_dirty.is_connected(_on_mixer_structure_changed):
-			_project.project_dirty.connect(_on_mixer_structure_changed)
 	_rebuild_strips()
 	_refresh_snapshot_picker()
+	_refresh_vca_picker()
 
 
 func attach_runtime(runtime: CodaRuntime) -> void:
@@ -163,7 +188,9 @@ func _mirror_project_buses(prune_unclaimed: bool) -> Dictionary:
 		CodaAudioBusSyncGateScript.SyncCaller.EditorMixer, prune_unclaimed
 	):
 		return {}
-	return CodaAudioBusMirrorScript.sync_to_audio_server(_project.bus_root, prune_unclaimed)
+	return CodaAudioBusMirrorScript.sync_to_audio_server(
+		_project.bus_root, prune_unclaimed, _project.vcas, {}
+	)
 
 
 func _on_mixer_structure_changed() -> void:
@@ -205,6 +232,7 @@ func _rebuild_strips() -> void:
 	_empty_state.visible = false
 	_scroll.visible = true
 	var flat: Array[CodaBus] = _project.bus_root.collect_flat([])
+	var return_buses: Array[CodaBus] = _project.bus_root.collect_return_buses([])
 	# Make sure Godot's audio server has the matching buses (also returns id->name mapping).
 	# Do not prune non-Coda Godot buses during normal mixer editing (would delete the game's
 	# native AudioServer layout). Pruning runs only before explicit bus-layout export.
@@ -223,14 +251,16 @@ func _rebuild_strips() -> void:
 			String(name_map.get(b.id, b.bus_name)),
 			is_master,
 			send_targets,
-			default_send
+			default_send,
+			return_buses
 		)
 		strip.volume_changed.connect(_on_strip_volume_changed)
 		strip.mute_toggled.connect(_on_strip_mute_toggled)
 		strip.solo_toggled.connect(_on_strip_solo_toggled)
 		strip.bypass_toggled.connect(_on_strip_bypass_toggled)
 		strip.bus_renamed.connect(_on_strip_bus_renamed)
-		strip.send_target_changed.connect(_on_strip_send_target_changed)
+		strip.bus_link_changed.connect(_on_strip_bus_link_changed)
+		strip.wet_send_level_changed.connect(_on_strip_wet_send_level_changed)
 		strip.context_action_requested.connect(_on_strip_context_action_requested)
 		strip.bus_strip_selected.connect(_on_bus_strip_selected)
 		_strips_by_bus_id[b.id] = strip
@@ -346,10 +376,17 @@ func _previous_flat_send_targets(bus: CodaBus, flat: Array[CodaBus]) -> Array[Co
 	return out
 
 
-func _on_strip_send_target_changed(bus_id: String, target_bus_id: String) -> void:
+func _on_strip_bus_link_changed(bus_id: String, target_bus_id: String) -> void:
 	if _project == null:
 		return
 	_project.update_bus_send_target(bus_id, target_bus_id)
+	_mirror_project_buses(false)
+
+
+func _on_strip_wet_send_level_changed(bus_id: String, send_id: String, level: float) -> void:
+	if _project == null:
+		return
+	_project.update_wet_send_level(bus_id, send_id, level)
 	_mirror_project_buses(false)
 
 
@@ -403,11 +440,25 @@ func _on_strip_context_action_requested(bus_id: String, action: StringName) -> v
 			_project.remove_bus(bus_id)
 		&"reset_volume":
 			_project.reset_bus_volume(bus_id)
-			# Push to Godot immediately and update the strip UI without a rebuild.
 			_on_strip_volume_changed(bus_id, 0.0)
 			var strip: CodaBusStrip = _strips_by_bus_id.get(bus_id, null) as CodaBusStrip
 			if strip != null:
 				strip.set_volume_no_signal(0.0)
+		&"add_return_bus":
+			var ret: CodaBus = _project.add_return_bus(bus_id, "Reverb Return")
+			if ret != null:
+				_mirror_project_buses(false)
+				_rebuild_strips()
+		&"add_wet_send":
+			var returns: Array[CodaBus] = _project.bus_root.collect_return_buses([])
+			if returns.is_empty():
+				var ret2: CodaBus = _project.add_return_bus(_project.bus_root.id, "Reverb Return")
+				if ret2 != null:
+					returns = [ret2]
+			if not returns.is_empty():
+				_project.add_wet_send(bus_id, returns[0].id, 0.25)
+				_mirror_project_buses(false)
+				_rebuild_strips()
 		_:
 			pass
 
@@ -450,6 +501,7 @@ func _sync_strip_ui_from_project(name_map: Dictionary) -> void:
 	if _project == null or _project.bus_root == null:
 		return
 	var flat: Array[CodaBus] = _project.bus_root.collect_flat([])
+	var return_buses: Array[CodaBus] = _project.bus_root.collect_return_buses([])
 	for b in flat:
 		var strip: CodaBusStrip = _strips_by_bus_id.get(b.id, null) as CodaBusStrip
 		if strip == null:
@@ -465,7 +517,8 @@ func _sync_strip_ui_from_project(name_map: Dictionary) -> void:
 			String(name_map.get(b.id, b.bus_name)),
 			is_master,
 			send_targets,
-			default_send
+			default_send,
+			return_buses
 		)
 
 
@@ -513,3 +566,61 @@ func _on_export_bus_layout_pressed() -> void:
 		NexusCodaLog.warn("mixer", "Could not export bus layout (%s)." % error_string(err))
 	else:
 		NexusCodaLog.info("mixer", 'Exported bus layout to "%s"' % saved_path)
+
+
+func _refresh_vca_picker() -> void:
+	if _vca_picker == null:
+		return
+	_vca_picker.clear()
+	if _project == null or _project.vcas.is_empty():
+		_vca_picker.add_item("(none)")
+		_vca_picker.set_item_disabled(0, true)
+		if _vca_volume != null:
+			_vca_volume.editable = false
+		return
+	for i in _project.vcas.size():
+		var v: CodaVca = _project.vcas[i]
+		_vca_picker.add_item(v.vca_name)
+		_vca_picker.set_item_metadata(i, v.id)
+	if _vca_volume != null:
+		_vca_volume.editable = true
+		_on_vca_picked(_vca_picker.selected)
+
+
+func _on_vca_picked(_idx: int) -> void:
+	if _project == null or _vca_picker == null or _vca_volume == null:
+		return
+	if _vca_picker.item_count == 0 or _vca_picker.get_item_text(0) == "(none)":
+		return
+	var sel: int = _vca_picker.selected
+	if sel < 0 or sel >= _vca_picker.item_count:
+		return
+	var vca_id: String = str(_vca_picker.get_item_metadata(sel))
+	var v: CodaVca = _project.find_vca_by_id(vca_id)
+	if v == null:
+		return
+	_vca_volume.set_value_no_signal(v.volume_db)
+
+
+func _on_vca_volume_changed(value: float) -> void:
+	if _project == null or _vca_picker == null:
+		return
+	var vca_id: String = str(_vca_picker.get_item_metadata(_vca_picker.selected))
+	if vca_id.is_empty():
+		return
+	_project.update_vca_volume(vca_id, float(value))
+	_mirror_project_buses(false)
+
+
+func _on_add_vca_pressed() -> void:
+	if _project == null:
+		return
+	var v: CodaVca = _project.add_vca("VCA %d" % (_project.vcas.size() + 1))
+	if v == null:
+		return
+	var flat: Array[CodaBus] = _project.bus_root.collect_flat([])
+	for b in flat:
+		if b.id != _project.bus_root.id and b.bus_kind == CodaBus.BusKind.MIX:
+			_project.set_vca_controls_bus(v.id, b.id, true)
+	_refresh_vca_picker()
+	_mirror_project_buses(false)

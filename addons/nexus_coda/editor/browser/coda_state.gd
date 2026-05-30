@@ -1,9 +1,6 @@
 class_name CodaState
-extends RefCounted
+extends CodaProject
 
-const CodaProjectSerializerScript := preload(
-	"res://addons/nexus_coda/domain/coda_project_serializer.gd"
-)
 const CodaEventsStoreScript := preload(
 	"res://addons/nexus_coda/editor/browser/stores/coda_events_store.gd"
 )
@@ -19,103 +16,21 @@ const CodaBanksStoreScript := preload(
 const CodaEffectsMutatorScript := preload(
 	"res://addons/nexus_coda/editor/browser/stores/coda_effects_mutator.gd"
 )
-const CodaProjectIndexScript := preload(
-	"res://addons/nexus_coda/domain/coda_project_index.gd"
-)
-
-signal structure_changed
-## Bus volume/mute/bypass and other non-structural edits; marks unsaved state without forcing full UI rebuilds.
-signal project_dirty
-
-var events_root: CodaBrowserNode
-var assets_root: CodaBrowserNode
-var bus_root: CodaBus
-var snapshots: Array[CodaSnapshot] = []
-var banks: Array[CodaBank] = []
-var game_sync_rules: Array[CodaGameSyncRule] = []
-
-## Project-level appearance metadata; the editor window applies these on load.
-## `theme_mode` is "dark" or "light"; `accent_color` overrides the default Coda accent.
-var theme_mode: String = "dark"
-var accent_color: Color = Color(0.42, 0.74, 1.00, 1.0)
 
 var _events_store: CodaEventsStore
 var _assets_store: CodaAssetsStore
 var _mixer_store: CodaMixerStore
 var _banks_store: CodaBanksStore
 var _effects_mutator: CodaEffectsMutator
-var _project_index: CodaProjectIndex
 
 
 func _init() -> void:
+	super._init()
 	_banks_store = CodaBanksStoreScript.new(self)
 	_events_store = CodaEventsStoreScript.new(self, _banks_store)
 	_assets_store = CodaAssetsStoreScript.new(self)
 	_mixer_store = CodaMixerStoreScript.new(self)
 	_effects_mutator = CodaEffectsMutatorScript.new(self)
-	_project_index = CodaProjectIndexScript.new()
-	_project_index.bind_state(self)
-	clear_to_empty_project()
-
-
-func clear_to_empty_project() -> void:
-	events_root = CodaBrowserNode.new("Events", CodaBrowserNode.Kind.FOLDER)
-	assets_root = CodaBrowserNode.new("Assets", CodaBrowserNode.Kind.FOLDER)
-	bus_root = CodaBus.make_default_master()
-	snapshots.clear()
-	banks.clear()
-	game_sync_rules.clear()
-	theme_mode = "dark"
-	accent_color = Color(0.42, 0.74, 1.00, 1.0)
-	structure_changed.emit()
-
-
-func set_theme_appearance(p_theme_mode: String, p_accent_color: Color) -> void:
-	var normalized: String = p_theme_mode.strip_edges().to_lower()
-	if normalized != "light" and normalized != "dark":
-		normalized = "dark"
-	theme_mode = normalized
-	accent_color = p_accent_color
-	project_dirty.emit()
-
-
-func find_node_anywhere(target_id: String) -> CodaBrowserNode:
-	var indexed: CodaBrowserNode = _project_index.find_node_anywhere(target_id)
-	if indexed != null:
-		return indexed
-	return null
-
-
-func find_clip_anywhere(clip_id: String) -> Dictionary:
-	return _project_index.find_clip(clip_id)
-
-
-## Immutable playback copy; editor preview runtime must not share live authoring state.
-func duplicate_for_playback() -> CodaState:
-	var copy := CodaState.new()
-	CodaProjectSerializerScript.load_from_dictionary(
-		copy, CodaProjectSerializerScript.to_dictionary(self)
-	)
-	_copy_event_work_areas(events_root, copy.events_root)
-	return copy
-
-
-func _copy_event_work_areas(src_root: CodaBrowserNode, dst_root: CodaBrowserNode) -> void:
-	if src_root == null or dst_root == null:
-		return
-	if (
-		src_root.kind == CodaBrowserNode.Kind.EVENT
-		and dst_root.kind == CodaBrowserNode.Kind.EVENT
-	):
-		var src_tl: CodaEventTimeline = src_root.event_timeline
-		var dst_tl: CodaEventTimeline = dst_root.event_timeline
-		if src_tl != null and dst_tl != null:
-			const Transport := preload("res://addons/nexus_coda/domain/coda_timeline_transport.gd")
-			Transport.copy_preview_transport(src_tl, dst_tl)
-	for src_child in src_root.children:
-		var dst_child: CodaBrowserNode = dst_root.find_by_id(src_child.id)
-		if dst_child != null:
-			_copy_event_work_areas(src_child, dst_child)
 
 
 func parent_of(target_id: String) -> CodaBrowserNode:
@@ -171,6 +86,18 @@ func set_event_authoring_data(
 
 func set_event_parameters(event_id: String, parameters: Array[CodaEventParameter]) -> String:
 	return _events_store.set_event_parameters(event_id, parameters)
+
+
+func set_event_properties(event_id: String, properties: Array[CodaEventProperty]) -> String:
+	return _events_store.set_event_properties(event_id, properties)
+
+
+func set_event_tags(event_id: String, tags: PackedStringArray) -> String:
+	return _events_store.set_event_tags(event_id, tags)
+
+
+func set_event_notes(event_id: String, notes: String) -> String:
+	return _events_store.set_event_notes(event_id, notes)
 
 
 func notify_event_graph_changed(event_id: String) -> String:
@@ -237,6 +164,30 @@ func update_bus_send_target(bus_id: String, target_bus_id: String) -> void:
 	_mixer_store.update_bus_send_target(bus_id, target_bus_id)
 
 
+func update_wet_send_level(bus_id: String, send_id: String, level: float) -> void:
+	_mixer_store.update_wet_send_level(bus_id, send_id, level)
+
+
+func add_wet_send(source_bus_id: String, return_bus_id: String, level: float = 0.0) -> CodaBusSend:
+	return _mixer_store.add_wet_send(source_bus_id, return_bus_id, level)
+
+
+func add_return_bus(parent_id: String, bus_name: String = "Reverb Return") -> CodaBus:
+	return _mixer_store.add_return_bus(parent_id, bus_name)
+
+
+func add_vca(p_name: String = "VCA") -> CodaVca:
+	return _mixer_store.add_vca(p_name)
+
+
+func update_vca_volume(vca_id: String, volume_db: float) -> void:
+	_mixer_store.update_vca_volume(vca_id, volume_db)
+
+
+func set_vca_controls_bus(vca_id: String, bus_id: String, enabled: bool) -> void:
+	_mixer_store.set_vca_controls_bus(vca_id, bus_id, enabled)
+
+
 func move_bus_before_in_tree(drag_bus_id: String, before_bus_id: String) -> bool:
 	return _mixer_store.move_bus_before_in_tree(drag_bus_id, before_bus_id)
 
@@ -283,18 +234,6 @@ func remove_snapshot(snapshot_id: String) -> bool:
 
 func rename_snapshot(snapshot_id: String, new_name: String) -> bool:
 	return _mixer_store.rename_snapshot(snapshot_id, new_name)
-
-
-func find_snapshot_by_id(snapshot_id: String) -> CodaSnapshot:
-	return _mixer_store.find_snapshot_by_id(snapshot_id)
-
-
-func find_snapshot_by_name(p_name: String) -> CodaSnapshot:
-	return _mixer_store.find_snapshot_by_name(p_name)
-
-
-func apply_snapshot(snapshot_id: String) -> bool:
-	return _mixer_store.apply_snapshot(snapshot_id)
 
 
 func add_bank(p_name: String = "Bank") -> CodaBank:
@@ -399,11 +338,3 @@ func set_bus_effect_params(bus_id: String, effect_id: String, params: Dictionary
 
 func set_bus_effect_bypass(bus_id: String, effect_id: String, on: bool) -> void:
 	_effects_mutator.set_bypass(CodaEffectsMutator.Scope.BUS, "", bus_id, effect_id, on)
-
-
-func to_dictionary() -> Dictionary:
-	return CodaProjectSerializerScript.to_dictionary(self)
-
-
-func load_from_dictionary(data: Dictionary) -> void:
-	CodaProjectSerializerScript.load_from_dictionary(self, data)

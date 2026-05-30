@@ -143,7 +143,8 @@ func set_footer_visible(on: bool) -> void:
 
 
 func bind_effects_array(effects: Array[CodaTrackEffect]) -> void:
-	_last_structure_sig = ""
+	if _effects_ref != effects:
+		_last_structure_sig = ""
 	_effects_ref = effects
 	if not _ready_done or _list == null:
 		_pending_bind = true
@@ -301,11 +302,21 @@ func _sync_rows_from_data() -> void:
 			var sl: HSlider = pair.get("slider") as HSlider
 			var spb: SpinBox = pair.get("spinbox") as SpinBox
 			var cur: float = float(params.get(k, sl.value if sl != null else 0.0))
-			if sl != null and not sl.has_focus() and not is_equal_approx(sl.value, cur):
+			if sl != null and not _slider_is_being_edited(sl) \
+					and not is_equal_approx(sl.value, cur):
 				sl.set_value_no_signal(cur)
 			if spb != null and not spb.get_line_edit().has_focus() \
+					and not _slider_is_being_edited(spb) \
 					and not is_equal_approx(spb.value, cur):
 				spb.set_value_no_signal(cur)
+
+
+static func _slider_is_being_edited(ctrl: Control) -> bool:
+	if ctrl == null or not is_instance_valid(ctrl):
+		return false
+	if not (Input.get_mouse_button_mask() & MOUSE_BUTTON_MASK_LEFT):
+		return false
+	return ctrl.get_global_rect().has_point(ctrl.get_global_mouse_position())
 
 
 # ---------- Effect card ----------

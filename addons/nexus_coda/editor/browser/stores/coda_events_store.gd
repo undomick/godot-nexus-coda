@@ -92,7 +92,39 @@ func set_event_parameters(event_id: String, parameters: Array[CodaEventParameter
 	node.event_parameters.clear()
 	for p in parameters:
 		node.event_parameters.append(p.clone_keep_id())
-	_state.structure_changed.emit()
+	_state.project_dirty.emit()
+	return ""
+
+
+func set_event_properties(event_id: String, properties: Array[CodaEventProperty]) -> String:
+	var err_msg: String = CodaEventProperty.validate_list(properties)
+	if not err_msg.is_empty():
+		return err_msg
+	var node: CodaBrowserNode = _state.events_root.find_by_id(event_id)
+	if node == null or node.kind != CodaBrowserNode.Kind.EVENT:
+		return "Not an event in the events tree."
+	node.event_properties.clear()
+	for p in properties:
+		node.event_properties.append(p.clone_keep_id())
+	_state.project_dirty.emit()
+	return ""
+
+
+func set_event_tags(event_id: String, tags: PackedStringArray) -> String:
+	var node: CodaBrowserNode = _state.events_root.find_by_id(event_id)
+	if node == null or node.kind != CodaBrowserNode.Kind.EVENT:
+		return "Not an event in the events tree."
+	node.event_tags = CodaBrowserNode.normalize_tags(tags)
+	_state.project_dirty.emit()
+	return ""
+
+
+func set_event_notes(event_id: String, notes: String) -> String:
+	var node: CodaBrowserNode = _state.events_root.find_by_id(event_id)
+	if node == null or node.kind != CodaBrowserNode.Kind.EVENT:
+		return "Not an event in the events tree."
+	node.event_notes = notes
+	_state.project_dirty.emit()
 	return ""
 
 
@@ -196,6 +228,13 @@ func delete_events_node(target_id: String) -> String:
 	return ""
 
 
+func _event_params_from_dict(data: Dictionary) -> Array:
+	var raw: Variant = data.get("event_set_parameters", data.get("event_parameters", []))
+	if raw is Array:
+		return raw
+	return []
+
+
 func _parent_recursive(parent: CodaBrowserNode, target_id: String) -> CodaBrowserNode:
 	return CodaBrowserTreeDropScript.parent_of_node(parent, target_id)
 
@@ -203,12 +242,16 @@ func _parent_recursive(parent: CodaBrowserNode, target_id: String) -> CodaBrowse
 func _capture_event_duplicate_ids(data: Dictionary) -> Dictionary:
 	var out := {
 		"param_ids": [],
+		"property_ids": [],
 		"graph_node_ids": [],
 		"clip_ids": _capture_timeline_clip_ids_from_dict(data.get("event_timeline", null)),
 	}
-	for pd in data.get("event_parameters", []) as Array:
+	for pd in _event_params_from_dict(data) as Array:
 		if pd is Dictionary:
 			(out["param_ids"] as Array).append(str((pd as Dictionary).get("id", "")))
+	for prop_raw in data.get("event_properties", []) as Array:
+		if prop_raw is Dictionary:
+			(out["property_ids"] as Array).append(str((prop_raw as Dictionary).get("id", "")))
 	var graph_raw: Variant = data.get("event_graph", null)
 	if graph_raw is Dictionary:
 		for n_raw in (graph_raw as Dictionary).get("nodes", []) as Array:
@@ -219,9 +262,12 @@ func _capture_event_duplicate_ids(data: Dictionary) -> Dictionary:
 
 func _strip_ids_for_event_duplicate(data: Dictionary) -> void:
 	data.erase("id")
-	for pd in data.get("event_parameters", []) as Array:
+	for pd in _event_params_from_dict(data) as Array:
 		if pd is Dictionary:
 			(pd as Dictionary).erase("id")
+	for prop_raw in data.get("event_properties", []) as Array:
+		if prop_raw is Dictionary:
+			(prop_raw as Dictionary).erase("id")
 	for md in data.get("event_modulations", []) as Array:
 		if md is Dictionary:
 			(md as Dictionary).erase("id")

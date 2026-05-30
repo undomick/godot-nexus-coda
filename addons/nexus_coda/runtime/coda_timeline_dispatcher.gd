@@ -266,6 +266,15 @@ func finalize_handle(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	_finish_teardown(handle, was_alive)
 
 
+func reroute_voices_for_event_output(handle: CodaEventHandle) -> void:
+	if handle == null:
+		return
+	var dispatchers: Dictionary = _runtime.get_timeline_dispatchers()
+	if not dispatchers.has(handle):
+		return
+	_lane_voice.reroute_voices_for_event_output(handle, dispatchers[handle])
+
+
 func resync_preview_for_event(event_id: String) -> void:
 	if event_id.is_empty():
 		return
@@ -289,7 +298,7 @@ func resync_preview_for_event(event_id: String) -> void:
 		return
 	d["layout_sig"] = sig
 	CodaTimelineClipDispatchScript.reset_bookkeeping(d)
-	_lane_voice.stop_voices(d, handle)
+	_lane_voice.stop_voices_dry(d, handle)
 	_clip_dispatch.prime_overlapping_voices(handle, d, timeline, handle.timeline_cursor_seconds)
 	_sync_segment_voice_after_prime(handle, d, timeline)
 	_clip_dispatch.refresh_voice_output_levels(handle, d, timeline)

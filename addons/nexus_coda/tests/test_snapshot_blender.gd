@@ -12,6 +12,7 @@ static func run() -> int:
 	failed += _test_blend_marks_project_dirty()
 	failed += _test_blend_interrupt_commits_previous()
 	failed += _test_blend_mute_applies_immediately()
+	failed += _test_blend_respects_sync_gate()
 	return failed
 
 
@@ -129,4 +130,16 @@ static func _test_blend_mute_applies_immediately() -> int:
 	if bus.volume_db <= -11.999:
 		push_error("volume should still be blending, got %s" % bus.volume_db)
 		return 1
+	return 0
+
+
+static func _test_blend_respects_sync_gate() -> int:
+	const Gate := preload("res://addons/nexus_coda/runtime/coda_audio_bus_sync_gate.gd")
+	const Writer := preload("res://addons/nexus_coda/runtime/coda_audio_server_writer.gd")
+	Gate.reset_for_tests()
+	Gate.set_gameplay_active(true)
+	if Writer.set_bus_volume_db(Gate.SyncCaller.EditorPreview, "Master", -20.0):
+		push_error("snapshot blend writer path should honor gameplay gate")
+		return 1
+	Gate.reset_for_tests()
 	return 0

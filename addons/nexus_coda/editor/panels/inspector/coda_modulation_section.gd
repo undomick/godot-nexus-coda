@@ -62,6 +62,9 @@ func set_event(event: Variant) -> void:
 		_empty_hint.visible = false
 		_add_button.disabled = true
 		return
+	if _selected_event != null and bn.id == _selected_event.id:
+		_selected_event = bn
+		return
 	_selected_event = bn
 	_add_button.disabled = false
 	_load_drafts_from_selection()

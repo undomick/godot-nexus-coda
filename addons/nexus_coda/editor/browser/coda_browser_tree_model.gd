@@ -49,6 +49,14 @@ func build_tree_branch(
 static func branch_visible(node: CodaBrowserNode, filter_lower: String) -> bool:
 	if filter_lower.is_empty():
 		return true
+	if filter_lower.begins_with("#"):
+		var tag_query: String = CodaBrowserNode.normalize_tag(filter_lower)
+		if node.kind == CodaBrowserNode.Kind.EVENT and CodaBrowserNode.event_has_tag(node, tag_query):
+			return true
+		for c in node.children:
+			if branch_visible(c, filter_lower):
+				return true
+		return false
 	if node.name.to_lower().contains(filter_lower):
 		return true
 	for c in node.children:

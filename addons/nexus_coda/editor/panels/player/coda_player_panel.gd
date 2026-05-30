@@ -25,6 +25,9 @@ const CodaSectionHeaderScript := preload(
 const CodaEventTransportBarScript := preload(
 	"res://addons/nexus_coda/editor/panels/inspector/coda_event_transport_bar.gd"
 )
+const CodaEditorPlaybackSyncScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_playback_sync.gd"
+)
 const CodaPlayerParamGridScript := preload(
 	"res://addons/nexus_coda/editor/panels/player/coda_player_param_grid.gd"
 )
@@ -634,13 +637,7 @@ func _on_param_grid_value_changed(param_id: String, value: Variant) -> void:
 
 
 func _resolve_playback_event(source: CodaBrowserNode) -> CodaBrowserNode:
-	if _runtime == null or source == null:
-		return source
-	var project: CodaState = _runtime.get_project()
-	if project == null:
-		return source
-	var playback: CodaBrowserNode = project.find_node_anywhere(source.id)
-	return playback if playback != null else source
+	return CodaEditorPlaybackSyncScript.resolve_playback_event(_runtime, source)
 
 
 func _sync_playback_work_area() -> void:

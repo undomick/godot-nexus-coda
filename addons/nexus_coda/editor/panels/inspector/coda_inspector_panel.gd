@@ -3,6 +3,7 @@ class_name CodaInspectorPanel
 extends VBoxContainer
 
 signal authoring_mode_changed(node: Variant)
+signal event_output_bus_changed(node: Variant)
 
 ## Stacked-section inspector for the currently selected browser node.
 ## Layout:
@@ -18,6 +19,15 @@ const CodaEmptyStateScript := preload("res://addons/nexus_coda/editor/theme/coda
 const CodaSectionHeaderScript := preload("res://addons/nexus_coda/editor/theme/coda_section_header.gd")
 const CodaParametersSectionScript := preload(
 	"res://addons/nexus_coda/editor/panels/inspector/coda_parameters_section.gd"
+)
+const CodaEventTagsSectionScript := preload(
+	"res://addons/nexus_coda/editor/panels/inspector/coda_event_tags_section.gd"
+)
+const CodaEventNotesSectionScript := preload(
+	"res://addons/nexus_coda/editor/panels/inspector/coda_event_notes_section.gd"
+)
+const CodaEventPropertiesSectionScript := preload(
+	"res://addons/nexus_coda/editor/panels/inspector/coda_event_properties_section.gd"
 )
 const CodaModulationSectionScript := preload(
 	"res://addons/nexus_coda/editor/panels/inspector/coda_modulation_section.gd"
@@ -58,6 +68,9 @@ var _event_stack: VBoxContainer
 var _authoring_mode_row: HBoxContainer
 var _authoring_mode_picker: OptionButton
 var _parameters_section: CodaParametersSection
+var _tags_section: CodaEventTagsSection
+var _notes_section: CodaEventNotesSection
+var _properties_section: CodaEventPropertiesSection
 var _modulation_section: CodaModulationSection
 var _banks_section: CodaBanksSection
 var _output_placeholder: Label
@@ -138,6 +151,15 @@ func _ready() -> void:
 	_parameters_section = CodaParametersSectionScript.new()
 	_event_stack.add_child(_parameters_section)
 
+	_properties_section = CodaEventPropertiesSectionScript.new()
+	_event_stack.add_child(_properties_section)
+
+	_tags_section = CodaEventTagsSectionScript.new()
+	_event_stack.add_child(_tags_section)
+
+	_notes_section = CodaEventNotesSectionScript.new()
+	_event_stack.add_child(_notes_section)
+
 	_event_stack.add_child(HSeparator.new())
 
 	_modulation_section = CodaModulationSectionScript.new()
@@ -203,6 +225,12 @@ func attach_project(project: CodaState) -> void:
 	_project = project
 	if _parameters_section != null:
 		_parameters_section.attach_project(project)
+	if _properties_section != null:
+		_properties_section.attach_project(project)
+	if _tags_section != null:
+		_tags_section.attach_project(project)
+	if _notes_section != null:
+		_notes_section.attach_project(project)
 	if _modulation_section != null:
 		_modulation_section.attach_project(project)
 	if _banks_section != null:
@@ -253,6 +281,12 @@ func apply_view_state(state: Dictionary) -> void:
 		_refresh_output_bus_picker(bn)
 		if _parameters_section != null:
 			_parameters_section.set_event(bn)
+		if _properties_section != null:
+			_properties_section.set_event(bn)
+		if _tags_section != null:
+			_tags_section.set_event(bn)
+		if _notes_section != null:
+			_notes_section.set_event(bn)
 		if _modulation_section != null:
 			_modulation_section.set_event(bn)
 		if _banks_section != null:
@@ -260,6 +294,12 @@ func apply_view_state(state: Dictionary) -> void:
 	else:
 		if _parameters_section != null:
 			_parameters_section.set_event(null)
+		if _properties_section != null:
+			_properties_section.set_event(null)
+		if _tags_section != null:
+			_tags_section.set_event(null)
+		if _notes_section != null:
+			_notes_section.set_event(null)
 		if _modulation_section != null:
 			_modulation_section.set_event(null)
 		if _banks_section != null:
@@ -404,6 +444,7 @@ func _on_output_bus_picked(idx: int) -> void:
 	else:
 		_selected_node.event_output_bus_id = str(_output_bus_picker.get_item_metadata(idx))
 	_project.project_dirty.emit()
+	event_output_bus_changed.emit(_selected_node)
 
 
 func _show_empty() -> void:

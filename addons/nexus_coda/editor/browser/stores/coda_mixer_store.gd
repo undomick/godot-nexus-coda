@@ -1,6 +1,9 @@
 class_name CodaMixerStore
 extends RefCounted
 
+const CodaBusSendScript := preload("res://addons/nexus_coda/domain/coda_bus_send.gd")
+const CodaTrackEffectScript := preload("res://addons/nexus_coda/domain/effects/coda_track_effect.gd")
+
 var _state: CodaState
 
 
@@ -53,6 +56,98 @@ func update_bus_send_target(bus_id: String, target_bus_id: String) -> void:
 			return
 	b.send_target_id = tid
 	_state.structure_changed.emit()
+
+
+func update_bus_kind(bus_id: String, kind: int) -> void:
+	var b: CodaBus = _state.bus_root.find_by_id(bus_id)
+	if b == null or b.id == _state.bus_root.id:
+		return
+	b.bus_kind = clampi(kind, CodaBus.BusKind.MIX, CodaBus.BusKind.VCA)
+	_state.structure_changed.emit()
+
+
+func add_wet_send(source_bus_id: String, return_bus_id: String, level: float = 0.0) -> CodaBusSend:
+	var b: CodaBus = _state.bus_root.find_by_id(source_bus_id)
+	var ret: CodaBus = _state.bus_root.find_by_id(return_bus_id)
+	if b == null or ret == null or ret.bus_kind != CodaBus.BusKind.RETURN:
+		return null
+	if b.bus_kind != CodaBus.BusKind.MIX:
+		return null
+	var send := CodaBusSendScript.new()
+	send.target_bus_id = return_bus_id
+	send.level = clampf(level, 0.0, 1.0)
+	b.wet_sends.append(send)
+	_state.structure_changed.emit()
+	return send
+
+
+func update_wet_send_level(source_bus_id: String, send_id: String, level: float) -> void:
+	var b: CodaBus = _state.bus_root.find_by_id(source_bus_id)
+	if b == null:
+		return
+	var send: CodaBusSend = b.find_wet_send_by_id(send_id)
+	if send == null:
+		return
+	send.level = clampf(level, 0.0, 1.0)
+	_state.project_dirty.emit()
+
+
+func remove_wet_send(source_bus_id: String, send_id: String) -> void:
+	var b: CodaBus = _state.bus_root.find_by_id(source_bus_id)
+	if b == null:
+		return
+	for i in range(b.wet_sends.size()):
+		if b.wet_sends[i].id == send_id:
+			b.wet_sends.remove_at(i)
+			_state.structure_changed.emit()
+			return
+
+
+func add_return_bus(parent_id: String, bus_name: String = "Reverb Return") -> CodaBus:
+	var b: CodaBus = add_child_bus(parent_id, bus_name)
+	if b == null:
+		return null
+	b.bus_kind = CodaBus.BusKind.RETURN
+	var rev := CodaTrackEffectScript.new()
+	rev.type = CodaTrackEffect.Type.REVERB
+	rev.params = {"dry": 0.0, "wet": 1.0, "room_size": 0.7}
+	b.effects.append(rev)
+	return b
+
+
+func add_vca(p_name: String = "VCA") -> CodaVca:
+	var v := CodaVca.new(p_name)
+	_state.vcas.append(v)
+	_state.project_dirty.emit()
+	return v
+
+
+func update_vca_volume(vca_id: String, volume_db: float) -> void:
+	var v: CodaVca = _state.find_vca_by_id(vca_id)
+	if v == null:
+		return
+	v.volume_db = volume_db
+	_state.project_dirty.emit()
+
+
+func update_vca_mute(vca_id: String, mute: bool) -> void:
+	var v: CodaVca = _state.find_vca_by_id(vca_id)
+	if v == null:
+		return
+	v.mute = mute
+	_state.project_dirty.emit()
+
+
+func set_vca_controls_bus(vca_id: String, bus_id: String, enabled: bool) -> void:
+	var v: CodaVca = _state.find_vca_by_id(vca_id)
+	if v == null:
+		return
+	if enabled:
+		if bus_id not in v.controlled_bus_ids:
+			v.controlled_bus_ids.append(bus_id)
+	else:
+		v.controlled_bus_ids.erase(bus_id)
+	_state.project_dirty.emit()
 
 
 func move_bus_before_in_tree(drag_bus_id: String, before_bus_id: String) -> bool:
@@ -135,6 +230,7 @@ func remove_bus(bus_id: String) -> bool:
 	if not _state.bus_root.remove_child_by_id(bus_id):
 		return false
 	_sanitize_send_targets_after_bus_removed(bus_id)
+	_sanitize_wet_sends_after_bus_removed(bus_id)
 	_state.structure_changed.emit()
 	return true
 
@@ -207,12 +303,16 @@ func rename_bus(bus_id: String, new_name: String) -> bool:
 func add_snapshot(p_name: String = "Snapshot") -> CodaSnapshot:
 	var s: CodaSnapshot = CodaSnapshot.new(p_name)
 	for b in _state.bus_root.collect_flat():
+		var send_levels: Dictionary = {}
+		for ws in b.wet_sends:
+			send_levels[ws.id] = {"level": ws.level}
 		s.bus_overrides[b.id] = {
 			"volume_db": b.volume_db,
 			"mute": b.mute,
 			"solo": b.solo,
 			"bypass": b.bypass,
 			"send_target_id": b.send_target_id,
+			"wet_sends": send_levels,
 		}
 	_state.snapshots.append(s)
 	_state.project_dirty.emit()
@@ -269,8 +369,22 @@ func apply_snapshot(snapshot_id: String) -> bool:
 		b.solo = bool(entry.get("solo", b.solo))
 		b.bypass = bool(entry.get("bypass", b.bypass))
 		b.send_target_id = str(entry.get("send_target_id", b.send_target_id))
+		_apply_snapshot_wet_sends(b, entry)
 	_state.project_dirty.emit()
 	return true
+
+
+func _apply_snapshot_wet_sends(bus: CodaBus, entry: Dictionary) -> void:
+	var raw: Variant = entry.get("wet_sends", null)
+	if raw == null:
+		return
+	if raw is Dictionary:
+		for send_id in raw.keys():
+			var send: CodaBusSend = bus.find_wet_send_by_id(str(send_id))
+			if send == null:
+				continue
+			var ov: Dictionary = raw[send_id] as Dictionary
+			send.level = clampf(float(ov.get("level", send.level)), 0.0, 1.0)
 
 
 func _parent_bus_find(root: CodaBus, child_id: String) -> CodaBus:
@@ -304,6 +418,18 @@ func _bus_is_strict_ancestor(ancestor_id: String, descendant_id: String) -> bool
 			return true
 		cur_id = p.id
 	return false
+
+
+func _sanitize_wet_sends_after_bus_removed(removed_bus_id: String) -> void:
+	var rid: String = String(removed_bus_id).strip_edges()
+	if rid.is_empty() or _state.bus_root == null:
+		return
+	for b in _state.bus_root.collect_flat([]):
+		var kept: Array[CodaBusSend] = []
+		for ws in b.wet_sends:
+			if String(ws.target_bus_id).strip_edges() != rid:
+				kept.append(ws)
+		b.wet_sends = kept
 
 
 func _sanitize_send_targets_after_bus_removed(removed_bus_id: String) -> void:
@@ -372,7 +498,10 @@ func _clone_bus_new_ids_build(src: CodaBus, id_remap: Dictionary) -> CodaBus:
 	b.mute = src.mute
 	b.solo = src.solo
 	b.bypass = src.bypass
+	b.bus_kind = src.bus_kind
 	b.send_target_id = src.send_target_id
+	for ws in src.wet_sends:
+		b.wet_sends.append(ws.clone_new_id())
 	for e in src.effects:
 		b.effects.append(e.clone_new_id())
 	for c in src.children:

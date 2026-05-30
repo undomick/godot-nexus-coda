@@ -3,21 +3,21 @@ extends RefCounted
 
 ## Lazy id lookups for browser nodes and timeline clips. Rebuild on structure_changed.
 
-var _state: CodaState = null
+var _project: CodaProject = null
 var _node_by_id: Dictionary = {}
 var _clip_by_id: Dictionary = {}
 var _dirty: bool = true
 
 
-func bind_state(state: CodaState) -> void:
-	if _state != null and is_instance_valid(_state):
-		if _state.structure_changed.is_connected(_mark_dirty):
-			_state.structure_changed.disconnect(_mark_dirty)
-	_state = state
+func bind_project(project: CodaProject) -> void:
+	if _project != null and is_instance_valid(_project):
+		if _project.structure_changed.is_connected(_mark_dirty):
+			_project.structure_changed.disconnect(_mark_dirty)
+	_project = project
 	_dirty = true
-	if _state != null:
-		if not _state.structure_changed.is_connected(_mark_dirty):
-			_state.structure_changed.connect(_mark_dirty)
+	if _project != null:
+		if not _project.structure_changed.is_connected(_mark_dirty):
+			_project.structure_changed.connect(_mark_dirty)
 
 
 func find_node_anywhere(target_id: String) -> CodaBrowserNode:
@@ -35,13 +35,13 @@ func _mark_dirty() -> void:
 
 
 func _ensure_built() -> void:
-	if not _dirty or _state == null:
+	if not _dirty or _project == null:
 		return
 	_node_by_id.clear()
 	_clip_by_id.clear()
-	_index_browser_subtree(_state.events_root)
-	_index_browser_subtree(_state.assets_root)
-	_index_event_clips(_state.events_root)
+	_index_browser_subtree(_project.events_root)
+	_index_browser_subtree(_project.assets_root)
+	_index_event_clips(_project.events_root)
 	_dirty = false
 
 

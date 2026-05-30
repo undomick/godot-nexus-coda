@@ -3,6 +3,10 @@ class_name CodaTimelineLaneVoice
 extends RefCounted
 
 const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_bus_helper.gd")
+const CodaVoiceWetLayersScript := preload("res://addons/nexus_coda/runtime/coda_voice_wet_layers.gd")
+const CodaSpatialVoiceRuntimeScript := preload(
+	"res://addons/nexus_coda/runtime/coda_spatial_voice_runtime.gd"
+)
 const CodaEffectCatalogScript := preload(
 	"res://addons/nexus_coda/domain/effects/coda_effect_catalog.gd"
 )
@@ -75,12 +79,29 @@ func spawn_lane_voice(handle: CodaEventHandle, d: Dictionary, entry: Dictionary)
 	player.pitch_scale = float(entry.get("pitch_scale", 1.0)) * float(
 		handle.params.get("pitch_scale", 1.0)
 	)
+	CodaSpatialVoiceRuntimeScript.apply_from_meta(player, player.volume_db)
 	var clip_end: float = float(entry.get("timeline_clip_end_seconds", -1.0))
 	if clip_end > 0.0:
 		player.set_meta(&"_coda_clip_timeline_end", clip_end)
 	if needs_source_extend and stream_offset > 0.001:
 		player.set_meta(&"_coda_timeline_restart_offset", stream_offset)
 	player.play(maxf(0.0, float(entry.get("stream_offset_seconds", 0.0))))
+	var track_sends: Array[CodaBusSend] = entry.get("track_wet_sends", []) as Array
+	var event_sends: Array[CodaBusSend] = []
+	if handle.event_node is CodaBrowserNode:
+		event_sends = (handle.event_node as CodaBrowserNode).event_wet_sends
+	var merged_sends: Array[CodaBusSend] = CodaVoiceWetLayersScript.merge_sends(
+		event_sends, track_sends
+	)
+	CodaVoiceWetLayersScript.spawn_wet_layers(
+		_runtime,
+		handle,
+		player,
+		d,
+		clip_id,
+		merged_sends,
+		handle.param_values_smoothed
+	)
 	if _timeline_music != null:
 		_timeline_music.apply_music_fade_in(handle, player)
 	if handle._paused:
@@ -240,6 +261,41 @@ func _release_fx_bus_with_tail(p: AudioStreamPlayer) -> void:
 		CodaFxBusHelperScript.schedule_destroy_after_tail(nm, tail_s, _runtime)
 	else:
 		CodaFxBusHelperScript.destroy_if_ours(nm)
+
+
+func reroute_voices_for_event_output(handle: CodaEventHandle, d: Dictionary) -> void:
+	var timeline: CodaEventTimeline = d.get("timeline", null) as CodaEventTimeline
+	var voices: Dictionary = d.get("voices", {})
+	for sound_key in voices.keys():
+		var key_str: String = str(sound_key)
+		if key_str.contains("_wet_"):
+			continue
+		var p: AudioStreamPlayer = voices[sound_key] as AudioStreamPlayer
+		if p == null or not is_instance_valid(p):
+			continue
+		var track_output_bus_id: String = ""
+		if timeline != null:
+			var info: Dictionary = timeline.find_clip(key_str)
+			var track: CodaTimelineTrack = info.get("track", null) as CodaTimelineTrack
+			if track != null:
+				track_output_bus_id = track.output_bus_id
+		var send_bus: String = _send_bus_for_track(handle, track_output_bus_id)
+		_apply_player_send_bus(p, send_bus)
+
+
+func _apply_player_send_bus(player: AudioStreamPlayer, send_bus: String) -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	var send_nm: String = String(send_bus).strip_edges()
+	if send_nm.is_empty() or AudioServer.get_bus_index(send_nm) < 0:
+		send_nm = "Master"
+	if player.has_meta(&"_coda_fx_bus"):
+		var fx_nm: String = String(player.get_meta(&"_coda_fx_bus", ""))
+		var fx_idx: int = AudioServer.get_bus_index(fx_nm)
+		if fx_idx >= 0:
+			AudioServer.set_bus_send(fx_idx, send_nm)
+		return
+	player.bus = send_nm
 
 
 func _send_bus_for_track(handle: CodaEventHandle, track_output_bus_id: String) -> String:

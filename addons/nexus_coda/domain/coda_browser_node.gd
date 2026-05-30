@@ -9,6 +9,7 @@ enum AuthoringMode { GRAPH = 0, TIMELINE = 1 }
 
 const CodaEventGraphScript := preload("res://addons/nexus_coda/domain/coda_event_graph.gd")
 const CodaModulationScript := preload("res://addons/nexus_coda/domain/coda_modulation.gd")
+const CodaBusSendScript := preload("res://addons/nexus_coda/domain/coda_bus_send.gd")
 const CodaEventTimelineScript := preload(
 	"res://addons/nexus_coda/domain/timeline/coda_event_timeline.gd"
 )
@@ -23,8 +24,14 @@ var asset_source_path: String = ""
 var event_def_version: int = 3
 ## Kind.EVENT: which model should the runtime use to schedule this event.
 var event_authoring_mode: AuthoringMode = AuthoringMode.GRAPH
-## Kind.EVENT: designer-defined parameters (gameplay will set these at runtime later).
+## Kind.EVENT: Set-Parameters (gameplay writes at runtime via Coda.set_parameter()).
 var event_parameters: Array[CodaEventParameter] = []
+## Kind.EVENT: editor-only tags for browser filtering (not exported to banks).
+var event_tags: PackedStringArray = PackedStringArray()
+## Kind.EVENT: editor-only free-form notes (not exported to banks).
+var event_notes: String = ""
+## Kind.EVENT: Get-Properties (designer defaults; gameplay reads via Coda.get_property()).
+var event_properties: Array[CodaEventProperty] = []
 ## Kind.EVENT: legacy flat list, kept for backwards-compatible reads. Phase 3 always migrates to event_graph on load.
 var event_audio_paths: PackedStringArray = PackedStringArray()
 ## Kind.EVENT: node graph driving playback (Phase 3+).
@@ -35,6 +42,8 @@ var event_timeline: CodaEventTimeline = null
 var event_modulations: Array[CodaModulation] = []
 ## Kind.EVENT: id of the CodaBus this event routes to. Empty = master.
 var event_output_bus_id: String = ""
+## Kind.EVENT: wet sends to return buses (parallel to output bus).
+var event_wet_sends: Array[CodaBusSend] = []
 ## Kind.EVENT: parameter name that drives segment switches on the Segments track. Empty = default list.
 var event_music_segment_param: String = ""
 var children: Array[CodaBrowserNode] = []
@@ -51,6 +60,34 @@ func _init(p_name: String = "Node", p_kind: Kind = Kind.FOLDER) -> void:
 
 static func _generate_id() -> String:
 	return "%s_%d_%d" % [str(Time.get_ticks_usec()), randi(), randi()]
+
+
+static func normalize_tag(raw: String) -> String:
+	return raw.strip_edges().trim_prefix("#").to_lower()
+
+
+static func normalize_tags(raw_tags: PackedStringArray) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	var seen: Dictionary = {}
+	for t in raw_tags:
+		var n: String = normalize_tag(str(t))
+		if n.is_empty() or seen.has(n):
+			continue
+		seen[n] = true
+		out.append(n)
+	return out
+
+
+static func event_has_tag(event: CodaBrowserNode, tag_query: String) -> bool:
+	if event == null:
+		return false
+	var q: String = normalize_tag(tag_query)
+	if q.is_empty():
+		return false
+	for t in event.event_tags:
+		if normalize_tag(str(t)) == q:
+			return true
+	return false
 
 
 func is_folder() -> bool:
@@ -109,9 +146,17 @@ func to_dictionary() -> Dictionary:
 	if kind == Kind.EVENT:
 		d["event_def_version"] = event_def_version
 		d["event_authoring_mode"] = int(event_authoring_mode)
-		d["event_parameters"] = event_parameters.map(
+		d["event_set_parameters"] = event_parameters.map(
 			func(p: CodaEventParameter) -> Dictionary: return p.to_dictionary()
 		)
+		if not event_tags.is_empty():
+			d["event_tags"] = Array(event_tags)
+		if not event_notes.is_empty():
+			d["event_notes"] = event_notes
+		if not event_properties.is_empty():
+			d["event_properties"] = event_properties.map(
+				func(p: CodaEventProperty) -> Dictionary: return p.to_dictionary()
+			)
 		# Persist legacy field for forward-compat tools and as a fallback if the graph is absent on read.
 		d["event_audio_paths"] = Array(event_audio_paths)
 		if event_graph != null:
@@ -122,6 +167,8 @@ func to_dictionary() -> Dictionary:
 			func(m: CodaModulation) -> Dictionary: return m.to_dictionary()
 		)
 		d["event_output_bus_id"] = event_output_bus_id
+		if not event_wet_sends.is_empty():
+			d["event_wet_sends"] = CodaBusSendScript.sends_to_array(event_wet_sends)
 		if not event_music_segment_param.is_empty():
 			d["event_music_segment_param"] = event_music_segment_param
 	return d
@@ -155,9 +202,16 @@ static func from_dictionary(data: Dictionary) -> CodaBrowserNode:
 			_:
 				node.event_authoring_mode = AuthoringMode.GRAPH
 		node.event_parameters.clear()
-		for pd in data.get("event_parameters", []) as Array:
+		var params_raw: Variant = data.get("event_set_parameters", data.get("event_parameters", []))
+		for pd in params_raw as Array:
 			if pd is Dictionary:
 				node.event_parameters.append(CodaEventParameter.from_dictionary(pd))
+		node.event_tags = normalize_tags(_tags_from_dict(data))
+		node.event_notes = str(data.get("event_notes", ""))
+		node.event_properties.clear()
+		for prop_raw in data.get("event_properties", []) as Array:
+			if prop_raw is Dictionary:
+				node.event_properties.append(CodaEventProperty.from_dictionary(prop_raw))
 		node.event_audio_paths.clear()
 		var paths_raw: Variant = data.get("event_audio_paths", [])
 		if paths_raw is Array:
@@ -181,9 +235,19 @@ static func from_dictionary(data: Dictionary) -> CodaBrowserNode:
 			if md is Dictionary:
 				node.event_modulations.append(CodaModulationScript.from_dictionary(md))
 		node.event_output_bus_id = str(data.get("event_output_bus_id", "")).strip_edges()
+		node.event_wet_sends = CodaBusSendScript.sends_from_array(data.get("event_wet_sends", []) as Array)
 		node.event_music_segment_param = str(data.get("event_music_segment_param", "")).strip_edges()
 		node.event_def_version = max(node.event_def_version, 3)
 	for child_data in data.get("children", []) as Array:
 		if child_data is Dictionary:
 			node.children.append(from_dictionary(child_data))
 	return node
+
+
+static func _tags_from_dict(data: Dictionary) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	var tags_raw: Variant = data.get("event_tags", [])
+	if tags_raw is Array:
+		for t in tags_raw:
+			out.append(str(t))
+	return out

@@ -2,14 +2,15 @@
 class_name CodaProjectSerializer
 extends RefCounted
 
-## Serializes and hydrates [CodaState] project documents (.ncoda).
+## Serializes and hydrates [CodaProject] / [CodaState] project documents (.ncoda).
 
 const CodaGameSyncRuleScript := preload(
 	"res://addons/nexus_coda/domain/coda_game_sync_rule.gd"
 )
+const CodaVcaScript := preload("res://addons/nexus_coda/domain/coda_vca.gd")
 
 
-static func to_dictionary(state: CodaState) -> Dictionary:
+static func to_dictionary(state: CodaProject) -> Dictionary:
 	var snaps_arr: Array = []
 	for s in state.snapshots:
 		snaps_arr.append(s.to_dictionary())
@@ -19,11 +20,15 @@ static func to_dictionary(state: CodaState) -> Dictionary:
 	var rules_arr: Array = []
 	for r in state.game_sync_rules:
 		rules_arr.append(r.to_dictionary())
+	var vcas_arr: Array = []
+	for v in state.vcas:
+		vcas_arr.append(v.to_dictionary())
 	return {
-		"version": 5,
+		"version": 6,
 		"events": state.events_root.to_dictionary(),
 		"assets": state.assets_root.to_dictionary(),
 		"buses": state.bus_root.to_dictionary() if state.bus_root != null else CodaBus.make_default_master().to_dictionary(),
+		"vcas": vcas_arr,
 		"snapshots": snaps_arr,
 		"banks": banks_arr,
 		"game_sync_rules": rules_arr,
@@ -34,7 +39,7 @@ static func to_dictionary(state: CodaState) -> Dictionary:
 	}
 
 
-static func load_from_dictionary(state: CodaState, data: Dictionary) -> void:
+static func load_from_dictionary(state: CodaProject, data: Dictionary) -> void:
 	var ev: Variant = data.get("events", {})
 	if ev is Dictionary:
 		state.events_root = CodaBrowserNode.from_dictionary(ev)
@@ -50,6 +55,10 @@ static func load_from_dictionary(state: CodaState, data: Dictionary) -> void:
 		state.bus_root = CodaBus.from_dictionary(buses_raw)
 	else:
 		state.bus_root = CodaBus.make_default_master()
+	state.vcas.clear()
+	for v_raw in data.get("vcas", []) as Array:
+		if v_raw is Dictionary:
+			state.vcas.append(CodaVcaScript.from_dictionary(v_raw))
 	state.snapshots.clear()
 	for s_raw in data.get("snapshots", []) as Array:
 		if s_raw is Dictionary:

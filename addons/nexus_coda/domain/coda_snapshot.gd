@@ -4,12 +4,12 @@ extends RefCounted
 
 ## Snapshot of mixer state. Only buses listed in `bus_overrides` are touched on apply()
 ## (so partial snapshots are possible). Apply blends from current state to the snapshot
-## values over `blend_ms` (Phase 5 MVP: instant; Phase 7 may add an interpolated apply).
+## values over `blend_ms` via [CodaSnapshotBlender].
 
 var id: String
 var snapshot_name: String = "Snapshot"
 var blend_ms: int = 0
-## Map of bus_id (String) -> { "volume_db", "mute", "solo", "bypass", "send_target_id" }
+## Map of bus_id (String) -> { "volume_db", "mute", "solo", "bypass", "send_target_id", "wet_sends" }
 var bus_overrides: Dictionary = {}
 
 
@@ -35,14 +35,17 @@ func to_dictionary() -> Dictionary:
 	var entries: Array = []
 	for bus_id in bus_overrides.keys():
 		var ov: Dictionary = bus_overrides[bus_id] as Dictionary
-		entries.append({
+		var row: Dictionary = {
 			"bus_id": bus_id,
 			"volume_db": float(ov.get("volume_db", 0.0)),
 			"mute": bool(ov.get("mute", false)),
 			"solo": bool(ov.get("solo", false)),
 			"bypass": bool(ov.get("bypass", false)),
 			"send_target_id": str(ov.get("send_target_id", "")),
-		})
+		}
+		if ov.has("wet_sends"):
+			row["wet_sends"] = ov.get("wet_sends")
+		entries.append(row)
 	return {
 		"id": id,
 		"name": snapshot_name,
@@ -71,4 +74,6 @@ static func from_dictionary(data: Dictionary) -> CodaSnapshot:
 			"bypass": bool(entry.get("bypass", false)),
 			"send_target_id": str(entry.get("send_target_id", "")),
 		}
+		if entry.has("wet_sends"):
+			s.bus_overrides[bus_id]["wet_sends"] = entry.get("wet_sends")
 	return s

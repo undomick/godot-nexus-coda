@@ -54,6 +54,7 @@ var _delete_target_id: String = ""
 
 var _rebuild_queued: bool = false
 var _suppress_tree_selection_emit: bool = false
+var _mouse_drove_selection_emit: bool = false
 var _tree_model: CodaBrowserTreeModel = CodaBrowserTreeModelScript.new()
 
 
@@ -91,6 +92,7 @@ func _ready() -> void:
 	add_child(_tree)
 
 	_tree.item_selected.connect(_on_item_selected)
+	_tree.item_mouse_selected.connect(_on_item_mouse_selected)
 	_tree.item_activated.connect(_on_item_activated)
 	_tree.item_edited.connect(_on_item_edited)
 	_tree.rename_committed.connect(_on_tree_rename_committed)
@@ -260,8 +262,21 @@ func _refresh_folder_item_icon(item: TreeItem) -> void:
 
 # ---------- Selection routing ----------
 
+func _on_item_mouse_selected(_position: Vector2, mouse_button_index: int) -> void:
+	if mouse_button_index != MOUSE_BUTTON_LEFT:
+		return
+	if _suppress_tree_selection_emit:
+		return
+	_mouse_drove_selection_emit = true
+	_emit_selection()
+
+
 func _on_item_selected() -> void:
 	if _suppress_tree_selection_emit:
+		return
+	# Left clicks emit via item_mouse_selected (includes re-selecting the same row).
+	if _mouse_drove_selection_emit:
+		_mouse_drove_selection_emit = false
 		return
 	if not _emit_selection():
 		call_deferred(&"_deferred_emit_selection")

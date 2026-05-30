@@ -152,6 +152,7 @@ static func _fallback_segment_entry(tr: CodaTimelineTrack, clip: CodaTimelineCli
 		"fade_in_seconds": clip.fade_in_seconds,
 		"fade_out_seconds": clip.fade_out_seconds,
 		"track_output_bus_id": tr.output_bus_id,
+		"track_wet_sends": tr.wet_sends,
 		"timeline_clip_end_seconds": clip.end_seconds(),
 	}
 

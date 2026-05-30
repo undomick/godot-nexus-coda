@@ -62,12 +62,9 @@ func attach_project(project: CodaState) -> void:
 	if _project != null and is_instance_valid(_project):
 		if _project.structure_changed.is_connected(_sync_active_chain):
 			_project.structure_changed.disconnect(_sync_active_chain)
-		if _project.project_dirty.is_connected(_sync_active_chain):
-			_project.project_dirty.disconnect(_sync_active_chain)
 	_project = project
 	if _project != null:
 		_project.structure_changed.connect(_sync_active_chain)
-		_project.project_dirty.connect(_sync_active_chain)
 	if _chains_ready:
 		_apply_scope()
 

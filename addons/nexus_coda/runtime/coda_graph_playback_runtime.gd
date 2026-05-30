@@ -9,6 +9,12 @@ const CodaRuntimeGraphPlaybackScript := preload(
 const CodaRuntimeParameterPipelineScript := preload(
 	"res://addons/nexus_coda/runtime/coda_runtime_parameter_pipeline.gd"
 )
+const CodaVoiceWetLayersScript := preload(
+	"res://addons/nexus_coda/runtime/coda_voice_wet_layers.gd"
+)
+const CodaSpatialVoiceRuntimeScript := preload(
+	"res://addons/nexus_coda/runtime/coda_spatial_voice_runtime.gd"
+)
 const CodaAudioStreamCacheScript := preload(
 	"res://addons/nexus_coda/runtime/coda_audio_stream_cache.gd"
 )
@@ -221,6 +227,7 @@ func _finalize_paused_preview(handle: CodaEventHandle) -> void:
 	unmark_plan_resume(handle)
 	_unpause_graph_players(handle)
 	stop_parallel_siblings(handle)
+	CodaVoiceWetLayersScript.stop_graph_wet_layers(handle)
 	handle.clear_player_binding()
 	var was_alive: bool = handle._alive
 	if was_alive:
@@ -306,7 +313,9 @@ func _start_parallel_step(
 		var entry: Dictionary = parallel_entries[i] as Dictionary
 		var tail: Array = parallel_entries.slice(i + 1)
 		tail.append_array(plan_tail)
-		var player: AudioStreamPlayer = _start_player_for_entry(entry, params, tail, event_loops)
+		var player: AudioStreamPlayer = _start_player_for_entry(
+			entry, params, tail, event_loops, owner
+		)
 		if player == null:
 			continue
 		started_indices[i] = true
@@ -415,8 +424,31 @@ static func _entry_should_loop_stream(
 	return true
 
 
+func reroute_voices_for_output_bus(handle: CodaEventHandle, voice_bus: String) -> void:
+	if handle == null:
+		return
+	var route_bus: String = String(voice_bus).strip_edges()
+	if route_bus.is_empty() or AudioServer.get_bus_index(route_bus) < 0:
+		route_bus = "Master"
+	_set_player_output_bus(handle._player, route_bus)
+	for sib in handle.graph_parallel_siblings:
+		var sh: CodaEventHandle = sib as CodaEventHandle
+		if sh != null:
+			_set_player_output_bus(sh._player, route_bus)
+
+
+func _set_player_output_bus(player: AudioStreamPlayer, route_bus: String) -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	player.bus = route_bus
+
+
 func _start_player_for_entry(
-	entry: Dictionary, params: Dictionary, plan_remaining: Array = [], event_loops: bool = false
+	entry: Dictionary,
+	params: Dictionary,
+	plan_remaining: Array = [],
+	event_loops: bool = false,
+	handle: CodaEventHandle = null
 ) -> AudioStreamPlayer:
 	var stream_path: String = String(entry.get("audio_path", "")).strip_edges()
 	if stream_path.is_empty():
@@ -456,8 +488,16 @@ func _start_player_for_entry(
 		blend_db = -80.0
 	player.volume_db = float(entry.get("volume_db", 0.0)) + override_db + blend_db
 	player.pitch_scale = float(entry.get("pitch_scale", 1.0)) * float(params.get("pitch_scale", 1.0))
+	CodaSpatialVoiceRuntimeScript.apply_from_meta(player, player.volume_db)
 	_runtime.runtime_begin_player_voice(player)
 	player.play()
+	if handle != null and handle.event_node is CodaBrowserNode:
+		var ev: CodaBrowserNode = handle.event_node as CodaBrowserNode
+		if not ev.event_wet_sends.is_empty():
+			var pvals: Dictionary = handle.param_values_smoothed if handle != null else {}
+			CodaVoiceWetLayersScript.spawn_graph_wet_layers(
+				_runtime, handle, player, ev.event_wet_sends, pvals
+			)
 	return player
 
 

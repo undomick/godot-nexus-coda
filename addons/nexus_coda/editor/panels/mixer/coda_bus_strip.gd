@@ -2,14 +2,16 @@
 class_name CodaBusStrip
 extends PanelContainer
 
-## Bus strip: name, L/R meters + fader + vertical M/S/B, dB field, send target, drag reorder.
+## Bus strip: name, L/R meters + fader + vertical M/S/B, dB field, bus link, wet sends, drag reorder.
 
 signal volume_changed(bus_id: String, volume_db: float)
 signal mute_toggled(bus_id: String, mute: bool)
 signal solo_toggled(bus_id: String, solo: bool)
 signal bypass_toggled(bus_id: String, bypass: bool)
 signal bus_renamed(bus_id: String, new_name: String)
-signal send_target_changed(bus_id: String, target_bus_id: String)
+signal bus_link_changed(bus_id: String, target_bus_id: String)
+signal wet_send_level_changed(bus_id: String, send_id: String, level: float)
+signal wet_send_add_requested(bus_id: String, return_bus_id: String)
 signal context_action_requested(bus_id: String, action: StringName)
 signal bus_strip_selected(bus_id: String)
 
@@ -35,12 +37,15 @@ var _bypass_btn: Button
 var _meter_l: ProgressBar
 var _meter_r: ProgressBar
 var _send_option: OptionButton
+var _wet_send_box: VBoxContainer
 var _godot_bus_name: String = ""
 
 const _CTX_ADD_BUS_HERE := 1
 const _CTX_DUPLICATE_BUS := 2
 const _CTX_DELETE_BUS := 3
 const _CTX_RESET_VOLUME := 4
+const _CTX_ADD_RETURN := 5
+const _CTX_ADD_WET_SEND := 6
 
 var _context_menu: PopupMenu
 var _selected: bool = false
@@ -69,7 +74,6 @@ func _ready() -> void:
 	_name_edit.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
 	_name_edit.text_submitted.connect(func(_t: String) -> void: _commit_bus_name_if_needed())
 	_name_edit.focus_exited.connect(_commit_bus_name_if_needed)
-	_name_edit.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	col.add_child(_name_edit)
 
 	var main_row := HBoxContainer.new()
@@ -85,13 +89,10 @@ func _ready() -> void:
 
 	_meter_l = _make_meter()
 	_meter_r = _make_meter()
-	_meter_l.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
-	_meter_r.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	meters_fader.add_child(_meter_l)
 	meters_fader.add_child(_meter_r)
 
 	_fader = VerticalDragFader.new(FADER_MIN_DB, FADER_MAX_DB, FADER_STEP)
-	_fader.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	meters_fader.add_child(_fader)
 	_fader.fader_value_changed.connect(_on_vertical_fader_changed)
 
@@ -104,9 +105,6 @@ func _ready() -> void:
 	_mute_btn = _make_toggle_strip_button("M", "Mute")
 	_solo_btn = _make_toggle_strip_button("S", "Solo")
 	_bypass_btn = _make_toggle_strip_button("B", "Bypass bus effects")
-	_mute_btn.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
-	_solo_btn.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
-	_bypass_btn.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	_mute_btn.toggled.connect(_on_mute_toggled_ui)
 	_solo_btn.toggled.connect(_on_solo_toggled_ui)
 	_bypass_btn.toggled.connect(_on_bypass_toggled_ui)
@@ -122,16 +120,19 @@ func _ready() -> void:
 	_db_edit.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
 	_db_edit.text_submitted.connect(func(_t: String) -> void: _commit_db_field())
 	_db_edit.focus_exited.connect(_commit_db_field)
-	_db_edit.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	col.add_child(_db_edit)
 
 	_send_option = OptionButton.new()
 	_send_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_send_option.custom_minimum_size = Vector2(0, 26)
-	_send_option.tooltip_text = "Audio bus send / link target (toward Master)"
+	_send_option.tooltip_text = "Bus link (toward Master). Not a wet send."
 	_send_option.item_selected.connect(_on_send_item_selected)
-	_send_option.set_drag_forwarding(Callable(self, "_get_drag_data"), Callable(self, "_can_drop_data"), Callable(self, "_drop_data"))
 	col.add_child(_send_option)
+
+	_wet_send_box = VBoxContainer.new()
+	_wet_send_box.add_theme_constant_override(&"separation", 2)
+	_wet_send_box.visible = false
+	col.add_child(_wet_send_box)
 
 	_context_menu = PopupMenu.new()
 	_context_menu.name = "BusContextMenu"
@@ -140,6 +141,9 @@ func _ready() -> void:
 	_context_menu.add_item("Delete bus", _CTX_DELETE_BUS)
 	_context_menu.add_separator()
 	_context_menu.add_item("Reset volume", _CTX_RESET_VOLUME)
+	_context_menu.add_separator()
+	_context_menu.add_item("Add return bus below", _CTX_ADD_RETURN)
+	_context_menu.add_item("Add wet send...", _CTX_ADD_WET_SEND)
 	_context_menu.id_pressed.connect(_on_context_menu_id_pressed)
 	add_child(_context_menu)
 
@@ -286,7 +290,8 @@ func bind(
 	godot_bus_name: String,
 	is_master_strip: bool,
 	send_targets: Array[CodaBus],
-	default_send_target_id: String
+	default_send_target_id: String,
+	return_buses: Array[CodaBus] = []
 ) -> void:
 	_bus = bus
 	_godot_bus_name = godot_bus_name
@@ -320,6 +325,8 @@ func bind(
 				sel_idx = i
 		if _send_option.item_count > 0:
 			_send_option.select(clampi(sel_idx, 0, _send_option.item_count - 1))
+
+	_refresh_wet_send_rows(return_buses)
 
 	_syncing_ui = false
 	_refresh_context_menu_enabled()
@@ -382,6 +389,10 @@ func _on_context_menu_id_pressed(id: int) -> void:
 			context_action_requested.emit(_bus.id, &"delete_bus")
 		_CTX_RESET_VOLUME:
 			context_action_requested.emit(_bus.id, &"reset_volume")
+		_CTX_ADD_RETURN:
+			context_action_requested.emit(_bus.id, &"add_return_bus")
+		_CTX_ADD_WET_SEND:
+			context_action_requested.emit(_bus.id, &"add_wet_send")
 		_:
 			pass
 
@@ -392,7 +403,56 @@ func _on_send_item_selected(index: int) -> void:
 	if index < 0 or index >= _send_option.item_count:
 		return
 	var tid: String = str(_send_option.get_item_metadata(index))
-	send_target_changed.emit(_bus.id, tid)
+	bus_link_changed.emit(_bus.id, tid)
+
+
+func _refresh_wet_send_rows(return_buses: Array[CodaBus]) -> void:
+	if _wet_send_box == null or _bus == null:
+		return
+	for c in _wet_send_box.get_children():
+		c.queue_free()
+	var show: bool = (
+		not _is_master_bus
+		and _bus.bus_kind == CodaBus.BusKind.MIX
+		and not _bus.wet_sends.is_empty()
+	)
+	_wet_send_box.visible = show
+	if not show:
+		return
+	for ws in _bus.wet_sends:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override(&"separation", 2)
+		var lbl := Label.new()
+		lbl.text = _return_label_for_send(ws, return_buses)
+		lbl.tooltip_text = "Wet send to return bus"
+		lbl.custom_minimum_size = Vector2(36, 0)
+		lbl.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE - 1)
+		row.add_child(lbl)
+		var slider := HSlider.new()
+		slider.min_value = 0.0
+		slider.max_value = 1.0
+		slider.step = 0.01
+		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		slider.value = ws.level
+		slider.set_meta(&"send_id", ws.id)
+		slider.value_changed.connect(_on_wet_send_slider_changed.bind(slider))
+		row.add_child(slider)
+		_wet_send_box.add_child(row)
+
+
+func _return_label_for_send(send: CodaBusSend, return_buses: Array[CodaBus]) -> String:
+	for rb in return_buses:
+		if rb.id == send.target_bus_id:
+			var n: String = String(rb.bus_name).strip_edges()
+			return n if not n.is_empty() else "Ret"
+	return "Ret"
+
+
+func _on_wet_send_slider_changed(value: float, slider: HSlider) -> void:
+	if _syncing_ui or _bus == null or slider == null:
+		return
+	var sid: String = str(slider.get_meta(&"send_id", ""))
+	wet_send_level_changed.emit(_bus.id, sid, float(value))
 
 
 func update_meter() -> void:

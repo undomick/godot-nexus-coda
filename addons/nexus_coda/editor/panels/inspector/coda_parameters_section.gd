@@ -27,7 +27,7 @@ func _ready() -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	_header = SectionHeaderScript.new()
-	_header.heading = "Parameters"
+	_header.heading = "Set Parameters"
 	add_child(_header)
 
 	_add_button = Button.new()
@@ -35,6 +35,13 @@ func _ready() -> void:
 	_add_button.tooltip_text = "Add parameter"
 	_add_button.pressed.connect(_on_add_pressed)
 	_header.add_trailing(_add_button)
+
+	var hint := Label.new()
+	hint.text = "Gameplay writes these values at runtime (switch, blend, modulation)."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
+	hint.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
+	add_child(hint)
 
 	_rows_host = VBoxContainer.new()
 	_rows_host.add_theme_constant_override(&"separation", Tokens.SPACING_XS)
@@ -59,6 +66,9 @@ func set_event(event: Variant) -> void:
 		_draft_parameters.clear()
 		_clear_rows()
 		_validation_label.visible = false
+		return
+	if _selected_event != null and bn.id == _selected_event.id:
+		_selected_event = bn
 		return
 	_selected_event = bn
 	_load_drafts_from_selection()
@@ -275,8 +285,6 @@ func _push_changes() -> void:
 		return
 	var err: String = _project.set_event_parameters(_selected_event.id, _draft_parameters)
 	_apply_validation_message(err)
-	if err.is_empty():
-		_load_drafts_from_selection()
 
 
 func _apply_validation_message(err: String) -> void:

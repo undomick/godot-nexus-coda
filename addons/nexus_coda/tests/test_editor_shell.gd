@@ -2,6 +2,7 @@ extends SceneTree
 
 const LayoutStore := preload("res://addons/nexus_coda/editor/shell/coda_editor_layout_store.gd")
 const LayoutStoreClass := preload("res://addons/nexus_coda/editor/shell/coda_editor_layout_store.gd")
+const CodaProjectScript := preload("res://addons/nexus_coda/domain/coda_project.gd")
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
 const CodaTimelineMarkerUiScript := preload(
 	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_marker_ui.gd"
@@ -19,6 +20,7 @@ const CodaProjectSerializerScript := preload(
 const CodaRuntimeGraphPlaybackScript := preload(
 	"res://addons/nexus_coda/runtime/coda_runtime_graph_playback.gd"
 )
+const TestBusSyncMatrixScript := preload("res://addons/nexus_coda/tests/test_bus_sync_matrix.gd")
 const CodaAudioBusSyncGateScript := preload(
 	"res://addons/nexus_coda/runtime/coda_audio_bus_sync_gate.gd"
 )
@@ -71,6 +73,8 @@ func _init() -> void:
 	failed += _test_graph_parallel_split()
 	failed += _test_bus_sync_gate_editor_blocks_autoload()
 	failed += _test_bus_sync_gate_gameplay_wins()
+	failed += TestBusSyncMatrixScript.run()
+	failed += _test_coda_project_duplicate_for_playback()
 	failed += _test_voice_pool_exhausted_signal()
 	failed += _test_effects_chain_binding()
 	failed += _test_inspector_fx_scope_exclusive()
@@ -332,6 +336,22 @@ static func _test_graph_parallel_split() -> int:
 	var split: Array = CodaRuntimeGraphPlaybackScript.split_parallel_entries(entries)
 	if split.size() != 2:
 		push_error("graph parallel split size")
+		return 1
+	return 0
+
+
+static func _test_coda_project_duplicate_for_playback() -> int:
+	var state: CodaState = CodaStateScript.new()
+	state.bus_root.volume_db = -3.5
+	var copy: CodaProject = state.duplicate_for_playback()
+	if copy == null:
+		push_error("duplicate_for_playback returned null")
+		return 1
+	if copy is CodaState:
+		push_error("playback copy should be domain CodaProject without editor stores")
+		return 1
+	if abs(copy.bus_root.volume_db - (-3.5)) > 0.001:
+		push_error("playback copy should preserve bus volume")
 		return 1
 	return 0
 

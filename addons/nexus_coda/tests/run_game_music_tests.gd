@@ -23,6 +23,10 @@ const TestTimelineClipChromeScript := preload(
 	"res://addons/nexus_coda/tests/test_timeline_clip_chrome.gd"
 )
 const TestRuntimeNodesScript := preload("res://addons/nexus_coda/tests/test_runtime_nodes.gd")
+const TestFxTailLifecycleScript := preload("res://addons/nexus_coda/tests/test_fx_tail_lifecycle.gd")
+const TestBusSendsScript := preload("res://addons/nexus_coda/tests/test_bus_sends.gd")
+const TestBusSyncMatrixScript := preload("res://addons/nexus_coda/tests/test_bus_sync_matrix.gd")
+const TestEventMetadataScript := preload("res://addons/nexus_coda/tests/test_event_metadata.gd")
 
 
 func _initialize() -> void:
@@ -39,6 +43,10 @@ func _initialize() -> void:
 	failed += TestTimelineCommandsScript.run()
 	failed += TestTimelineClipChromeScript.run()
 	failed += TestRuntimeNodesScript.run()
+	failed += TestFxTailLifecycleScript.run()
+	failed += TestBusSendsScript.run()
+	failed += TestBusSyncMatrixScript.run()
+	failed += TestEventMetadataScript.run()
 	if failed == 0:
 		print("Coda game music tests: OK")
 		quit(0)
