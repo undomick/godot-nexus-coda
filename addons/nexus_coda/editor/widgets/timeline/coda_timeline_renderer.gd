@@ -34,6 +34,7 @@ static func draw(canvas: CanvasItem, state: Dictionary) -> void:
 	draw_loop_region(canvas, state)
 	draw_work_area(canvas, state)
 	draw_clips(canvas, state)
+	draw_beyond_timeline_shade(canvas, state)
 	draw_timeline_end(canvas, state)
 	draw_ruler(canvas, state)
 	draw_markers(canvas, state)
@@ -83,6 +84,24 @@ static func draw_track_lanes(canvas: CanvasItem, state: Dictionary) -> void:
 	)
 
 
+static func draw_beyond_timeline_shade(canvas: CanvasItem, state: Dictionary) -> void:
+	var timeline: CodaEventTimeline = state.get("timeline", null)
+	if timeline == null or timeline.length_seconds <= 0.001:
+		return
+	var widget_size: Vector2 = state.get("size", Vector2.ZERO)
+	var scroll: float = state.get("scroll_seconds", 0.0)
+	var spp: float = state.get("seconds_per_pixel", 1.0 / 80.0)
+	var x_end: float = seconds_to_x(timeline.length_seconds, scroll, spp)
+	if x_end >= widget_size.x - 0.5:
+		return
+	var shade_x: float = maxf(0.0, x_end)
+	var shade_w: float = widget_size.x - shade_x
+	if shade_w <= 0.5:
+		return
+	var shade := Color(Tokens.TEXT_MUTED.r, Tokens.TEXT_MUTED.g, Tokens.TEXT_MUTED.b, 0.22)
+	canvas.draw_rect(Rect2(Vector2(shade_x, 0.0), Vector2(shade_w, widget_size.y)), shade, true)
+
+
 static func draw_timeline_end(canvas: CanvasItem, state: Dictionary) -> void:
 	var timeline: CodaEventTimeline = state.get("timeline", null)
 	if timeline == null or timeline.length_seconds <= 0.001:
@@ -93,7 +112,7 @@ static func draw_timeline_end(canvas: CanvasItem, state: Dictionary) -> void:
 	var x: float = seconds_to_x(timeline.length_seconds, scroll, spp)
 	if x < -2.0 or x > widget_size.x + 2.0:
 		return
-	var col := Color(Tokens.WARN.r, Tokens.WARN.g, Tokens.WARN.b, 0.85)
+	var col := Color(Tokens.TEXT_MUTED.r, Tokens.TEXT_MUTED.g, Tokens.TEXT_MUTED.b, 0.9)
 	canvas.draw_line(Vector2(x, float(RULER_HEIGHT)), Vector2(x, widget_size.y), col, 2.0)
 	var font: Font = state.get("theme_font", null)
 	if font != null and x >= 0.0 and x <= widget_size.x - 40.0:
@@ -105,7 +124,7 @@ static func draw_timeline_end(canvas: CanvasItem, state: Dictionary) -> void:
 			HORIZONTAL_ALIGNMENT_LEFT,
 			-1,
 			Tokens.FONT_LABEL_SIZE,
-			Tokens.WARN
+			Tokens.TEXT_MUTED
 		)
 
 

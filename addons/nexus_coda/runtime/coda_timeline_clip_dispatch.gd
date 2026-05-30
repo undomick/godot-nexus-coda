@@ -26,6 +26,21 @@ static func reset_bookkeeping(d: Dictionary) -> void:
 	d["spent_clip_ids"] = {}
 
 
+static func audible_clip_end(clip: CodaTimelineClip, timeline: CodaEventTimeline) -> float:
+	if clip == null:
+		return 0.0
+	var end: float = clip.start_seconds + clip.duration_seconds
+	if timeline == null:
+		return end
+	return minf(end, timeline.length_seconds)
+
+
+static func clip_starts_before_timeline_end(clip: CodaTimelineClip, timeline: CodaEventTimeline) -> bool:
+	if clip == null or timeline == null:
+		return false
+	return clip.start_seconds < timeline.length_seconds - 0.0001
+
+
 static func clip_lane_entry(
 	track: CodaTimelineTrack, clip: CodaTimelineClip, into_clip: float, clip_end: float
 ) -> Dictionary:
@@ -57,9 +72,11 @@ func prime_overlapping_voices(
 		for clip in track.clips:
 			if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
 				continue
+			if not clip_starts_before_timeline_end(clip, timeline):
+				continue
 			if fired.has(clip.id):
 				continue
-			var clip_end: float = clip.start_seconds + clip.duration_seconds
+			var clip_end: float = audible_clip_end(clip, timeline)
 			if at_seconds < clip.start_seconds or at_seconds >= clip_end:
 				continue
 			var into_clip: float = at_seconds - clip.start_seconds
@@ -88,12 +105,14 @@ func fire_clips_in_range(
 		for clip in track.clips:
 			if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
 				continue
+			if not clip_starts_before_timeline_end(clip, timeline):
+				continue
 			if fired.has(clip.id):
 				continue
 			var spent: Dictionary = d.get("spent_clip_ids", {})
 			if spent.has(clip.id):
 				continue
-			var clip_end: float = clip.start_seconds + clip.duration_seconds
+			var clip_end: float = audible_clip_end(clip, timeline)
 			if clip_end <= from_seconds or clip.start_seconds >= to_seconds:
 				continue
 			var crosses_start: bool = (
@@ -131,7 +150,9 @@ func heal_orphaned_fired_clips(
 				continue
 			if voices.has(clip.id):
 				continue
-			var clip_end: float = clip.start_seconds + clip.duration_seconds
+			if not clip_starts_before_timeline_end(clip, timeline):
+				continue
+			var clip_end: float = audible_clip_end(clip, timeline)
 			if at_seconds < clip.start_seconds or at_seconds >= clip_end:
 				continue
 			fired.erase(clip.id)

@@ -78,7 +78,6 @@ func _on_clip_move_requested(clip_id: String, new_start: float, new_track_index:
 		if view != null:
 			view.set_track_row_highlight(int(_panel.call(&"get_selected_track_index")))
 		_panel.call(&"_emit_track_selection_changed")
-	CodaTimelineCommands.extend_timeline_if_content_exceeds(t)
 	_panel.call(&"_notify_timeline_changed")
 
 
@@ -109,7 +108,6 @@ func _on_clip_resize_requested(
 		return
 	var t: CodaEventTimeline = ev.event_timeline
 	CodaTimelineCommands.resize_clip(t, clip_id, new_start, new_duration, new_offset_seconds)
-	CodaTimelineCommands.extend_timeline_if_content_exceeds(t)
 	_panel.call(&"_notify_timeline_changed")
 
 

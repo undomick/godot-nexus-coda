@@ -244,15 +244,9 @@ func duplicate_clip(clip_id: String, gap_seconds: float = 0.05) -> String:
 	for i in range(dup.effects.size()):
 		dup.effects[i] = dup.effects[i].clone_new_id()
 	var new_start: float = c.start_seconds + c.duration_seconds + max(0.0, gap_seconds)
-	if new_start >= length_seconds - 0.01:
-		return "No space after the clip to duplicate."
-	var room: float = length_seconds - new_start
 	var max_src: float = dup.max_source_playable_seconds()
-	var max_d: float = minf(c.duration_seconds, minf(room, max_src))
-	if max_d < MIN_SPLIT_SEGMENT_SECONDS:
-		return "Not enough timeline space to place the duplicate."
 	dup.start_seconds = new_start
-	dup.duration_seconds = max_d
+	dup.duration_seconds = minf(c.duration_seconds, max_src)
 	dup.offset_seconds = c.offset_seconds
 	tr.clips.append(dup)
 	_sort_track_clips(tr)
@@ -279,12 +273,10 @@ func paste_clip_at(track_index: int, start_seconds: float, data: Dictionary) -> 
 	for i in range(clip.effects.size()):
 		clip.effects[i] = clip.effects[i].clone_new_id()
 	clip.start_seconds = maxf(0.0, start_seconds)
-	var room: float = length_seconds - clip.start_seconds
 	var max_src: float = clip.max_source_playable_seconds()
-	var max_d: float = minf(clip.duration_seconds, minf(room, max_src))
-	if max_d < MIN_SPLIT_SEGMENT_SECONDS:
-		return {"error": "Not enough timeline space at the playhead.", "clip_id": ""}
-	clip.duration_seconds = max_d
+	clip.duration_seconds = minf(clip.duration_seconds, max_src)
+	if clip.duration_seconds < MIN_SPLIT_SEGMENT_SECONDS:
+		return {"error": "Clip is too short to paste.", "clip_id": ""}
 	tr.clips.append(clip)
 	_sort_track_clips(tr)
 	invalidate_clip_index()
@@ -309,8 +301,6 @@ func validate() -> String:
 				return 'Clip "%s" starts before 0.' % c.id
 			if c.duration_seconds < 0.0:
 				return 'Clip "%s" has negative duration.' % c.id
-			if c.start_seconds + c.duration_seconds > length_seconds + 0.0001:
-				return 'Clip "%s" extends past the timeline length.' % c.id
 			if not c.audio_path.is_empty() and ResourceLoader.exists(c.audio_path):
 				var max_src: float = c.max_source_playable_seconds()
 				if max_src < 1.0e9 and c.duration_seconds > max_src + 0.0001:

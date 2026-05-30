@@ -287,10 +287,7 @@ func _hit_test_trim_handles(
 
 
 func apply_snap(view: CodaTimelineView, t: float) -> float:
-	var timeline: CodaEventTimeline = view.get_timeline()
-	var raw: float = max(0.0, t)
-	if timeline != null:
-		raw = clampf(raw, 0.0, timeline.length_seconds)
+	var raw: float = maxf(0.0, t)
 	var thresh_sec: float = view.get_zoom() * 8.0
 	var best: float = raw
 	var best_d: float = thresh_sec + 1.0
@@ -487,10 +484,7 @@ func _handle_mouse_motion(view: CodaTimelineView, mm: InputEventMouseMotion) -> 
 			var max_play_r: float = (
 				clip_r.max_source_playable_seconds() if clip_r != null else 1.0e12
 			)
-			var max_end: float = minf(
-				timeline.length_seconds,
-				_drag_initial_clip_start + max_play_r
-			)
+			var max_end: float = _drag_initial_clip_start + max_play_r
 			var new_end: float = clampf(
 				max(_drag_initial_clip_start + MIN_CLIP_DURATION_SECONDS, apply_snap(view, t)),
 				_drag_initial_clip_start + MIN_CLIP_DURATION_SECONDS,

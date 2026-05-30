@@ -851,15 +851,73 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_paste_clip_at_playhead()
 			get_viewport().set_input_as_handled()
 			return
-		if _view != null and not _view.get_selected_marker_id().is_empty():
-			if k.keycode == KEY_F2:
-				_open_marker_rename(_view.get_selected_marker_id())
+		if k.keycode == KEY_F2 and _view != null and not _view.get_selected_marker_id().is_empty():
+			_open_marker_rename(_view.get_selected_marker_id())
+			get_viewport().set_input_as_handled()
+			return
+		if k.keycode == KEY_DELETE or k.keycode == KEY_BACKSPACE:
+			if request_timeline_delete():
 				get_viewport().set_input_as_handled()
 				return
-			if k.keycode == KEY_DELETE or k.keycode == KEY_BACKSPACE:
-				_delete_marker(_view.get_selected_marker_id())
-				get_viewport().set_input_as_handled()
-				return
+
+
+func request_timeline_delete() -> bool:
+	if _split_root == null or not _split_root.visible or _view == null:
+		return false
+	if _selected_event == null or _selected_event.event_timeline == null:
+		return false
+	if (
+		not _view.get_selected_clip_id().is_empty()
+		or not _view.get_selected_marker_id().is_empty()
+	):
+		return _try_delete_timeline_selection()
+	if not _timeline_has_keyboard_focus():
+		return false
+	return _try_delete_timeline_selection()
+
+
+func _timeline_has_keyboard_focus() -> bool:
+	var fo: Control = get_viewport().gui_get_focus_owner() as Control
+	if fo == null or not is_ancestor_of(fo):
+		return false
+	if fo is LineEdit or fo is TextEdit:
+		return false
+	return true
+
+
+func _try_delete_timeline_selection() -> bool:
+	if _view == null or _selected_event == null or _selected_event.event_timeline == null:
+		return false
+	var marker_id: String = _view.get_selected_marker_id()
+	if not marker_id.is_empty():
+		_delete_marker(marker_id)
+		return true
+	var clip_id: String = _view.get_selected_clip_id()
+	if not clip_id.is_empty():
+		_delete_selected_clip()
+		return true
+	var track_id: String = get_selected_track_id()
+	if not track_id.is_empty():
+		_on_remove_track_pressed(track_id)
+		return true
+	return false
+
+
+func _delete_selected_clip() -> void:
+	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
+		return
+	var cid: String = _view.get_selected_clip_id()
+	if cid.is_empty():
+		return
+	var snap: CodaEventTimeline = CodaTimelineCommands.delete_clip(
+		_selected_event.event_timeline, cid
+	)
+	if snap == null:
+		return
+	_push_snapshot(snap)
+	_view.clear_selection()
+	clip_selection_changed.emit(_selected_event.id, "")
+	_notify_timeline_changed()
 
 
 func _push_snapshot(snap: CodaEventTimeline) -> void:
@@ -999,5 +1057,4 @@ func _paste_clip_at_playhead() -> void:
 	if not new_id.is_empty():
 		_view.set_selected_clip(new_id)
 		clip_selection_changed.emit(_selected_event.id, new_id)
-	CodaTimelineCommands.extend_timeline_if_content_exceeds(_selected_event.event_timeline)
 	_notify_timeline_changed()

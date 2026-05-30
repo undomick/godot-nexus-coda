@@ -251,6 +251,10 @@ func _input(event: InputEvent) -> void:
 				if _browser_panel.request_browser_rename():
 					get_viewport().set_input_as_handled()
 		CodaEditorShortcutsScript.Action.BROWSER_DELETE:
+			if _timeline_panel != null and _timeline_panel.has_method(&"request_timeline_delete"):
+				if _timeline_panel.call(&"request_timeline_delete"):
+					get_viewport().set_input_as_handled()
+					return
 			if _browser_panel != null and _browser_panel.has_method(&"request_browser_delete"):
 				if _browser_panel.request_browser_delete():
 					get_viewport().set_input_as_handled()

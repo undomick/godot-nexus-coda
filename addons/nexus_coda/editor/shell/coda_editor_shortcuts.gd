@@ -54,6 +54,7 @@ static func sheet_entries() -> Array:
 		]},
 		{"category": "Timeline", "rows": [
 			["Space", "Play / pause (when Timeline has focus)"],
+			["Delete", "Remove selected clip, marker, or track"],
 			["Mouse wheel", "Zoom timeline"],
 			["Middle mouse drag", "Pan timeline"],
 			["Ctrl+Z / Ctrl+Y", "Undo / redo (Timeline focus)"],
@@ -72,7 +73,7 @@ static func panel_help_hint(panel_id: StringName) -> String:
 		&"graph":
 			return "Graph: Right-click to add nodes. Delete removes selection."
 		&"timeline":
-			return "Timeline: Space play/pause, wheel zoom, MMB pan, Ctrl+Z/Y undo."
+			return "Timeline: Space play/pause, Delete removes selection, wheel zoom, MMB pan, Ctrl+Z/Y undo."
 		&"mixer":
 			return "Mixer: Click a strip to select. Snapshot Recall applies bus levels."
 		&"player":

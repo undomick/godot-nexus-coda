@@ -35,31 +35,11 @@ static func timeline_content_end_seconds(timeline: CodaEventTimeline) -> float:
 
 
 static func timeline_length_change_would_truncate(timeline: CodaEventTimeline, new_length: float) -> bool:
-	if timeline == null:
-		return false
-	for tr in timeline.tracks:
-		for c in tr.clips:
-			if c.start_seconds >= new_length:
-				return true
-			var room: float = maxf(0.0, new_length - c.start_seconds)
-			var max_src: float = c.max_source_playable_seconds()
-			var max_d: float = minf(room, max_src)
-			if c.duration_seconds > max_d + 0.0001:
-				return true
 	return false
 
 
-static func clamp_clips_to_timeline_length(timeline: CodaEventTimeline) -> void:
-	if timeline == null:
-		return
-	for tr in timeline.tracks:
-		for c in tr.clips:
-			if c.start_seconds >= timeline.length_seconds:
-				c.start_seconds = maxf(0.0, timeline.length_seconds - 0.05)
-			var room: float = maxf(0.0, timeline.length_seconds - c.start_seconds)
-			var max_src: float = c.max_source_playable_seconds()
-			var max_d: float = minf(room, max_src)
-			c.duration_seconds = minf(c.duration_seconds, max_d)
+static func clamp_clips_to_timeline_length(_timeline: CodaEventTimeline) -> void:
+	pass
 
 
 static func extend_timeline_if_content_exceeds(timeline: CodaEventTimeline, margin: float = 0.25) -> void:
@@ -81,12 +61,8 @@ static func set_loop_enabled(timeline: CodaEventTimeline, on: bool) -> void:
 
 
 static func set_timeline_length(timeline: CodaEventTimeline, value: float) -> CodaEventTimeline:
-	var new_length: float = maxf(0.5, value)
-	var snap: CodaEventTimeline = null
-	if timeline_length_change_would_truncate(timeline, new_length):
-		snap = snapshot(timeline)
-	timeline.length_seconds = new_length
-	clamp_clips_to_timeline_length(timeline)
+	var snap := snapshot(timeline)
+	timeline.length_seconds = maxf(0.5, value)
 	timeline.clamp_work_points_to_length()
 	return snap
 
@@ -95,7 +71,6 @@ static func fit_timeline_length(timeline: CodaEventTimeline, margin: float = 0.2
 	var snap := snapshot(timeline)
 	var need: float = timeline_content_end_seconds(timeline)
 	timeline.length_seconds = maxf(0.5, need + margin)
-	clamp_clips_to_timeline_length(timeline)
 	timeline.clamp_work_points_to_length()
 	return snap
 
@@ -174,12 +149,10 @@ static func add_clip(
 	var snap := snapshot(timeline)
 	var tr_i: int = clampi(track_index, 0, timeline.tracks.size() - 1)
 	var clip := CodaTimelineClip.new()
-	clip.start_seconds = clampf(playhead, 0.0, timeline.length_seconds)
-	var remain: float = max(0.01, timeline.length_seconds - clip.start_seconds)
-	clip.duration_seconds = clampf(min(1.0, max(0.5, remain)), 0.05, remain)
+	clip.start_seconds = maxf(0.0, playhead)
+	clip.duration_seconds = 1.0
 	timeline.tracks[tr_i].clips.append(clip)
 	timeline.invalidate_clip_index()
-	extend_timeline_if_content_exceeds(timeline)
 	return snap
 
 
@@ -205,7 +178,6 @@ static func assign_clip_audio(
 	clip.audio_path = res_path
 	clip.offset_seconds = 0.0
 	clip.duration_seconds = clip.max_source_playable_seconds()
-	extend_timeline_if_content_exceeds(timeline)
 	return snap
 
 
@@ -217,12 +189,11 @@ static func drop_browser_asset(
 	var snap := snapshot(timeline)
 	var clip := CodaTimelineClip.new()
 	clip.audio_path = res_path
-	clip.start_seconds = clampf(start_seconds, 0.0, timeline.length_seconds)
+	clip.start_seconds = maxf(0.0, start_seconds)
 	clip.offset_seconds = 0.0
 	clip.duration_seconds = clip.max_source_playable_seconds()
 	timeline.tracks[track_index].clips.append(clip)
 	timeline.invalidate_clip_index()
-	extend_timeline_if_content_exceeds(timeline)
 	return snap
 
 
@@ -239,8 +210,7 @@ static func move_clip(
 	if clip == null or from_track == null:
 		return
 	var target_track_index: int = clampi(new_track_index, 0, timeline.tracks.size() - 1)
-	var max_start: float = max(0.0, timeline.length_seconds - clip.duration_seconds)
-	var clamped_start: float = clampf(new_start, 0.0, max_start)
+	var clamped_start: float = maxf(0.0, new_start)
 	var to_track: CodaTimelineTrack = timeline.tracks[target_track_index]
 	if from_track != to_track:
 		from_track.clips.erase(clip)
@@ -398,9 +368,7 @@ static func resize_clip(
 	clip.start_seconds = max(0.0, new_start)
 	if new_offset_seconds == new_offset_seconds:
 		clip.offset_seconds = maxf(0.0, new_offset_seconds)
-	var max_by_source: float = clip.max_source_playable_seconds()
-	var max_by_tl: float = max(0.0, timeline.length_seconds - clip.start_seconds)
-	var max_d: float = minf(max_by_source, max_by_tl)
+	var max_d: float = clip.max_source_playable_seconds()
 	clip.duration_seconds = clampf(new_duration, MIN_CLIP_DURATION_SECONDS, max_d)
 	clamp_clip_fades(clip)
 
@@ -432,8 +400,6 @@ static func split_clip_at_time(
 static func duplicate_clip(timeline: CodaEventTimeline, clip_id: String) -> Dictionary:
 	var snap := snapshot(timeline)
 	var err: String = timeline.duplicate_clip(clip_id)
-	if err.is_empty():
-		extend_timeline_if_content_exceeds(timeline)
 	return {"snapshot": snap, "error": err}
 
 
@@ -459,7 +425,6 @@ static func paste_clip_at_playhead(
 	var result: Dictionary = timeline.paste_clip_at(track_index, start_seconds, data)
 	if not String(result.get("error", "")).is_empty():
 		return {"snapshot": snap, "error": result.get("error", ""), "clip_id": ""}
-	extend_timeline_if_content_exceeds(timeline)
 	return {
 		"snapshot": snap,
 		"error": "",
