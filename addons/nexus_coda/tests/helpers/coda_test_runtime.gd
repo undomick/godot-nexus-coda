@@ -4,21 +4,21 @@ class_name CodaTestRuntime
 ## Builds minimal [CodaState] + timeline music events for headless runtime tests.
 
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
-const CodaBrowserNodeScript := preload("res://addons/nexus_coda/editor/browser/coda_browser_node.gd")
+const CodaBrowserNodeScript := preload("res://addons/nexus_coda/domain/coda_browser_node.gd")
 const CodaEventParameterScript := preload(
-	"res://addons/nexus_coda/editor/browser/coda_event_parameter.gd"
+	"res://addons/nexus_coda/domain/coda_event_parameter.gd"
 )
 const CodaEventTimelineScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_event_timeline.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_event_timeline.gd"
 )
 const CodaTimelineTrackScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_track.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_track.gd"
 )
 const CodaTimelineClipScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip.gd"
 )
 const CodaTimelineMarkerScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_marker.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_marker.gd"
 )
 const CodaEventResolverScript := preload("res://addons/nexus_coda/runtime/coda_event_resolver.gd")
 

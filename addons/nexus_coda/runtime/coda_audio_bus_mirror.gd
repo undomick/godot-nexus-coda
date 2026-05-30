@@ -12,9 +12,9 @@ class_name CodaAudioBusMirror
 ## whose names are not in the current Coda tree are removed before sync (editor mixer / export cleanup).
 ## The runtime keeps this [code]false[/code] by default so shipped games keep their project-wide bus layout.
 
-const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.gd")
+const CodaProjectIo := preload("res://addons/nexus_coda/domain/io/coda_project_io.gd")
 const CodaEffectCatalogScript := preload(
-	"res://addons/nexus_coda/editor/browser/effects/coda_effect_catalog.gd"
+	"res://addons/nexus_coda/domain/effects/coda_effect_catalog.gd"
 )
 const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_bus_helper.gd")
 

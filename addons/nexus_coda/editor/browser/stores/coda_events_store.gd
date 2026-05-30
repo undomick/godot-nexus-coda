@@ -6,14 +6,16 @@ const CodaBrowserTreeDropScript := preload(
 )
 
 var _state: CodaState
+var _banks_store: CodaBanksStore
 
 
-func _init(state: CodaState) -> void:
+func _init(state: CodaState, banks_store: CodaBanksStore = null) -> void:
 	_state = state
+	_banks_store = banks_store
 
 
 func events_parent_of(target_id: String) -> CodaBrowserNode:
-	return _parent_recursive(_state.events_root, target_id)
+	return CodaBrowserTreeDropScript.parent_of_node(_state.events_root, target_id)
 
 
 func add_events_folder(parent_id: String, folder_name: String = "New Folder") -> CodaBrowserNode:
@@ -140,7 +142,7 @@ func set_event_modulations(event_id: String, modulations: Array[CodaModulation])
 	node.event_modulations.clear()
 	for m in modulations:
 		node.event_modulations.append(m.clone_keep_id())
-	_state.structure_changed.emit()
+	_state.project_dirty.emit()
 	return ""
 
 
@@ -163,14 +165,39 @@ func move_events_drop(moving_id: String, target_id: String, section: int) -> boo
 	return false
 
 
+func rename_events_node(target_id: String, new_name: String) -> String:
+	var node: CodaBrowserNode = _state.events_root.find_by_id(target_id)
+	if node == null:
+		return "Event not found."
+	if node == _state.events_root:
+		return "Cannot rename the Events root."
+	var trimmed: String = new_name.strip_edges()
+	if trimmed.is_empty():
+		trimmed = "Untitled"
+	node.name = trimmed
+	_state.structure_changed.emit()
+	return ""
+
+
+func delete_events_node(target_id: String) -> String:
+	if target_id.is_empty() or target_id == _state.events_root.id:
+		return "Cannot delete the Events root."
+	var events_node: CodaBrowserNode = _state.events_root.find_by_id(target_id)
+	if events_node == null:
+		return "Event not found."
+	var purge_event_ids: PackedStringArray = PackedStringArray()
+	if _banks_store != null:
+		purge_event_ids = _banks_store.collect_event_ids_in_subtree(events_node)
+	if not _state.events_root.remove_child_by_id(target_id):
+		return "Event not found."
+	if _banks_store != null:
+		_banks_store.purge_event_ids_from_banks(purge_event_ids)
+	_state.structure_changed.emit()
+	return ""
+
+
 func _parent_recursive(parent: CodaBrowserNode, target_id: String) -> CodaBrowserNode:
-	for child in parent.children:
-		if child.id == target_id:
-			return parent
-		var deeper: CodaBrowserNode = _parent_recursive(child, target_id)
-		if deeper != null:
-			return deeper
-	return null
+	return CodaBrowserTreeDropScript.parent_of_node(parent, target_id)
 
 
 func _capture_event_duplicate_ids(data: Dictionary) -> Dictionary:

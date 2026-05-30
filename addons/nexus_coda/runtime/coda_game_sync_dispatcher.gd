@@ -96,12 +96,15 @@ static func _condition_passes(rule: CodaGameSyncRule, payload: Dictionary) -> bo
 		return true
 	# Stub: full expression eval later; "zone=forest" matches payload.zone == "forest"
 	if not expr.contains("="):
+		push_warning("CodaGameSync: unsupported condition (expected key=value): '%s'" % expr)
 		return false
 	var parts: PackedStringArray = expr.split("=", false, 1)
 	if parts.size() != 2:
+		push_warning("CodaGameSync: malformed condition: '%s'" % expr)
 		return false
 	var key: String = parts[0].strip_edges()
 	var want: String = parts[1].strip_edges()
 	if key.is_empty():
+		push_warning("CodaGameSync: empty key in condition: '%s'" % expr)
 		return false
 	return str(payload.get(key, "")) == want

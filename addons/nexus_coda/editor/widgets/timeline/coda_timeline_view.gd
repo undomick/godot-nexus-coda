@@ -57,6 +57,7 @@ signal playhead_seek_requested(time_seconds: float)
 signal selection_cleared
 ## Emitted once when a drag begins that should participate in host-side undo batching.
 signal timeline_interaction_started
+signal timeline_interaction_committed
 signal clip_duplicate_requested(clip_id: String)
 signal clip_split_at_playhead_requested(clip_id: String)
 signal audition_requested
@@ -214,6 +215,10 @@ func _wire_input_controller() -> void:
 	_input.timeline_interaction_started.connect(
 		func() -> void:
 			timeline_interaction_started.emit()
+	)
+	_input.timeline_interaction_committed.connect(
+		func() -> void:
+			timeline_interaction_committed.emit()
 	)
 	_input.audition_requested.connect(
 		func() -> void:

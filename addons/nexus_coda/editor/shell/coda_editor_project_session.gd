@@ -6,7 +6,7 @@ extends RefCounted
 
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
-const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.gd")
+const CodaProjectIo := preload("res://addons/nexus_coda/domain/io/coda_project_io.gd")
 const CodaProjectAutosave := preload("res://addons/nexus_coda/editor/io/coda_project_autosave.gd")
 const CodaInspectorSelectionScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_inspector_selection.gd"

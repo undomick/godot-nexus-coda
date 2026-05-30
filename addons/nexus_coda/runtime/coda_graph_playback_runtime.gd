@@ -9,6 +9,9 @@ const CodaRuntimeGraphPlaybackScript := preload(
 const CodaRuntimeParameterPipelineScript := preload(
 	"res://addons/nexus_coda/runtime/coda_runtime_parameter_pipeline.gd"
 )
+const CodaAudioStreamCacheScript := preload(
+	"res://addons/nexus_coda/runtime/coda_audio_stream_cache.gd"
+)
 
 var _runtime: CodaRuntime = null
 var _voice_fader: CodaVoiceFader = null
@@ -422,7 +425,7 @@ func _start_player_for_entry(
 	if not ResourceLoader.exists(stream_path):
 		_runtime.runtime_warn("audio resource missing: '%s'" % stream_path)
 		return null
-	var stream: AudioStream = load(stream_path) as AudioStream
+	var stream: AudioStream = CodaAudioStreamCacheScript.load_stream(stream_path)
 	if stream == null:
 		_runtime.runtime_warn("audio resource not an AudioStream: '%s'" % stream_path)
 		return null

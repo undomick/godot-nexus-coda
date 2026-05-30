@@ -24,6 +24,21 @@ const CATEGORY_GAME_SYNC := &"game_sync"
 signal selection_emitted(category: StringName, payload: Variant)
 
 
+static func bind_structure_changed(
+	new_state: Variant, previous: CodaState, on_structure: Callable
+) -> CodaState:
+	if previous != null and is_instance_valid(previous):
+		if previous.structure_changed.is_connected(on_structure):
+			previous.structure_changed.disconnect(on_structure)
+	if new_state == null:
+		return null
+	if not new_state is CodaState:
+		return null
+	var st: CodaState = new_state as CodaState
+	st.structure_changed.connect(on_structure)
+	return st
+
+
 func get_tab_title() -> String:
 	return "Tab"
 

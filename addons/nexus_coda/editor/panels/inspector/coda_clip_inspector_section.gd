@@ -10,11 +10,15 @@ const CodaTimelineCommandsScript := preload(
 )
 
 signal clip_properties_changed
+signal clip_fade_edit_started
+signal clip_fade_edit_committed
 
 var _project: CodaState = null
 var _event_id: String = ""
 var _clip_id: String = ""
 var _suppress_writeback: bool = false
+var _fade_inspector_edit_active: bool = false
+var _fade_spins: Array[SpinBox] = []
 
 var _fade_in_spin: SpinBox
 var _fade_out_spin: SpinBox
@@ -42,6 +46,10 @@ func _ready() -> void:
 	_fade_out_curve_spin.value_changed.connect(_on_fade_out_curve_changed)
 	_volume_spin.value_changed.connect(_on_volume_changed)
 	_pitch_spin.value_changed.connect(_on_pitch_changed)
+	_fade_spins = [_fade_in_spin, _fade_out_spin, _fade_in_curve_spin, _fade_out_curve_spin]
+	for spin in _fade_spins:
+		spin.get_line_edit().gui_input.connect(_on_fade_spin_gui_input)
+		spin.get_line_edit().focus_exited.connect(_on_fade_spin_focus_exited)
 
 
 func attach_project(project: CodaState) -> void:
@@ -147,6 +155,36 @@ func _on_fade_out_curve_changed(v: float) -> void:
 	if _suppress_writeback:
 		return
 	_apply_fades(_fade_in_spin.value, _fade_out_spin.value, -1.0, v)
+
+
+func _on_fade_spin_gui_input(event: InputEvent) -> void:
+	if _suppress_writeback:
+		return
+	if not event is InputEventMouseButton:
+		return
+	var mb := event as InputEventMouseButton
+	if not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
+		return
+	if _fade_inspector_edit_active:
+		return
+	_fade_inspector_edit_active = true
+	clip_fade_edit_started.emit()
+
+
+func _on_fade_spin_focus_exited() -> void:
+	if not _fade_inspector_edit_active:
+		return
+	if _any_fade_spin_focused():
+		return
+	_fade_inspector_edit_active = false
+	clip_fade_edit_committed.emit()
+
+
+func _any_fade_spin_focused() -> bool:
+	for spin in _fade_spins:
+		if spin.get_line_edit().has_focus():
+			return true
+	return false
 
 
 func _apply_fades(

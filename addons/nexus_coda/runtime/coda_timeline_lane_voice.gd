@@ -3,6 +3,9 @@ class_name CodaTimelineLaneVoice
 extends RefCounted
 
 const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_bus_helper.gd")
+const CodaAudioStreamCacheScript := preload(
+	"res://addons/nexus_coda/runtime/coda_audio_stream_cache.gd"
+)
 
 
 var _runtime: CodaRuntime = null
@@ -21,7 +24,7 @@ func spawn_lane_voice(handle: CodaEventHandle, d: Dictionary, entry: Dictionary)
 	if not ResourceLoader.exists(stream_path):
 		_runtime.runtime_warn("timeline clip audio missing: '%s'" % stream_path)
 		return false
-	var stream: AudioStream = load(stream_path) as AudioStream
+	var stream: AudioStream = CodaAudioStreamCacheScript.load_stream(stream_path)
 	if stream == null:
 		return false
 	var stream_offset: float = maxf(0.0, float(entry.get("stream_offset_seconds", 0.0)))

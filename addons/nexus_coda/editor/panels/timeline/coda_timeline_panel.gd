@@ -21,6 +21,9 @@ const CodaTrackHeaderStripScript := preload(
 const CodaTimelineMarkerUiScript := preload(
 	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_marker_ui.gd"
 )
+const CodaTimelineViewHandlersScript := preload(
+	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_view_handlers.gd"
+)
 
 const RULER_HEIGHT := CodaTimelineViewScript.RULER_HEIGHT
 const TRACK_HEADER_SPLIT_MIN_PX := 120
@@ -56,6 +59,9 @@ var _track_reorder_from: int = -1
 var _track_drag_watch_running: bool = false
 var _marker_rename_dialog_ref: Array = []
 var _clip_clipboard: Dictionary = {}
+var _view_handlers: CodaTimelineViewHandlers
+var _timeline_edit_interaction_active: bool = false
+var _timeline_preview_commit_pending: bool = false
 
 
 func _ready() -> void:
@@ -78,6 +84,30 @@ func _ready() -> void:
 	_preview.set_view(_view)
 	_show_empty()
 	set_process(true)
+
+
+func get_authoring_event() -> CodaBrowserNode:
+	return _selected_event
+
+
+func get_timeline_view() -> CodaTimelineView:
+	return _view
+
+
+func get_timeline_preview() -> CodaTimelinePreviewBridge:
+	return _preview
+
+
+func get_selected_track_index() -> int:
+	return _selected_track_index
+
+
+func set_selected_track_index_value(idx: int) -> void:
+	_selected_track_index = idx
+
+
+func clear_track_headers_signature() -> void:
+	_last_track_headers_sig = ""
 
 
 func attach_project(project: CodaState) -> void:
@@ -261,30 +291,8 @@ func _build_split_root() -> void:
 	_view = CodaTimelineViewScript.new()
 	_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_view.clip_move_requested.connect(_on_view_clip_move_requested)
-	_view.clip_fade_requested.connect(_on_view_clip_fade_requested)
-	_view.clip_resize_requested.connect(_on_view_clip_resize_requested)
-	_view.clip_delete_requested.connect(_on_view_clip_delete_requested)
-	_view.browser_asset_dropped.connect(_on_view_browser_asset_dropped)
-	_view.marker_changed.connect(_on_view_marker_changed)
-	_view.loop_region_changed.connect(_on_view_loop_region_changed)
-	_view.playhead_seek_requested.connect(_on_view_playhead_seek_requested)
-	_view.marker_double_clicked.connect(_on_view_marker_double_clicked)
-	_view.marker_selected.connect(_on_view_marker_selected)
-	_view.marker_delete_requested.connect(_on_view_marker_delete_requested)
-	_view.marker_rename_requested.connect(_on_view_marker_rename_requested)
-	_view.marker_go_to_time_requested.connect(_on_view_marker_go_to_time_requested)
-	_view.work_point_changed.connect(_on_view_work_point_changed)
-	_view.work_point_toggle_requested.connect(_on_view_work_point_toggle_requested)
-	_view.work_point_delete_requested.connect(_on_view_work_point_delete_requested)
-	_view.track_row_selected.connect(_on_view_track_row_selected)
-	_view.clip_audio_assign_requested.connect(_on_view_clip_audio_assign_requested)
-	_view.timeline_interaction_started.connect(_on_view_timeline_interaction_started)
-	_view.clip_duplicate_requested.connect(_on_view_clip_duplicate_requested)
-	_view.clip_split_at_playhead_requested.connect(_on_view_clip_split_at_playhead_requested)
-	_view.audition_requested.connect(_on_view_audition_requested)
-	_view.clip_selected.connect(_on_view_clip_selected_for_effects_panel)
-	_view.selection_cleared.connect(_on_view_clip_selection_cleared_for_effects_panel)
+	_view_handlers = CodaTimelineViewHandlersScript.new(self)
+	_view_handlers.connect_view(_view)
 	_split_root.add_child(_view)
 	call_deferred("_clamp_split_offset")
 
@@ -383,7 +391,7 @@ func _soft_refresh_timeline_after_param_edit() -> void:
 	_rebuild_track_headers()
 	_sync_toolbar_to_timeline()
 	_update_validation()
-	if _selected_event != null:
+	if _selected_event != null and not _timeline_edit_interaction_active:
 		_preview.resync_preview_for_event(_selected_event.id)
 
 
@@ -583,27 +591,6 @@ func _emit_track_selection_changed() -> void:
 	track_selection_changed.emit(ev_id, trs[idx].id)
 
 
-func _on_view_clip_selected_for_effects_panel(clip_id: String) -> void:
-	if _selected_event == null:
-		return
-	if not clip_id.is_empty() and _selected_event.event_timeline != null:
-		var info: Dictionary = _selected_event.event_timeline.find_clip(clip_id)
-		if not info.is_empty():
-			var tr: CodaTimelineTrack = info.get("track") as CodaTimelineTrack
-			if tr != null:
-				var tracks: Array[CodaTimelineTrack] = _selected_event.event_timeline.tracks
-				for i in tracks.size():
-					if tracks[i].id == tr.id:
-						_sync_track_index_for_clip(i)
-						break
-	clip_selection_changed.emit(_selected_event.id, clip_id)
-
-
-func _on_view_clip_selection_cleared_for_effects_panel() -> void:
-	if _selected_event == null:
-		return
-	clip_selection_changed.emit(_selected_event.id, "")
-
 
 func _sync_toolbar_to_timeline() -> void:
 	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
@@ -626,11 +613,31 @@ func _update_validation() -> void:
 		_validation_label.visible = true
 
 
+func begin_timeline_edit_interaction() -> void:
+	_timeline_edit_interaction_active = true
+	_timeline_preview_commit_pending = false
+
+
+func commit_timeline_edit_interaction() -> void:
+	_timeline_edit_interaction_active = false
+	_commit_timeline_preview()
+	_timeline_preview_commit_pending = false
+
+
+func _commit_timeline_preview() -> void:
+	if _selected_event == null:
+		return
+	_preview.commit_transport_for_event(_selected_event.id, _view)
+
+
 func _notify_timeline_changed() -> void:
 	if _project == null or _selected_event == null:
 		return
 	_project.notify_event_timeline_changed(_selected_event.id)
-	_preview.resync_preview_for_event(_selected_event.id)
+	if _timeline_edit_interaction_active:
+		_timeline_preview_commit_pending = true
+	else:
+		_commit_timeline_preview()
 	_update_validation()
 	if _selected_event.event_timeline != null:
 		_toolbar_ui.sync_length_spin(_selected_event.event_timeline.length_seconds)
@@ -779,169 +786,6 @@ func _sync_track_index_for_clip(track_idx: int) -> void:
 	_rebuild_track_headers()
 
 
-func _on_view_track_row_selected(track_index: int) -> void:
-	_set_selected_track_index(track_index, true)
-
-
-func _on_view_clip_audio_assign_requested(clip_id: String, res_path: String) -> void:
-	if clip_id.is_empty() or res_path.is_empty() or _selected_event == null:
-		return
-	var t: CodaEventTimeline = _selected_event.event_timeline
-	if t == null:
-		return
-	_apply_mutation(CodaTimelineCommands.assign_clip_audio(t, clip_id, res_path))
-
-
-# ---------- View signals ----------
-
-func _on_view_clip_move_requested(
-	clip_id: String, new_start: float, new_track_index: int
-) -> void:
-	if _selected_event == null or _selected_event.event_timeline == null:
-		return
-	var t: CodaEventTimeline = _selected_event.event_timeline
-	var prev_count: int = t.tracks.size()
-	var snap: CodaEventTimeline = CodaTimelineCommands.move_clip_to_track(
-		t, clip_id, new_start, new_track_index
-	)
-	if snap != null:
-		_push_snapshot(snap)
-	if t.tracks.size() > prev_count:
-		_selected_track_index = t.tracks.size() - 1
-		_last_track_headers_sig = ""
-		_rebuild_track_headers()
-		if _view != null:
-			_view.set_track_row_highlight(_selected_track_index)
-		_emit_track_selection_changed()
-	CodaTimelineCommands.extend_timeline_if_content_exceeds(t)
-	_notify_timeline_changed()
-
-
-func _on_view_clip_fade_requested(
-	clip_id: String,
-	fade_in: float,
-	fade_out: float,
-	fade_in_curve: float,
-	fade_out_curve: float
-) -> void:
-	if _selected_event == null or _selected_event.event_timeline == null:
-		return
-	var t: CodaEventTimeline = _selected_event.event_timeline
-	CodaTimelineCommands.apply_clip_fades(
-		t, clip_id, fade_in, fade_out, fade_in_curve, fade_out_curve
-	)
-	_notify_timeline_changed()
-
-
-func _on_view_clip_resize_requested(
-	clip_id: String,
-	new_start: float,
-	new_duration: float,
-	new_offset_seconds: float
-) -> void:
-	if _selected_event == null or _selected_event.event_timeline == null:
-		return
-	var t: CodaEventTimeline = _selected_event.event_timeline
-	CodaTimelineCommands.resize_clip(t, clip_id, new_start, new_duration, new_offset_seconds)
-	CodaTimelineCommands.extend_timeline_if_content_exceeds(t)
-	_notify_timeline_changed()
-
-
-func _on_view_browser_asset_dropped(track_index: int, start_seconds: float, res_path: String) -> void:
-	if _selected_event == null or _selected_event.event_timeline == null:
-		return
-	_apply_mutation(
-		CodaTimelineCommands.drop_browser_asset(
-			_selected_event.event_timeline, track_index, start_seconds, res_path
-		)
-	)
-
-
-func _on_view_clip_delete_requested(clip_id: String) -> void:
-	if clip_id.is_empty() or _selected_event == null or _selected_event.event_timeline == null:
-		return
-	var snap: CodaEventTimeline = CodaTimelineCommands.delete_clip(
-		_selected_event.event_timeline, clip_id
-	)
-	if snap == null:
-		return
-	_push_snapshot(snap)
-	if _view != null:
-		_view.clear_selection()
-	_notify_timeline_changed()
-
-
-func _on_view_marker_changed(_marker_id: String, _new_time: float) -> void:
-	_notify_timeline_changed()
-
-
-func _on_view_work_point_changed(_kind: String, _new_time: float) -> void:
-	_notify_timeline_changed()
-
-
-func _on_view_work_point_toggle_requested(kind: String) -> void:
-	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
-		return
-	var t: CodaEventTimeline = _selected_event.event_timeline
-	var ph: float = _view.get_playhead()
-	var snap: CodaEventTimeline = null
-	if kind == "in":
-		snap = CodaTimelineCommands.toggle_in_point(t, ph)
-	else:
-		snap = CodaTimelineCommands.toggle_out_point(t, ph)
-	_apply_mutation(snap)
-
-
-func _on_view_work_point_delete_requested(kind: String) -> void:
-	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
-		return
-	var t: CodaEventTimeline = _selected_event.event_timeline
-	var snap: CodaEventTimeline = null
-	if kind == "in":
-		snap = CodaTimelineCommands.delete_in_point(t)
-	else:
-		snap = CodaTimelineCommands.delete_out_point(t)
-	if snap == null:
-		return
-	_apply_mutation(snap)
-	if _view.get_selected_work_point() == kind:
-		_view.clear_work_point_selection()
-
-
-func _on_view_loop_region_changed(_start: float, _end: float) -> void:
-	_notify_timeline_changed()
-
-
-func _on_view_playhead_seek_requested(time_seconds: float) -> void:
-	_preview.seek_playhead(time_seconds)
-
-
-func _on_view_marker_double_clicked(marker_id: String) -> void:
-	_open_marker_rename(marker_id)
-
-
-func _on_view_marker_selected(_marker_id: String) -> void:
-	pass
-
-
-func _on_view_marker_rename_requested(marker_id: String) -> void:
-	_open_marker_rename(marker_id)
-
-
-func _on_view_marker_delete_requested(marker_id: String) -> void:
-	_delete_marker(marker_id)
-
-
-func _on_view_marker_go_to_time_requested(marker_id: String) -> void:
-	if _selected_event == null or _selected_event.event_timeline == null or _view == null:
-		return
-	var m: CodaTimelineMarker = _selected_event.event_timeline.find_marker(marker_id)
-	if m == null:
-		return
-	_view.set_playhead(m.time_seconds)
-	_preview.seek_playhead(m.time_seconds)
-
-
 func _open_marker_rename(marker_id: String) -> void:
 	if _selected_event == null or _selected_event.event_timeline == null:
 		return
@@ -1059,11 +903,6 @@ func _redo_timeline() -> void:
 	_restore_timeline_from(fut)
 
 
-func _on_view_timeline_interaction_started() -> void:
-	if _selected_event == null or _selected_event.event_timeline == null:
-		return
-	_push_snapshot(CodaTimelineCommands.snapshot(_selected_event.event_timeline))
-
 
 func _on_zoom_fit_pressed() -> void:
 	if _view == null:
@@ -1080,20 +919,6 @@ func _on_split_clip_toolbar_pressed() -> void:
 		return
 	_run_split_command(cid, _view.get_playhead())
 
-
-func _on_view_clip_duplicate_requested(clip_id: String) -> void:
-	if clip_id.is_empty() or _selected_event == null or _selected_event.event_timeline == null:
-		return
-	var result: Dictionary = CodaTimelineCommands.duplicate_clip(
-		_selected_event.event_timeline, clip_id
-	)
-	_apply_split_or_duplicate_result(result)
-
-
-func _on_view_clip_split_at_playhead_requested(clip_id: String) -> void:
-	if clip_id.is_empty() or _selected_event == null or _selected_event.event_timeline == null or _view == null:
-		return
-	_run_split_command(clip_id, _view.get_playhead())
 
 
 func _run_split_command(clip_id: String, split_t: float) -> void:
@@ -1114,9 +939,6 @@ func _apply_split_or_duplicate_result(result: Dictionary) -> void:
 		return
 	_notify_timeline_changed()
 
-
-func _on_view_audition_requested() -> void:
-	_preview.toggle_audition()
 
 
 func _copy_selected_clip() -> void:

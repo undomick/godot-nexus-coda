@@ -2,28 +2,28 @@ extends RefCounted
 class_name TestSegmentDriver
 
 const CodaTimelineClipScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip.gd"
 )
 const CodaEventTimelineScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_event_timeline.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_event_timeline.gd"
 )
 const CodaTimelineTrackScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_track.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_track.gd"
 )
 const CodaTimelineSegmentDriverScript := preload(
 	"res://addons/nexus_coda/runtime/coda_timeline_segment_driver.gd"
 )
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
-const CodaBrowserNodeScript := preload("res://addons/nexus_coda/editor/browser/coda_browser_node.gd")
+const CodaBrowserNodeScript := preload("res://addons/nexus_coda/domain/coda_browser_node.gd")
 const CodaTestRuntimeScript := preload("res://addons/nexus_coda/tests/helpers/coda_test_runtime.gd")
 const CodaEventHandleScript := preload("res://addons/nexus_coda/runtime/coda_event_handle.gd")
 const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
 const CodaTimelineDispatcherScript := preload(
 	"res://addons/nexus_coda/runtime/coda_timeline_dispatcher.gd"
 )
-const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
+const CodaModulationScript := preload("res://addons/nexus_coda/domain/coda_modulation.gd")
 const CodaEventParameterScript := preload(
-	"res://addons/nexus_coda/editor/browser/coda_event_parameter.gd"
+	"res://addons/nexus_coda/domain/coda_event_parameter.gd"
 )
 const CodaRuntimeParameterPipelineScript := preload(
 	"res://addons/nexus_coda/runtime/coda_runtime_parameter_pipeline.gd"

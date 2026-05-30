@@ -2,10 +2,10 @@ extends RefCounted
 
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
 const CodaEventTimelineScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_event_timeline.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_event_timeline.gd"
 )
 const CodaTimelineClipScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip.gd"
 )
 const CodaInspectorSelectionScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_inspector_selection.gd"
@@ -20,7 +20,7 @@ const CodaEffectsChainViewScript := preload(
 	"res://addons/nexus_coda/editor/panels/effects/coda_effects_chain_view.gd"
 )
 const CodaTrackEffectScript := preload(
-	"res://addons/nexus_coda/editor/browser/effects/coda_track_effect.gd"
+	"res://addons/nexus_coda/domain/effects/coda_track_effect.gd"
 )
 
 

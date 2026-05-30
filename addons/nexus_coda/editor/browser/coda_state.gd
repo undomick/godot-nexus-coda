@@ -2,7 +2,7 @@ class_name CodaState
 extends RefCounted
 
 const CodaProjectSerializerScript := preload(
-	"res://addons/nexus_coda/editor/browser/coda_project_serializer.gd"
+	"res://addons/nexus_coda/domain/coda_project_serializer.gd"
 )
 const CodaEventsStoreScript := preload(
 	"res://addons/nexus_coda/editor/browser/stores/coda_events_store.gd"
@@ -18,6 +18,9 @@ const CodaBanksStoreScript := preload(
 )
 const CodaEffectsMutatorScript := preload(
 	"res://addons/nexus_coda/editor/browser/stores/coda_effects_mutator.gd"
+)
+const CodaProjectIndexScript := preload(
+	"res://addons/nexus_coda/domain/coda_project_index.gd"
 )
 
 signal structure_changed
@@ -41,14 +44,17 @@ var _assets_store: CodaAssetsStore
 var _mixer_store: CodaMixerStore
 var _banks_store: CodaBanksStore
 var _effects_mutator: CodaEffectsMutator
+var _project_index: CodaProjectIndex
 
 
 func _init() -> void:
-	_events_store = CodaEventsStoreScript.new(self)
-	_assets_store = CodaAssetsStoreScript.new(self, _events_store)
-	_mixer_store = CodaMixerStoreScript.new(self)
 	_banks_store = CodaBanksStoreScript.new(self)
+	_events_store = CodaEventsStoreScript.new(self, _banks_store)
+	_assets_store = CodaAssetsStoreScript.new(self)
+	_mixer_store = CodaMixerStoreScript.new(self)
 	_effects_mutator = CodaEffectsMutatorScript.new(self)
+	_project_index = CodaProjectIndexScript.new()
+	_project_index.bind_state(self)
 	clear_to_empty_project()
 
 
@@ -70,14 +76,46 @@ func set_theme_appearance(p_theme_mode: String, p_accent_color: Color) -> void:
 		normalized = "dark"
 	theme_mode = normalized
 	accent_color = p_accent_color
-	structure_changed.emit()
+	project_dirty.emit()
 
 
 func find_node_anywhere(target_id: String) -> CodaBrowserNode:
-	var e: CodaBrowserNode = events_root.find_by_id(target_id)
-	if e != null:
-		return e
-	return assets_root.find_by_id(target_id)
+	var indexed: CodaBrowserNode = _project_index.find_node_anywhere(target_id)
+	if indexed != null:
+		return indexed
+	return null
+
+
+func find_clip_anywhere(clip_id: String) -> Dictionary:
+	return _project_index.find_clip(clip_id)
+
+
+## Immutable playback copy; editor preview runtime must not share live authoring state.
+func duplicate_for_playback() -> CodaState:
+	var copy := CodaState.new()
+	CodaProjectSerializerScript.load_from_dictionary(
+		copy, CodaProjectSerializerScript.to_dictionary(self)
+	)
+	_copy_event_work_areas(events_root, copy.events_root)
+	return copy
+
+
+func _copy_event_work_areas(src_root: CodaBrowserNode, dst_root: CodaBrowserNode) -> void:
+	if src_root == null or dst_root == null:
+		return
+	if (
+		src_root.kind == CodaBrowserNode.Kind.EVENT
+		and dst_root.kind == CodaBrowserNode.Kind.EVENT
+	):
+		var src_tl: CodaEventTimeline = src_root.event_timeline
+		var dst_tl: CodaEventTimeline = dst_root.event_timeline
+		if src_tl != null and dst_tl != null:
+			const Transport := preload("res://addons/nexus_coda/domain/coda_timeline_transport.gd")
+			Transport.copy_preview_transport(src_tl, dst_tl)
+	for src_child in src_root.children:
+		var dst_child: CodaBrowserNode = dst_root.find_by_id(src_child.id)
+		if dst_child != null:
+			_copy_event_work_areas(src_child, dst_child)
 
 
 func parent_of(target_id: String) -> CodaBrowserNode:
@@ -152,29 +190,23 @@ func set_event_modulations(event_id: String, modulations: Array[CodaModulation])
 
 
 func rename_node(target_id: String, new_name: String) -> bool:
-	var node: CodaBrowserNode = find_node_anywhere(target_id)
-	if node == null or node == events_root or node == assets_root:
+	var err: String = _events_store.rename_events_node(target_id, new_name)
+	if err.is_empty():
+		return true
+	if err != "Event not found.":
 		return false
-	node.name = new_name.strip_edges()
-	if node.name.is_empty():
-		node.name = "Untitled"
-	structure_changed.emit()
-	return true
+	err = _assets_store.rename_assets_node(target_id, new_name)
+	return err.is_empty()
 
 
 func delete_node(target_id: String) -> bool:
-	var purge_event_ids: PackedStringArray = PackedStringArray()
-	var events_node: CodaBrowserNode = events_root.find_by_id(target_id)
-	if events_node != null:
-		purge_event_ids = _banks_store.collect_event_ids_in_subtree(events_node)
-	if events_root.remove_child_by_id(target_id):
-		_banks_store.purge_event_ids_from_banks(purge_event_ids)
-		structure_changed.emit()
+	var err: String = _events_store.delete_events_node(target_id)
+	if err.is_empty():
 		return true
-	if assets_root.remove_child_by_id(target_id):
-		structure_changed.emit()
-		return true
-	return false
+	if err != "Event not found.":
+		return false
+	err = _assets_store.delete_assets_node(target_id)
+	return err.is_empty()
 
 
 func move_events_drop(moving_id: String, target_id: String, section: int) -> bool:

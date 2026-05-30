@@ -42,6 +42,10 @@ const CodaRuntimeBusSyncScript := preload(
 const CodaRuntimeBankRegistryScript := preload(
 	"res://addons/nexus_coda/runtime/coda_runtime_bank_registry.gd"
 )
+const CodaAudioStreamCacheScript := preload(
+	"res://addons/nexus_coda/runtime/coda_audio_stream_cache.gd"
+)
+const CodaPlayOptionsScript := preload("res://addons/nexus_coda/domain/coda_play_options.gd")
 const NexusCodaLogScript := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 
 const RUNTIME_LOG_SCOPE := "runtime"
@@ -136,13 +140,12 @@ func set_project(project: Variant) -> void:
 	# Editor project loads and gameplay project swaps must not keep dispatchers tied to the
 	# previous CodaState (timeline cursors, graph plans, pooled players).
 	stop_all()
+	CodaAudioStreamCacheScript.clear()
 	if project != null:
 		_bank_registry.clear()
 	if _project != null:
-		if _project.structure_changed.is_connected(_on_project_buses_changed):
-			_project.structure_changed.disconnect(_on_project_buses_changed)
-		if _project.project_dirty.is_connected(_on_project_buses_changed):
-			_project.project_dirty.disconnect(_on_project_buses_changed)
+		if _project.structure_changed.is_connected(_on_project_bus_structure_changed):
+			_project.structure_changed.disconnect(_on_project_bus_structure_changed)
 	if project == null:
 		_project = null
 		if _snapshot_blender != null:
@@ -156,15 +159,13 @@ func set_project(project: Variant) -> void:
 		_snapshot_blender.setup(_project, Callable(_bus_sync, "sync_buses"))
 	_bus_sync.sync_buses()
 	if _project != null:
-		if not _project.structure_changed.is_connected(_on_project_buses_changed):
-			_project.structure_changed.connect(_on_project_buses_changed)
-		if not _project.project_dirty.is_connected(_on_project_buses_changed):
-			_project.project_dirty.connect(_on_project_buses_changed)
+		if not _project.structure_changed.is_connected(_on_project_bus_structure_changed):
+			_project.structure_changed.connect(_on_project_bus_structure_changed)
 	project_loaded.emit(_project)
 
 
-func _on_project_buses_changed() -> void:
-	_bus_sync.apply_loaded_bank_buses()
+func _on_project_bus_structure_changed() -> void:
+	_bus_sync.sync_buses()
 
 
 func resolve_bus_name_for_event(event: CodaBrowserNode) -> String:
@@ -477,20 +478,18 @@ func collect_runtime_handles() -> Array:
 func _start_event(
 	event: CodaBrowserNode, path: String, params: Dictionary, source_bank_id: String = ""
 ) -> CodaEventHandle:
-	var exclusive_preview: bool = bool(params.get("_coda_exclusive_preview", false))
-	params = params.duplicate()
-	params.erase("_coda_exclusive_preview")
-	# Editor panels pass this so a pinned Player preview cannot leave another event's timeline
-	# dispatcher running and lose lane voices when the voice pool reuses a player.
-	if exclusive_preview:
+	var play_opts: CodaPlayOptions = CodaPlayOptionsScript.from_params_dict(params)
+	if play_opts.exclusive_preview:
 		stop_all()
+	params = play_opts.to_params_dict()
 	if event.event_authoring_mode == CodaBrowserNode.AuthoringMode.TIMELINE:
 		return _timeline_dispatcher.start_timeline_event(event, path, params, source_bank_id)
 	# Build the parameter snapshot used to plan the graph (Switch/Blend look this up).
 	var live_params: Dictionary = _parameter_pipeline.build_param_values(event, params)
 	# Stamp routing on params so graph voices use the right bus per voice.
-	params = params.duplicate()
-	params["_coda_voice_bus"] = resolve_bus_name_for_event(event)
+	if play_opts.voice_bus.is_empty():
+		play_opts.voice_bus = resolve_bus_name_for_event(event)
+	params = play_opts.to_params_dict()
 	# Resolve the play list. Prefer the v2 graph; fall back to legacy flat list (random pick) if missing.
 	var plan_entries: Array = []
 	var graph_event_loop: bool = false

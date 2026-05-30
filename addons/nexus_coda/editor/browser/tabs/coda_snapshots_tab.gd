@@ -82,9 +82,12 @@ func attach_state(state: Variant) -> void:
 		return
 	if _project != null and _project.structure_changed.is_connected(_on_project_structure_changed):
 		_project.structure_changed.disconnect(_on_project_structure_changed)
+	if _project != null and _project.project_dirty.is_connected(_on_project_structure_changed):
+		_project.project_dirty.disconnect(_on_project_structure_changed)
 	_project = state as CodaState
 	if _project != null:
 		_project.structure_changed.connect(_on_project_structure_changed)
+		_project.project_dirty.connect(_on_project_structure_changed)
 	if _list != null:
 		_queue_rebuild()
 

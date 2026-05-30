@@ -4,7 +4,7 @@ class_name TestVoiceFader
 const CodaVoiceFaderScript := preload("res://addons/nexus_coda/runtime/coda_voice_fader.gd")
 const CodaFadeCurveScript := preload("res://addons/nexus_coda/runtime/coda_fade_curve.gd")
 const CodaTimelineClipScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip.gd"
 )
 
 

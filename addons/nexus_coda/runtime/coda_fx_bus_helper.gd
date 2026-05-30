@@ -6,7 +6,7 @@ class_name CodaFxBusHelper
 ## Godot only supports bus-level effect chains, not per-voice ones.
 
 const CodaEffectCatalogScript := preload(
-	"res://addons/nexus_coda/editor/browser/effects/coda_effect_catalog.gd"
+	"res://addons/nexus_coda/domain/effects/coda_effect_catalog.gd"
 )
 
 const BUS_NAME_PREFIX := "__CodaFx_"

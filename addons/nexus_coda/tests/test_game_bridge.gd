@@ -1,7 +1,7 @@
 extends RefCounted
 class_name TestGameBridge
 
-const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/editor/browser/coda_game_sync_rule.gd")
+const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/domain/coda_game_sync_rule.gd")
 const CodaGameSyncContextScript := preload("res://addons/nexus_coda/runtime/coda_game_sync_context.gd")
 const CodaGameSyncDispatcherScript := preload(
 	"res://addons/nexus_coda/runtime/coda_game_sync_dispatcher.gd"

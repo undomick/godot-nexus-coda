@@ -9,12 +9,12 @@ extends VBoxContainer
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaEmptyStateScript := preload("res://addons/nexus_coda/editor/theme/coda_empty_state.gd")
-const NodeData := preload("res://addons/nexus_coda/editor/browser/coda_event_graph_node_data.gd")
+const NodeData := preload("res://addons/nexus_coda/domain/coda_event_graph_node_data.gd")
 const CodaGraphNodeViewScript := preload(
 	"res://addons/nexus_coda/editor/panels/graph/coda_graph_node_view.gd"
 )
 const CodaEventGraphScript := preload(
-	"res://addons/nexus_coda/editor/browser/coda_event_graph.gd"
+	"res://addons/nexus_coda/domain/coda_event_graph.gd"
 )
 const CodaGraphSchedulerScript := preload(
 	"res://addons/nexus_coda/runtime/coda_graph_scheduler.gd"

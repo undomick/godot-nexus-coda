@@ -7,14 +7,14 @@ const CodaTimelineMarkerUiScript := preload(
 	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_marker_ui.gd"
 )
 const CodaEventTimelineScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_event_timeline.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_event_timeline.gd"
 )
 const CodaTimelineMarkerScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_marker.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_marker.gd"
 )
-const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
+const CodaJsonUtilScript := preload("res://addons/nexus_coda/domain/io/coda_json_util.gd")
 const CodaProjectSerializerScript := preload(
-	"res://addons/nexus_coda/editor/browser/coda_project_serializer.gd"
+	"res://addons/nexus_coda/domain/coda_project_serializer.gd"
 )
 const CodaRuntimeGraphPlaybackScript := preload(
 	"res://addons/nexus_coda/runtime/coda_runtime_graph_playback.gd"
@@ -30,14 +30,14 @@ const CodaEffectsChainBindingScript := preload(
 	"res://addons/nexus_coda/editor/panels/effects/coda_effects_chain_binding.gd"
 )
 const CodaTimelineClipScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip.gd"
 )
 const CodaTimelineTrackScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_track.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_track.gd"
 )
-const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
+const CodaModulationScript := preload("res://addons/nexus_coda/domain/coda_modulation.gd")
 const CodaEventParameterScript := preload(
-	"res://addons/nexus_coda/editor/browser/coda_event_parameter.gd"
+	"res://addons/nexus_coda/domain/coda_event_parameter.gd"
 )
 const CodaInspectorEffectsSectionScript := preload(
 	"res://addons/nexus_coda/editor/panels/inspector/coda_inspector_effects_section.gd"
@@ -46,10 +46,10 @@ const CodaInspectorSelectionScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_inspector_selection.gd"
 )
 const CodaEffectCatalogScript := preload(
-	"res://addons/nexus_coda/editor/browser/effects/coda_effect_catalog.gd"
+	"res://addons/nexus_coda/domain/effects/coda_effect_catalog.gd"
 )
 const CodaTrackEffectScript := preload(
-	"res://addons/nexus_coda/editor/browser/effects/coda_track_effect.gd"
+	"res://addons/nexus_coda/domain/effects/coda_track_effect.gd"
 )
 const InspectorSelectionFlowTests := preload(
 	"res://addons/nexus_coda/tests/test_inspector_selection_flow.gd"

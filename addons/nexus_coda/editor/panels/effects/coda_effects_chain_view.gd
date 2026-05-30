@@ -16,7 +16,7 @@ extends VBoxContainer
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 const CodaEffectCatalogScript := preload(
-	"res://addons/nexus_coda/editor/browser/effects/coda_effect_catalog.gd"
+	"res://addons/nexus_coda/domain/effects/coda_effect_catalog.gd"
 )
 
 const _LABEL_COL_WIDTH := 140

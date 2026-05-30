@@ -5,7 +5,7 @@ class_name CodaEventResolver
 ## Translates string event paths (e.g. "ui/click" or "events/ui/click") into CodaBrowserNode events.
 
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
-const CodaBrowserNodeScript := preload("res://addons/nexus_coda/editor/browser/coda_browser_node.gd")
+const CodaBrowserNodeScript := preload("res://addons/nexus_coda/domain/coda_browser_node.gd")
 
 const ROOT_PREFIX := "events/"
 

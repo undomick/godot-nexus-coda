@@ -5,7 +5,7 @@ extends RefCounted
 ## Persists dock layout JSON and layout preference under the editor cache dir.
 
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
-const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
+const CodaJsonUtilScript := preload("res://addons/nexus_coda/domain/io/coda_json_util.gd")
 const CodaEditorLayoutStoreScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_editor_layout_store.gd"
 )

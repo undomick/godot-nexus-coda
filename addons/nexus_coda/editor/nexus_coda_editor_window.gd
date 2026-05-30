@@ -1,9 +1,9 @@
-﻿@tool
+@tool
 extends Window
 
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
-const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.gd")
+const CodaProjectIo := preload("res://addons/nexus_coda/domain/io/coda_project_io.gd")
 const CodaDesignTokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 const CodaCommandPaletteScript := preload(
 	"res://addons/nexus_coda/editor/panels/palette/coda_command_palette.gd"
@@ -516,6 +516,9 @@ func _wire_inspector_selection() -> void:
 				_on_track_effects_focus_requested
 		):
 			_timeline_panel.track_effects_focus_requested.connect(_on_track_effects_focus_requested)
+	if _inspector_panel != null and _timeline_panel != null:
+		if _inspector_panel.has_method(&"wire_timeline_preview_debounce"):
+			_inspector_panel.wire_timeline_preview_debounce(_timeline_panel)
 	if _mixer_panel != null:
 		if not _mixer_panel.bus_user_selected.is_connected(_on_mixer_bus_selection_for_inspector):
 			_mixer_panel.bus_user_selected.connect(_on_mixer_bus_selection_for_inspector)
@@ -823,7 +826,11 @@ func _unwire_runtime_from_panels() -> void:
 
 func _push_project_to_runtime(state: Variant) -> void:
 	_ensure_editor_runtime()
-	if _editor_runtime != null:
+	if _editor_runtime == null:
+		return
+	if state is CodaState:
+		_editor_runtime.set_project((state as CodaState).duplicate_for_playback())
+	else:
 		_editor_runtime.set_project(state)
 
 
@@ -850,8 +857,8 @@ func _build_menus() -> void:
 
 	_rebuild_file_menu_items()
 	_rebuild_view_menu_items()
-	_help_menu.add_item("Command Palette…", HID_COMMAND_PALETTE)
-	_help_menu.add_item("Keyboard Shortcuts…", HID_SHORTCUTS)
+	_help_menu.add_item("Command Palette...", HID_COMMAND_PALETTE)
+	_help_menu.add_item("Keyboard Shortcuts...", HID_SHORTCUTS)
 	_file_menu.id_pressed.connect(_on_file_id_pressed)
 	_view_menu.id_pressed.connect(_on_view_id_pressed)
 	_view_menu.about_to_popup.connect(_refresh_view_menu_check_marks)

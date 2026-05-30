@@ -7,16 +7,14 @@ const CodaBrowserTreeDropScript := preload(
 )
 
 var _state: CodaState
-var _events_store: CodaEventsStore
 
 
-func _init(state: CodaState, events_store: CodaEventsStore) -> void:
+func _init(state: CodaState) -> void:
 	_state = state
-	_events_store = events_store
 
 
 func assets_parent_of(target_id: String) -> CodaBrowserNode:
-	return _parent_recursive(_state.assets_root, target_id)
+	return CodaBrowserTreeDropScript.parent_of_node(_state.assets_root, target_id)
 
 
 func add_assets_folder(parent_id: String, folder_name: String = "New Folder") -> CodaBrowserNode:
@@ -103,25 +101,98 @@ func move_assets_drop(moving_id: String, target_id: String, section: int) -> boo
 		target_id,
 		section,
 		Callable(self, &"assets_parent_of"),
-		Callable(_events_store, &"_validate_events_move_into"),
-		Callable(_events_store, &"_events_visual_list"),
-		Callable(_events_store, &"_events_insert_at_visual_index"),
-		Callable(_events_store, &"_events_into_folder_insert_index"),
-		Callable(_events_store, &"_events_child_visual_index")
+		Callable(self, &"_validate_assets_move_into"),
+		Callable(self, &"_assets_visual_list"),
+		Callable(self, &"_assets_insert_at_visual_index"),
+		Callable(self, &"_assets_into_folder_insert_index"),
+		Callable(self, &"_assets_child_visual_index")
 	):
 		_state.structure_changed.emit()
 		return true
 	return false
 
 
+func rename_assets_node(target_id: String, new_name: String) -> String:
+	var node: CodaBrowserNode = _state.assets_root.find_by_id(target_id)
+	if node == null:
+		return "Asset not found."
+	if node == _state.assets_root:
+		return "Cannot rename the Assets root."
+	var trimmed: String = new_name.strip_edges()
+	if trimmed.is_empty():
+		trimmed = "Untitled"
+	node.name = trimmed
+	_state.structure_changed.emit()
+	return ""
+
+
+func delete_assets_node(target_id: String) -> String:
+	if target_id.is_empty() or target_id == _state.assets_root.id:
+		return "Cannot delete the Assets root."
+	if not _state.assets_root.remove_child_by_id(target_id):
+		return "Asset not found."
+	_state.structure_changed.emit()
+	return ""
+
+
+func _assets_visual_list(parent: CodaBrowserNode) -> Array[CodaBrowserNode]:
+	var out: Array[CodaBrowserNode] = []
+	for c in parent.children:
+		out.append(c)
+	return out
+
+
+func _assets_child_visual_index(parent: CodaBrowserNode, child_id: String) -> int:
+	var visual: Array[CodaBrowserNode] = _assets_visual_list(parent)
+	for i in range(visual.size()):
+		if visual[i].id == child_id:
+			return i
+	return visual.size()
+
+
+func _assets_into_folder_insert_index(dest_parent: CodaBrowserNode, moving: CodaBrowserNode) -> int:
+	var visual: Array[CodaBrowserNode] = _assets_visual_list(dest_parent)
+	if moving.is_folder():
+		var idx: int = 0
+		for c in visual:
+			if c.is_folder():
+				idx += 1
+			else:
+				break
+		return idx
+	return visual.size()
+
+
+func _validate_assets_move_into(moving: CodaBrowserNode, dest_parent: CodaBrowserNode) -> bool:
+	if not moving.is_folder():
+		return true
+	if moving.id == dest_parent.id:
+		return false
+	return moving.find_by_id(dest_parent.id) == null
+
+
+func _apply_visual_order_folders_first(parent: CodaBrowserNode, visual: Array[CodaBrowserNode]) -> void:
+	var folders: Array[CodaBrowserNode] = []
+	var rest: Array[CodaBrowserNode] = []
+	for c in visual:
+		if c.is_folder():
+			folders.append(c)
+		else:
+			rest.append(c)
+	parent.children.clear()
+	parent.children.append_array(folders)
+	parent.children.append_array(rest)
+
+
+func _assets_insert_at_visual_index(parent: CodaBrowserNode, moving: CodaBrowserNode, visual_index: int) -> void:
+	var visual: Array[CodaBrowserNode] = _assets_visual_list(parent)
+	var idx: int = clampi(visual_index, 0, visual.size())
+	visual.insert(idx, moving)
+	_apply_visual_order_folders_first(parent, visual)
+
+
 func _parent_recursive(parent: CodaBrowserNode, target_id: String) -> CodaBrowserNode:
-	for child in parent.children:
-		if child.id == target_id:
-			return parent
-		var deeper: CodaBrowserNode = _parent_recursive(child, target_id)
-		if deeper != null:
-			return deeper
-	return null
+	return CodaBrowserTreeDropScript.parent_of_node(parent, target_id)
 
 
 func _import_one_res_path_under_assets_parent(coda_parent: CodaBrowserNode, res_path: String) -> bool:

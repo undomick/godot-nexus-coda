@@ -4,7 +4,7 @@ extends RefCounted
 
 ## Timeline layout fingerprints and shared track filtering for runtime dispatch.
 
-const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
+const CodaJsonUtilScript := preload("res://addons/nexus_coda/domain/io/coda_json_util.gd")
 
 
 static func timeline_has_solo(timeline: CodaEventTimeline) -> bool:

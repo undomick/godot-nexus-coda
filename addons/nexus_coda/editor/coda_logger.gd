@@ -5,7 +5,7 @@ extends Node
 
 const PRODUCT := "Nexus Coda"
 const PROJECT_PREFIX := "nexus/coda/logger/"
-const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
+const CodaJsonUtilScript := preload("res://addons/nexus_coda/domain/io/coda_json_util.gd")
 const DEFAULT_BUFFER_SIZE := 512
 const DEFAULT_FILE_PATH := "user://nexus_coda_log.ndjson"
 

@@ -10,7 +10,7 @@ const CodaTimelineSegmentDriverScript := preload(
 const CodaTestRuntimeScript := preload("res://addons/nexus_coda/tests/helpers/coda_test_runtime.gd")
 const CodaEventHandleScript := preload("res://addons/nexus_coda/runtime/coda_event_handle.gd")
 const CodaTimelineMarkerScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_marker.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_marker.gd"
 )
 
 

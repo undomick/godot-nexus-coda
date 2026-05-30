@@ -76,9 +76,8 @@ static func set_bpm(timeline: CodaEventTimeline, bpm: float) -> void:
 
 static func set_loop_enabled(timeline: CodaEventTimeline, on: bool) -> void:
 	timeline.loop_enabled = on
-	if on and timeline.loop_end_seconds <= timeline.loop_start_seconds:
-		timeline.loop_start_seconds = 0.0
-		timeline.loop_end_seconds = timeline.length_seconds
+	if on:
+		timeline.clamp_loop_region_to_length()
 
 
 static func set_timeline_length(timeline: CodaEventTimeline, value: float) -> CodaEventTimeline:
@@ -88,15 +87,6 @@ static func set_timeline_length(timeline: CodaEventTimeline, value: float) -> Co
 		snap = snapshot(timeline)
 	timeline.length_seconds = new_length
 	clamp_clips_to_timeline_length(timeline)
-	if timeline.loop_enabled:
-		timeline.loop_start_seconds = clampf(
-			timeline.loop_start_seconds, 0.0, timeline.length_seconds
-		)
-		timeline.loop_end_seconds = clampf(
-			timeline.loop_end_seconds,
-			timeline.loop_start_seconds + 0.01,
-			timeline.length_seconds
-		)
 	timeline.clamp_work_points_to_length()
 	return snap
 
@@ -106,8 +96,6 @@ static func fit_timeline_length(timeline: CodaEventTimeline, margin: float = 0.2
 	var need: float = timeline_content_end_seconds(timeline)
 	timeline.length_seconds = maxf(0.5, need + margin)
 	clamp_clips_to_timeline_length(timeline)
-	if timeline.loop_enabled:
-		timeline.loop_end_seconds = minf(timeline.loop_end_seconds, timeline.length_seconds)
 	timeline.clamp_work_points_to_length()
 	return snap
 
@@ -190,6 +178,7 @@ static func add_clip(
 	var remain: float = max(0.01, timeline.length_seconds - clip.start_seconds)
 	clip.duration_seconds = clampf(min(1.0, max(0.5, remain)), 0.05, remain)
 	timeline.tracks[tr_i].clips.append(clip)
+	timeline.invalidate_clip_index()
 	extend_timeline_if_content_exceeds(timeline)
 	return snap
 
@@ -232,6 +221,7 @@ static func drop_browser_asset(
 	clip.offset_seconds = 0.0
 	clip.duration_seconds = clip.max_source_playable_seconds()
 	timeline.tracks[track_index].clips.append(clip)
+	timeline.invalidate_clip_index()
 	extend_timeline_if_content_exceeds(timeline)
 	return snap
 
@@ -255,6 +245,7 @@ static func move_clip(
 	if from_track != to_track:
 		from_track.clips.erase(clip)
 		to_track.clips.append(clip)
+		timeline.invalidate_clip_index()
 	clip.start_seconds = clamped_start
 
 
@@ -426,6 +417,7 @@ static func delete_clip(timeline: CodaEventTimeline, clip_id: String) -> CodaEve
 	var idx: int = track.clips.find(clip)
 	if idx >= 0:
 		track.clips.remove_at(idx)
+		timeline.invalidate_clip_index()
 	return snap
 
 

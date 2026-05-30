@@ -29,7 +29,7 @@ func update_bus_solo(bus_id: String, solo: bool) -> void:
 	if b == null:
 		return
 	b.solo = solo
-	_state.structure_changed.emit()
+	_state.project_dirty.emit()
 
 
 func update_bus_bypass(bus_id: String, bypass: bool) -> void:
@@ -215,7 +215,7 @@ func add_snapshot(p_name: String = "Snapshot") -> CodaSnapshot:
 			"send_target_id": b.send_target_id,
 		}
 	_state.snapshots.append(s)
-	_state.structure_changed.emit()
+	_state.project_dirty.emit()
 	return s
 
 
@@ -223,7 +223,7 @@ func remove_snapshot(snapshot_id: String) -> bool:
 	for i in range(_state.snapshots.size() - 1, -1, -1):
 		if _state.snapshots[i].id == snapshot_id:
 			_state.snapshots.remove_at(i)
-			_state.structure_changed.emit()
+			_state.project_dirty.emit()
 			return true
 	return false
 
@@ -235,7 +235,7 @@ func rename_snapshot(snapshot_id: String, new_name: String) -> bool:
 			if trimmed.is_empty():
 				trimmed = "Snapshot"
 			s.snapshot_name = trimmed
-			_state.structure_changed.emit()
+			_state.project_dirty.emit()
 			return true
 	return false
 
@@ -269,7 +269,7 @@ func apply_snapshot(snapshot_id: String) -> bool:
 		b.solo = bool(entry.get("solo", b.solo))
 		b.bypass = bool(entry.get("bypass", b.bypass))
 		b.send_target_id = str(entry.get("send_target_id", b.send_target_id))
-	_state.structure_changed.emit()
+	_state.project_dirty.emit()
 	return true
 
 

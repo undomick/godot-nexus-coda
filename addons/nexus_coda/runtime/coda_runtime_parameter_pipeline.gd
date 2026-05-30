@@ -4,7 +4,7 @@ extends RefCounted
 
 ## Parameter smoothing, globals, and per-voice modulation for CodaRuntime.
 
-const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
+const CodaModulationScript := preload("res://addons/nexus_coda/domain/coda_modulation.gd")
 
 var _runtime: CodaRuntime = null
 var _global_params: Dictionary = {}

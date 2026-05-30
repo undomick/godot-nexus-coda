@@ -4,7 +4,7 @@ class_name CodaGraphScheduler
 
 ## One-shot event graph evaluation: trigger walk to ordered SOUND plan entries.
 
-const NodeData := preload("res://addons/nexus_coda/editor/browser/coda_event_graph_node_data.gd")
+const NodeData := preload("res://addons/nexus_coda/domain/coda_event_graph_node_data.gd")
 
 ## Returns `{ "entries": Array, "event_loop": bool }`.
 static func plan(graph: CodaEventGraph, param_values: Dictionary = {}, seed: int = 0) -> Dictionary:

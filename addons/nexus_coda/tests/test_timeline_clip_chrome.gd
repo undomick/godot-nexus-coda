@@ -5,7 +5,7 @@ const ChromeScript := preload(
 	"res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_clip_chrome.gd"
 )
 const CodaTimelineClipScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip.gd"
 )
 
 

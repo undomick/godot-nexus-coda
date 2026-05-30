@@ -2,8 +2,8 @@ extends RefCounted
 
 ## Session autosave under the editor cache dir. Restores the newest of autosave vs last saved file.
 
-const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.gd")
-const CodaJsonUtilScript := preload("res://addons/nexus_coda/editor/io/coda_json_util.gd")
+const CodaProjectIo := preload("res://addons/nexus_coda/domain/io/coda_project_io.gd")
+const CodaJsonUtilScript := preload("res://addons/nexus_coda/domain/io/coda_json_util.gd")
 
 const AUTOSAVE_SUBDIR := "nexus_coda"
 const AUTOSAVE_FILENAME := "project_autosave.json"

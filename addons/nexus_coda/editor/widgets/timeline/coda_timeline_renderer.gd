@@ -9,6 +9,9 @@ const Chrome := preload("res://addons/nexus_coda/editor/widgets/timeline/coda_ti
 const CodaTimelineWaveformCacheScript := preload(
 	"res://addons/nexus_coda/editor/widgets/timeline/coda_timeline_waveform_cache.gd"
 )
+const CodaTimelineTransportScript := preload(
+	"res://addons/nexus_coda/domain/coda_timeline_transport.gd"
+)
 
 const RULER_HEIGHT := 22
 const MARKER_FLAG_HALF_W := 5.0
@@ -184,8 +187,11 @@ static func draw_loop_region(canvas: CanvasItem, state: Dictionary) -> void:
 	var widget_size: Vector2 = state.get("size", Vector2.ZERO)
 	var scroll_seconds: float = state.get("scroll_seconds", 0.0)
 	var seconds_per_pixel: float = state.get("seconds_per_pixel", 1.0 / 80.0)
-	var x0: float = seconds_to_x(timeline.loop_start_seconds, scroll_seconds, seconds_per_pixel)
-	var x1: float = seconds_to_x(timeline.loop_end_seconds, scroll_seconds, seconds_per_pixel)
+	var bounds: Dictionary = CodaTimelineTransportScript.effective_loop_bounds(timeline)
+	var t0: float = float(bounds.get("start", 0.0))
+	var t1: float = float(bounds.get("end", 0.0))
+	var x0: float = seconds_to_x(t0, scroll_seconds, seconds_per_pixel)
+	var x1: float = seconds_to_x(t1, scroll_seconds, seconds_per_pixel)
 	if x1 <= x0:
 		return
 	var rect_full: Rect2 = Rect2(

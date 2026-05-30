@@ -5,7 +5,7 @@ extends CodaBrowserTab
 ## Game Syncs tab — parameters/modulations overview plus editable game-sync rules.
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
-const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/editor/browser/coda_game_sync_rule.gd")
+const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/domain/coda_game_sync_rule.gd")
 
 const KIND_PARAMETER := "parameter"
 const KIND_MODULATION := "modulation"

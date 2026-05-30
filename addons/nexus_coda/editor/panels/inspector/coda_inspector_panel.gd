@@ -433,3 +433,17 @@ func _show_empty() -> void:
 		_empty_state.visible = true
 	if _scroll != null:
 		_scroll.visible = false
+
+
+func wire_timeline_preview_debounce(timeline_panel: CodaTimelinePanel) -> void:
+	if _clip_section == null or timeline_panel == null:
+		return
+	var begin := Callable(timeline_panel, &"begin_timeline_edit_interaction")
+	var commit := Callable(timeline_panel, &"commit_timeline_edit_interaction")
+	var notify := Callable(timeline_panel, &"_notify_timeline_changed")
+	if not _clip_section.clip_fade_edit_started.is_connected(begin):
+		_clip_section.clip_fade_edit_started.connect(begin)
+	if not _clip_section.clip_fade_edit_committed.is_connected(commit):
+		_clip_section.clip_fade_edit_committed.connect(commit)
+	if not _clip_section.clip_properties_changed.is_connected(notify):
+		_clip_section.clip_properties_changed.connect(notify)

@@ -13,34 +13,34 @@ extends RefCounted
 ## the project still parses, opens cleanly, and demonstrates every panel.
 
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
-const CodaBrowserNodeScript := preload("res://addons/nexus_coda/editor/browser/coda_browser_node.gd")
+const CodaBrowserNodeScript := preload("res://addons/nexus_coda/domain/coda_browser_node.gd")
 const CodaEventParameterScript := preload(
-	"res://addons/nexus_coda/editor/browser/coda_event_parameter.gd"
+	"res://addons/nexus_coda/domain/coda_event_parameter.gd"
 )
-const CodaEventGraphScript := preload("res://addons/nexus_coda/editor/browser/coda_event_graph.gd")
+const CodaEventGraphScript := preload("res://addons/nexus_coda/domain/coda_event_graph.gd")
 const CodaEventGraphNodeDataScript := preload(
-	"res://addons/nexus_coda/editor/browser/coda_event_graph_node_data.gd"
+	"res://addons/nexus_coda/domain/coda_event_graph_node_data.gd"
 )
 const CodaEventGraphEdgeScript := preload(
-	"res://addons/nexus_coda/editor/browser/coda_event_graph_edge.gd"
+	"res://addons/nexus_coda/domain/coda_event_graph_edge.gd"
 )
-const CodaModulationScript := preload("res://addons/nexus_coda/editor/browser/coda_modulation.gd")
-const CodaBusScript := preload("res://addons/nexus_coda/editor/browser/coda_bus.gd")
-const CodaSnapshotScript := preload("res://addons/nexus_coda/editor/browser/coda_snapshot.gd")
-const CodaBankScript := preload("res://addons/nexus_coda/editor/browser/coda_bank.gd")
+const CodaModulationScript := preload("res://addons/nexus_coda/domain/coda_modulation.gd")
+const CodaBusScript := preload("res://addons/nexus_coda/domain/coda_bus.gd")
+const CodaSnapshotScript := preload("res://addons/nexus_coda/domain/coda_snapshot.gd")
+const CodaBankScript := preload("res://addons/nexus_coda/domain/coda_bank.gd")
 const CodaEventTimelineScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_event_timeline.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_event_timeline.gd"
 )
 const CodaTimelineTrackScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_track.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_track.gd"
 )
 const CodaTimelineClipScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_clip.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip.gd"
 )
 const CodaTimelineMarkerScript := preload(
-	"res://addons/nexus_coda/editor/browser/timeline/coda_timeline_marker.gd"
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_marker.gd"
 )
-const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/editor/browser/coda_game_sync_rule.gd")
+const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/domain/coda_game_sync_rule.gd")
 
 
 static func build() -> CodaState:

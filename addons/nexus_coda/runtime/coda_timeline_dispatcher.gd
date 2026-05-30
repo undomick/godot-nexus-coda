@@ -15,6 +15,10 @@ const CodaTimelineLaneVoiceScript := preload(
 const CodaTimelineClipDispatchScript := preload(
 	"res://addons/nexus_coda/runtime/coda_timeline_clip_dispatch.gd"
 )
+const CodaPlayOptionsScript := preload("res://addons/nexus_coda/domain/coda_play_options.gd")
+const CodaTimelineTransportScript := preload(
+	"res://addons/nexus_coda/domain/coda_timeline_transport.gd"
+)
 
 var _runtime: CodaRuntime = null
 var _voice_fader: CodaVoiceFader = null
@@ -65,12 +69,12 @@ func start_timeline_event(
 	handle.timeline_length_seconds = timeline.length_seconds
 	var start_sec: float = float(params.get("timeline_cursor_start", 0.0))
 	handle.timeline_cursor_seconds = clampf(start_sec, 0.0, timeline.length_seconds)
+	var play_opts: CodaPlayOptions = CodaPlayOptionsScript.from_params_dict(params)
 	var loop_override_start: float = -1.0
 	var loop_override_end: float = -1.0
-	var loop_region: Variant = params.get("_coda_loop_region", null)
-	if loop_region is Array and (loop_region as Array).size() == 2:
-		loop_override_start = float((loop_region as Array)[0])
-		loop_override_end = float((loop_region as Array)[1])
+	if play_opts.has_loop_region():
+		loop_override_start = play_opts.loop_region_start
+		loop_override_end = play_opts.loop_region_end
 
 	var dispatchers: Dictionary = _runtime.get_timeline_dispatchers()
 	dispatchers[handle] = {
@@ -86,6 +90,8 @@ func start_timeline_event(
 	}
 	handle.timeline_runtime = _runtime
 	var dispatch_entry: Dictionary = dispatchers[handle]
+	if loop_override_start < 0.0 or loop_override_end <= loop_override_start:
+		CodaTimelineTransportScript.sync_dispatcher_bounds(handle, dispatch_entry, timeline)
 	_clip_dispatch.prime_overlapping_voices(handle, dispatch_entry, timeline, handle.timeline_cursor_seconds)
 	_sync_segment_voice_after_prime(handle, dispatch_entry, timeline)
 	_runtime.runtime_emit_voice_started(handle)
@@ -111,6 +117,8 @@ func tick_dispatchers(delta: float) -> void:
 
 		_runtime.get_parameter_pipeline().advance_smoothing(handle, delta)
 
+		CodaTimelineTransportScript.sync_dispatcher_bounds(handle, d, timeline)
+
 		if handle.timeline_pending_seek_seconds >= 0.0:
 			var seek_target: float = handle.timeline_pending_seek_seconds
 			handle.timeline_pending_seek_seconds = -1.0
@@ -123,6 +131,16 @@ func tick_dispatchers(delta: float) -> void:
 
 		if handle._paused:
 			continue
+
+		if timeline.has_work_area():
+			var wa_lo: float = timeline.work_area_start()
+			var wa_hi: float = timeline.work_area_end()
+			if handle.timeline_cursor_seconds < wa_lo:
+				handle.timeline_cursor_seconds = wa_lo
+			elif handle.timeline_cursor_seconds > wa_hi and not handle.loop:
+				handle.timeline_cursor_seconds = wa_hi
+				finalize_handle(handle)
+				continue
 
 		var prev_cursor: float = handle.timeline_cursor_seconds
 		var next_cursor: float = prev_cursor + delta
@@ -138,10 +156,19 @@ func tick_dispatchers(delta: float) -> void:
 				loop_end = -1.0
 
 		var wrapped: bool = false
-		if loop_end > 0.0:
-			while next_cursor >= loop_end:
-				next_cursor = loop_start + (next_cursor - loop_end)
-				wrapped = true
+		if loop_end > loop_start and loop_end > 0.0:
+			if next_cursor >= loop_end:
+				if handle.loop:
+					while next_cursor >= loop_end:
+						next_cursor = loop_start + (next_cursor - loop_end)
+					wrapped = true
+				else:
+					_clip_dispatch.fire_clips_in_range(
+						handle, d, timeline, prev_cursor, loop_end
+					)
+					handle.timeline_cursor_seconds = loop_end
+					finalize_handle(handle)
+					continue
 		elif next_cursor >= timeline.length_seconds:
 			if handle.loop:
 				while next_cursor >= timeline.length_seconds and timeline.length_seconds > 0.0:
@@ -240,7 +267,7 @@ func resync_preview_for_event(event_id: String) -> void:
 		return
 	var handle: CodaEventHandle = active_handle_for_event(event_id)
 	var dispatchers: Dictionary = _runtime.get_timeline_dispatchers()
-	if handle == null or not dispatchers.has(handle) or handle._paused:
+	if handle == null or not dispatchers.has(handle):
 		return
 	var event: CodaBrowserNode = handle.event_node as CodaBrowserNode
 	if event == null or event.event_timeline == null:
@@ -249,9 +276,12 @@ func resync_preview_for_event(event_id: String) -> void:
 	var d: Dictionary = dispatchers[handle]
 	d["timeline"] = timeline
 	handle.timeline_length_seconds = timeline.length_seconds
-	_apply_work_area_loop_override(d, timeline)
+	CodaTimelineTransportScript.sync_dispatcher_bounds(handle, d, timeline)
+	if handle._paused:
+		return
 	var sig: String = CodaRuntimeTimelineLayoutScript.layout_signature(timeline)
 	if String(d.get("layout_sig", "")) == sig:
+		_clip_dispatch.refresh_voice_output_levels(handle, d, timeline)
 		return
 	d["layout_sig"] = sig
 	CodaTimelineClipDispatchScript.reset_bookkeeping(d)
@@ -405,12 +435,3 @@ func _sync_segment_voice_after_prime(
 		return
 	# Segment lanes follow music-state params, not cursor overlap.
 	_runtime.notify_music_state_changed(handle)
-
-
-static func _apply_work_area_loop_override(d: Dictionary, timeline: CodaEventTimeline) -> void:
-	if timeline.has_work_area():
-		d["loop_override_start"] = timeline.work_area_start()
-		d["loop_override_end"] = timeline.work_area_end()
-	else:
-		d["loop_override_start"] = -1.0
-		d["loop_override_end"] = -1.0

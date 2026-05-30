@@ -1,7 +1,7 @@
 class_name CodaBanksStore
 extends RefCounted
 
-const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/editor/browser/coda_game_sync_rule.gd")
+const CodaGameSyncRuleScript := preload("res://addons/nexus_coda/domain/coda_game_sync_rule.gd")
 
 var _state: CodaState
 

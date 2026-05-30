@@ -2,9 +2,9 @@
 class_name CodaRuntimeBankRegistry
 extends RefCounted
 
-const CodaBankExportScript := preload("res://addons/nexus_coda/editor/io/coda_bank_export.gd")
-const CodaBrowserNodeScript := preload("res://addons/nexus_coda/editor/browser/coda_browser_node.gd")
-const CodaBusScript := preload("res://addons/nexus_coda/editor/browser/coda_bus.gd")
+const CodaBankExportScript := preload("res://addons/nexus_coda/domain/io/coda_bank_export.gd")
+const CodaBrowserNodeScript := preload("res://addons/nexus_coda/domain/coda_browser_node.gd")
+const CodaBusScript := preload("res://addons/nexus_coda/domain/coda_bus.gd")
 
 var _runtime: CodaRuntime = null
 var _loaded_banks: Dictionary = {}

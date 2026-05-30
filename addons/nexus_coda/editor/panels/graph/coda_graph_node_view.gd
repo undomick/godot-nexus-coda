@@ -10,7 +10,7 @@ signal browse_audio_requested(node_id: String)
 signal preview_sound_requested(node_id: String)
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
-const NodeData := preload("res://addons/nexus_coda/editor/browser/coda_event_graph_node_data.gd")
+const NodeData := preload("res://addons/nexus_coda/domain/coda_event_graph_node_data.gd")
 const AUDIO_TYPE := 0
 
 var _data_ref: CodaEventGraphNodeData

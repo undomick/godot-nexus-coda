@@ -5,6 +5,16 @@ extends RefCounted
 ## Shared drag-drop placement for Events and Assets browser trees.
 
 
+static func parent_of_node(root: CodaBrowserNode, target_id: String) -> CodaBrowserNode:
+	for child in root.children:
+		if child.id == target_id:
+			return root
+		var deeper: CodaBrowserNode = parent_of_node(child, target_id)
+		if deeper != null:
+			return deeper
+	return null
+
+
 static func move_drop(
 	tree_root: CodaBrowserNode,
 	root_node_id: String,

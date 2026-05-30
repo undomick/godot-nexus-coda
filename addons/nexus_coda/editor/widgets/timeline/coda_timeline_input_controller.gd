@@ -69,6 +69,7 @@ signal loop_region_changed(start_seconds: float, end_seconds: float)
 signal playhead_seek_requested(time_seconds: float)
 signal selection_cleared
 signal timeline_interaction_started
+signal timeline_interaction_committed
 signal audition_requested
 
 var _drag_kind: DragKind = DragKind.NONE
@@ -506,22 +507,30 @@ func _handle_mouse_motion(view: CodaTimelineView, mm: InputEventMouseMotion) -> 
 		DragKind.IN_POINT_MOVE:
 			var in_t: float = _clamp_in_point_time(timeline, apply_snap(view, t))
 			timeline.in_point_seconds = in_t
+			timeline.clamp_work_points_to_length()
 			work_point_changed.emit("in", in_t)
 			view.queue_redraw()
 		DragKind.OUT_POINT_MOVE:
 			var out_t: float = _clamp_out_point_time(timeline, apply_snap(view, t))
 			timeline.out_point_seconds = out_t
+			timeline.clamp_work_points_to_length()
 			work_point_changed.emit("out", out_t)
 			view.queue_redraw()
 		DragKind.LOOP_START:
 			var ls: float = clampf(apply_snap(view, t), 0.0, timeline.loop_end_seconds - 0.01)
 			timeline.loop_start_seconds = ls
-			loop_region_changed.emit(ls, timeline.loop_end_seconds)
+			timeline.clamp_loop_region_to_length()
+			loop_region_changed.emit(timeline.loop_start_seconds, timeline.loop_end_seconds)
 			view.queue_redraw()
 		DragKind.LOOP_END:
-			var le: float = max(timeline.loop_start_seconds + 0.01, apply_snap(view, t))
+			var le: float = clampf(
+				max(timeline.loop_start_seconds + 0.01, apply_snap(view, t)),
+				timeline.loop_start_seconds + 0.01,
+				timeline.length_seconds
+			)
 			timeline.loop_end_seconds = le
-			loop_region_changed.emit(timeline.loop_start_seconds, le)
+			timeline.clamp_loop_region_to_length()
+			loop_region_changed.emit(timeline.loop_start_seconds, timeline.loop_end_seconds)
 			view.queue_redraw()
 
 
@@ -629,6 +638,7 @@ func _begin_drag(view: CodaTimelineView, hit: Dictionary, mb: InputEventMouseBut
 
 
 func _end_drag() -> void:
+	var released_kind: DragKind = _drag_kind
 	_drag_kind = DragKind.NONE
 	_drag_clip_id = ""
 	_drag_marker_id = ""
@@ -636,6 +646,25 @@ func _end_drag() -> void:
 	_work_point_press_kind = ""
 	_ghost_new_track = false
 	_hover_clip_edge = "none"
+	if _drag_commits_preview_on_release(released_kind):
+		timeline_interaction_committed.emit()
+
+
+static func _drag_commits_preview_on_release(kind: DragKind) -> bool:
+	return kind in [
+		DragKind.CLIP_MOVE,
+		DragKind.CLIP_RESIZE_LEFT,
+		DragKind.CLIP_RESIZE_RIGHT,
+		DragKind.CLIP_FADE_IN,
+		DragKind.CLIP_FADE_OUT,
+		DragKind.CLIP_FADE_IN_SHAPE,
+		DragKind.CLIP_FADE_OUT_SHAPE,
+		DragKind.MARKER_MOVE,
+		DragKind.LOOP_START,
+		DragKind.LOOP_END,
+		DragKind.IN_POINT_MOVE,
+		DragKind.OUT_POINT_MOVE,
+	]
 
 
 func _resolve_move_target_track_index(view: CodaTimelineView, y: float) -> int:

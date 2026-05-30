@@ -5,7 +5,7 @@ extends RefCounted
 ## Build menu, theme, sample project, and command-palette action registry.
 
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
-const CodaBankExportScript := preload("res://addons/nexus_coda/editor/io/coda_bank_export.gd")
+const CodaBankExportScript := preload("res://addons/nexus_coda/domain/io/coda_bank_export.gd")
 const CodaDesignTokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 const CodaSampleProjectScript := preload(
 	"res://addons/nexus_coda/editor/samples/coda_sample_project.gd"

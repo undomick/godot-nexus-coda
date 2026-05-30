@@ -8,6 +8,9 @@ extends CodaBrowserTab
 ## the request to the Inspector so the Banks section can edit the selected bank.
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
+const CodaBrowserRenameDialogScript := preload(
+	"res://addons/nexus_coda/editor/browser/coda_browser_rename_dialog.gd"
+)
 
 const _CTX_RENAME := 1
 const _CTX_DUPLICATE := 2
@@ -19,8 +22,7 @@ var _list: ItemList
 var _add_button: Button
 var _delete_button: Button
 var _rebuild_queued: bool = false
-var _rename_dialog: AcceptDialog
-var _rename_field: LineEdit
+var _rename_ui: CodaBrowserRenameDialog
 var _rename_target_id: String = ""
 var _delete_dialog: ConfirmationDialog
 var _delete_target_id: String = ""
@@ -86,11 +88,7 @@ func _ready() -> void:
 func attach_state(state: Variant) -> void:
 	if state == null:
 		return
-	if _project != null and _project.structure_changed.is_connected(_on_project_structure_changed):
-		_project.structure_changed.disconnect(_on_project_structure_changed)
-	_project = state as CodaState
-	if _project != null:
-		_project.structure_changed.connect(_on_project_structure_changed)
+	_project = CodaBrowserTab.bind_structure_changed(state, _project, _on_project_structure_changed)
 	if _list != null:
 		_queue_rebuild()
 
@@ -257,28 +255,13 @@ func _emit_selection() -> bool:
 
 
 func _setup_rename_dialog() -> void:
-	_rename_dialog = AcceptDialog.new()
-	_rename_dialog.title = "Rename Bank"
-	_rename_field = LineEdit.new()
-	_rename_field.custom_minimum_size = Vector2(280, 0)
-	_rename_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override(&"margin_left", 8)
-	margin.add_theme_constant_override(&"margin_right", 8)
-	margin.add_theme_constant_override(&"margin_top", 8)
-	margin.add_theme_constant_override(&"margin_bottom", 8)
-	margin.add_child(_rename_field)
-	_rename_dialog.add_child(margin)
-	_rename_dialog.confirmed.connect(_on_rename_confirmed)
-	_rename_dialog.about_to_popup.connect(
-		func() -> void: _rename_field.call_deferred(&"grab_focus")
-	)
-	_rename_field.text_submitted.connect(
+	_rename_ui = CodaBrowserRenameDialogScript.create(self, "Rename Bank")
+	_rename_ui.connect_confirmed(_on_rename_confirmed)
+	_rename_ui.connect_text_submitted(
 		func(_t: String) -> void:
 			_on_rename_confirmed()
-			_rename_dialog.hide()
+			_rename_ui.hide_dialog()
 	)
-	add_child(_rename_dialog)
 
 
 func _setup_delete_dialog() -> void:
@@ -323,14 +306,13 @@ func _open_rename(bank_id: String) -> void:
 	if bank == null:
 		return
 	_rename_target_id = bank_id
-	_rename_field.text = bank.bank_name
-	_rename_dialog.popup_centered()
+	_rename_ui.popup_for(bank.bank_name)
 
 
 func _on_rename_confirmed() -> void:
 	if _project == null or _rename_target_id.is_empty():
 		return
-	_project.rename_bank(_rename_target_id, _rename_field.text)
+	_project.rename_bank(_rename_target_id, _rename_ui.field.text)
 	call_deferred(&"select_by_id", _rename_target_id)
 
 

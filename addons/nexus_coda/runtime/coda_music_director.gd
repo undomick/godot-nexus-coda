@@ -120,6 +120,11 @@ func _process(_delta: float) -> void:
 		if int(item.get("fire_at", 0)) > now:
 			remaining.append(item)
 			continue
+		var slot_key: String = str(item.get("slot", "default"))
+		var slot_handle: CodaEventHandle = _slot_handle(slot_key)
+		if slot_handle != null and slot_handle.is_paused():
+			remaining.append(item)
+			continue
 		match str(item.get("kind", "")):
 			"set_music":
 				_set_music_immediate(

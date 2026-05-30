@@ -14,6 +14,10 @@ signal playhead_changed(seconds: float)
 
 const Tokens := preload("res://addons/nexus_coda/editor/theme/coda_design_tokens.gd")
 const NexusCodaLog := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
+const CodaPlayOptionsScript := preload("res://addons/nexus_coda/domain/coda_play_options.gd")
+const CodaTimelineTransportScript := preload(
+	"res://addons/nexus_coda/domain/coda_timeline_transport.gd"
+)
 const CodaEmptyStateScript := preload("res://addons/nexus_coda/editor/theme/coda_empty_state.gd")
 const CodaSectionHeaderScript := preload(
 	"res://addons/nexus_coda/editor/theme/coda_section_header.gd"
@@ -371,15 +375,17 @@ func _on_play_requested() -> void:
 	if _selected_event == null or _runtime == null:
 		return
 	_stop_active_voice()
-	var params: Dictionary = {
-		"loop": _transport_bar.is_loop_enabled(),
-		"_coda_exclusive_preview": true,
-	}
+	var opts := CodaPlayOptionsScript.new()
+	opts.loop = _transport_bar.is_loop_enabled()
+	opts.exclusive_preview = true
 	if _selected_event.event_authoring_mode == CodaBrowserNode.AuthoringMode.TIMELINE:
 		var tline: CodaEventTimeline = _selected_event.event_timeline
 		if tline != null:
-			params["timeline_cursor_start"] = clampf(_seek_slider.value, 0.0, tline.length_seconds)
-	var h: CodaEventHandle = _runtime.play_event_node(_selected_event, params)
+			opts.timeline_cursor_start = clampf(_seek_slider.value, 0.0, tline.length_seconds)
+			CodaTimelineTransportScript.apply_to_play_options(tline, opts)
+			_sync_playback_work_area()
+	var playback_event: CodaBrowserNode = _resolve_playback_event(_selected_event)
+	var h: CodaEventHandle = _runtime.play_event_node(playback_event, opts.to_params_dict())
 	if h == null:
 		_transport_bar.set_playing(false)
 		_set_status(STATUS_IDLE)
@@ -404,6 +410,10 @@ func _on_stop_requested() -> void:
 
 
 func _on_loop_toggled(loop: bool) -> void:
+	if _selected_event != null and _selected_event.event_timeline != null:
+		_selected_event.event_timeline.loop_enabled = loop
+	if _selected_event != null and _selected_event.event_authoring_mode == CodaBrowserNode.AuthoringMode.TIMELINE:
+		_sync_playback_work_area()
 	var r: CodaEventHandle = _resolve_preview_handle()
 	if r != null:
 		r.loop = loop
@@ -621,3 +631,25 @@ func _on_param_grid_value_changed(param_id: String, value: Variant) -> void:
 	var rh: CodaEventHandle = _resolve_preview_handle()
 	if rh != null and _runtime != null:
 		_runtime.set_parameter(rh, param_id, value)
+
+
+func _resolve_playback_event(source: CodaBrowserNode) -> CodaBrowserNode:
+	if _runtime == null or source == null:
+		return source
+	var project: CodaState = _runtime.get_project()
+	if project == null:
+		return source
+	var playback: CodaBrowserNode = project.find_node_anywhere(source.id)
+	return playback if playback != null else source
+
+
+func _sync_playback_work_area() -> void:
+	if _runtime == null or _selected_event == null:
+		return
+	var live_tl: CodaEventTimeline = _selected_event.event_timeline
+	if live_tl == null:
+		return
+	var playback: CodaBrowserNode = _resolve_playback_event(_selected_event)
+	if playback == null or playback.event_timeline == null:
+		return
+	CodaTimelineTransportScript.copy_preview_transport(live_tl, playback.event_timeline)

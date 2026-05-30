@@ -4,7 +4,7 @@ extends RefCounted
 
 ## Async EditorFileDialog and generic three-button prompts for the Nexus Coda editor window.
 
-const CodaProjectIo := preload("res://addons/nexus_coda/editor/coda_project_io.gd")
+const CodaProjectIo := preload("res://addons/nexus_coda/domain/io/coda_project_io.gd")
 
 const UNSAVED_LAYER_NODEPATH := NodePath("UnsavedPromptLayer")
 
