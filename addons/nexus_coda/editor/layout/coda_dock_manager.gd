@@ -200,3 +200,15 @@ func _find_current_or_default_zone(info: CodaDockPanelInfo) -> StringName:
 	if not remembered.is_empty() and get_zone(StringName(remembered)) != null:
 		return StringName(remembered)
 	return info.default_zone_id
+
+
+func teardown() -> void:
+	const Lifecycle := preload("res://addons/nexus_coda/editor/shell/coda_editor_lifecycle.gd")
+	for panel_id in _panels_by_id.keys():
+		var info: CodaDockPanelInfo = _panels_by_id[panel_id] as CodaDockPanelInfo
+		if info == null or info.control == null or not is_instance_valid(info.control):
+			continue
+		Lifecycle.call_editor_teardown(info.control)
+		info.control.free()
+	_panels_by_id.clear()
+	_last_zone_by_panel.clear()

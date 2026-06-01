@@ -23,6 +23,7 @@ var _clip_id: String = ""
 var _bus_id: String = ""
 var _chains_ready: bool = false
 var _chain_signals_connected: bool = false
+var _section_ready: bool = false
 
 
 func _init() -> void:
@@ -32,6 +33,9 @@ func _init() -> void:
 
 
 func _ready() -> void:
+	if _section_ready:
+		return
+	_section_ready = true
 	var track_pack: Dictionary = _make_chain_panel(
 		"Track chains are saved with the event and included in editor preview resync."
 	)
@@ -135,90 +139,30 @@ func get_active_mutation_target() -> Dictionary:
 func _connect_chain_signals_once() -> void:
 	if _chain_signals_connected or _track_chain == null:
 		return
-	_track_chain.effect_add_requested.connect(_on_track_chain_add_requested)
-	_track_chain.effect_remove_requested.connect(_on_track_chain_remove_requested)
-	_track_chain.effect_move_requested.connect(_on_track_chain_move_requested)
-	_track_chain.effect_param_changed.connect(_on_track_chain_param_changed)
-	_track_chain.effect_bypass_changed.connect(_on_track_chain_bypass_changed)
-	_clip_chain.effect_add_requested.connect(_on_clip_chain_add_requested)
-	_clip_chain.effect_remove_requested.connect(_on_clip_chain_remove_requested)
-	_clip_chain.effect_move_requested.connect(_on_clip_chain_move_requested)
-	_clip_chain.effect_param_changed.connect(_on_clip_chain_param_changed)
-	_clip_chain.effect_bypass_changed.connect(_on_clip_chain_bypass_changed)
-	_bus_chain.effect_add_requested.connect(_on_bus_chain_add_requested)
-	_bus_chain.effect_remove_requested.connect(_on_bus_chain_remove_requested)
-	_bus_chain.effect_move_requested.connect(_on_bus_chain_move_requested)
-	_bus_chain.effect_param_changed.connect(_on_bus_chain_param_changed)
-	_bus_chain.effect_bypass_changed.connect(_on_bus_chain_bypass_changed)
+	_wire_chain(_track_chain, FxScope.TIMELINE_TRACK)
+	_wire_chain(_clip_chain, FxScope.TIMELINE_CLIP)
+	_wire_chain(_bus_chain, FxScope.BUS)
 	_chain_signals_connected = true
 
 
-func _on_track_chain_add_requested(effect_type: int) -> void:
-	_on_effect_add_requested(_track_chain, effect_type)
-
-
-func _on_clip_chain_add_requested(effect_type: int) -> void:
-	_on_effect_add_requested(_clip_chain, effect_type)
-
-
-func _on_bus_chain_add_requested(effect_type: int) -> void:
-	_on_effect_add_requested(_bus_chain, effect_type)
-
-
-func _on_track_chain_remove_requested(effect_id: String) -> void:
-	_on_effect_remove_requested(FxScope.TIMELINE_TRACK, effect_id)
-
-
-func _on_clip_chain_remove_requested(effect_id: String) -> void:
-	_on_effect_remove_requested(FxScope.TIMELINE_CLIP, effect_id)
-
-
-func _on_bus_chain_remove_requested(effect_id: String) -> void:
-	_on_effect_remove_requested(FxScope.BUS, effect_id)
-
-
-func _on_track_chain_move_requested(from_i: int, to_i: int) -> void:
-	_on_effect_move_requested(FxScope.TIMELINE_TRACK, from_i, to_i)
-
-
-func _on_clip_chain_move_requested(from_i: int, to_i: int) -> void:
-	_on_effect_move_requested(FxScope.TIMELINE_CLIP, from_i, to_i)
-
-
-func _on_bus_chain_move_requested(from_i: int, to_i: int) -> void:
-	_on_effect_move_requested(FxScope.BUS, from_i, to_i)
-
-
-func _on_track_chain_param_changed(effect_id: String, key: String, value: float) -> void:
-	_on_effect_param_changed(FxScope.TIMELINE_TRACK, effect_id, key, value)
-
-
-func _on_clip_chain_param_changed(effect_id: String, key: String, value: float) -> void:
-	_on_effect_param_changed(FxScope.TIMELINE_CLIP, effect_id, key, value)
-
-
-func _on_bus_chain_param_changed(effect_id: String, key: String, value: float) -> void:
-	_on_effect_param_changed(FxScope.BUS, effect_id, key, value)
-
-
-func _on_track_chain_bypass_changed(effect_id: String, on: bool) -> void:
-	_on_effect_bypass_changed(FxScope.TIMELINE_TRACK, effect_id, on)
-
-
-func _on_clip_chain_bypass_changed(effect_id: String, on: bool) -> void:
-	_on_effect_bypass_changed(FxScope.TIMELINE_CLIP, effect_id, on)
-
-
-func _on_bus_chain_bypass_changed(effect_id: String, on: bool) -> void:
-	_on_effect_bypass_changed(FxScope.BUS, effect_id, on)
-
-
-func _capture_add_snapshot_for_chain(_chain: CodaEffectsChainView) -> void:
-	pass
-
-
-func _effect_add_from_chain(chain: CodaEffectsChainView, effect_type: int) -> void:
-	_on_effect_add_requested(chain, effect_type)
+func _wire_chain(chain: CodaEffectsChainView, scope: FxScope) -> void:
+	chain.effect_add_requested.connect(
+		func(effect_type: int) -> void: _on_effect_add_requested(chain, effect_type)
+	)
+	chain.effect_remove_requested.connect(
+		func(effect_id: String) -> void: _on_effect_remove_requested(scope, effect_id)
+	)
+	chain.effect_move_requested.connect(
+		func(from_i: int, to_i: int) -> void: _on_effect_move_requested(scope, from_i, to_i)
+	)
+	chain.effect_param_changed.connect(
+		func(effect_id: String, key: String, value: float) -> void:
+			_on_effect_param_changed(scope, effect_id, key, value)
+	)
+	chain.effect_bypass_changed.connect(
+		func(effect_id: String, on: bool) -> void:
+			_on_effect_bypass_changed(scope, effect_id, on)
+	)
 
 
 func _mutation_context_for_chain(chain: CodaEffectsChainView) -> Dictionary:
@@ -334,35 +278,7 @@ func _apply_effect_add(ctx: Dictionary, effect_type: int) -> void:
 		_:
 			push_warning("Coda: effect add skipped (unknown scope)")
 			return
-	call_deferred("_finish_effect_add_refresh", ctx.duplicate(true))
-
-
-func _finish_effect_add_refresh(ctx: Dictionary) -> void:
-	_refresh_chain_from_context(ctx)
 	_sync_active_chain()
-
-
-func _refresh_chain_from_context(ctx: Dictionary) -> void:
-	if _project == null or ctx.is_empty():
-		return
-	var scope: StringName = ctx.get("scope", &"") as StringName
-	match scope:
-		&"track":
-			var tr: CodaTimelineTrack = BindingScript.resolve_track(
-				_project, str(ctx.get("event_id", "")), str(ctx.get("track_id", ""))
-			)
-			if tr != null:
-				_track_chain.bind_effects_array(tr.effects)
-		&"clip":
-			var clip: CodaTimelineClip = BindingScript.resolve_clip(
-				_project, str(ctx.get("event_id", "")), str(ctx.get("clip_id", ""))
-			)
-			if clip != null:
-				_clip_chain.bind_effects_array(clip.effects)
-		&"bus":
-			var bus: CodaBus = BindingScript.resolve_bus(_project, str(ctx.get("bus_id", "")))
-			if bus != null:
-				_bus_chain.bind_effects_array(bus.effects)
 
 
 func _make_chain_panel(footer: String) -> Dictionary:
@@ -383,6 +299,8 @@ func _make_chain_panel(footer: String) -> Dictionary:
 	chain.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	chain.set_footer_text(footer)
 	margin.add_child(chain)
+	if not chain.is_node_ready():
+		chain._ready()
 	return {"panel": panel, "chain": chain}
 
 
@@ -480,6 +398,7 @@ func _on_effect_remove_requested(scope: FxScope, effect_id: String) -> void:
 			_project.remove_clip_effect(_timeline_event_id, _clip_id, effect_id)
 		FxScope.BUS:
 			_project.remove_bus_effect(_bus_id, effect_id)
+	_sync_active_chain()
 
 
 func _on_effect_move_requested(scope: FxScope, from_i: int, to_i: int) -> void:
@@ -492,6 +411,7 @@ func _on_effect_move_requested(scope: FxScope, from_i: int, to_i: int) -> void:
 			_project.move_clip_effect(_timeline_event_id, _clip_id, from_i, to_i)
 		FxScope.BUS:
 			_project.move_bus_effect(_bus_id, from_i, to_i)
+	_sync_active_chain()
 
 
 func _on_effect_param_changed(
@@ -523,3 +443,4 @@ func _on_effect_bypass_changed(scope: FxScope, effect_id: String, on: bool) -> v
 			_project.set_clip_effect_bypass(_timeline_event_id, _clip_id, effect_id, on)
 		FxScope.BUS:
 			_project.set_bus_effect_bypass(_bus_id, effect_id, on)
+	_sync_active_chain()

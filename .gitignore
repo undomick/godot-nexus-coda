@@ -38,6 +38,9 @@ CMakeFiles/
 cmake_install.cmake
 compile_commands.json
 
+# Logs
+*.log
+
 # IDE / OS
 .cursor/
 .vs/

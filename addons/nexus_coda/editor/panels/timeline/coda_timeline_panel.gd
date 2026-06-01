@@ -35,6 +35,7 @@ signal track_selection_changed(event_id: String, track_id: String)
 signal clip_selection_changed(event_id: String, clip_id: String)
 
 var _project: CodaState = null
+var _ensure_runtime_handler: Callable = Callable()
 var _selected_event: CodaBrowserNode = null
 
 var _toolbar_ui: CodaTimelineToolbar
@@ -117,14 +118,35 @@ func attach_project(project: CodaState) -> void:
 		if _project.project_dirty.is_connected(_on_project_project_dirty):
 			_project.project_dirty.disconnect(_on_project_project_dirty)
 	_project = project
+	if _preview != null:
+		_preview.set_authoring_project(project)
+	if _project == null:
+		on_browser_event_selected(null)
+		return
 	if _project != null:
 		_project.structure_changed.connect(_on_project_structure_changed)
 		_project.project_dirty.connect(_on_project_project_dirty)
 	_refresh_view_state()
 
 
+func set_ensure_runtime_handler(handler: Callable) -> void:
+	_ensure_runtime_handler = handler
+	if _preview != null:
+		_preview.set_ensure_runtime_handler(handler)
+
+
 func attach_runtime(runtime: CodaRuntime) -> void:
 	_preview.attach_runtime(runtime)
+
+
+func editor_teardown() -> void:
+	set_process(false)
+	stop_all_previews()
+	if _preview != null:
+		_preview.teardown()
+	on_browser_event_selected(null)
+	attach_project(null)
+	_selected_event = null
 
 
 func get_selected_clip_id() -> String:

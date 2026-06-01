@@ -158,6 +158,23 @@ func _add_palette_button(host: Container, label_text: String, kind: int, tip: St
 
 func attach_project(project: CodaState) -> void:
 	_project = project
+	if project == null:
+		on_browser_event_selected(null)
+
+
+func editor_teardown() -> void:
+	on_browser_event_selected(null)
+	_selected_event = null
+	_runtime = null
+	if _graph_edit != null:
+		_graph_edit.clear_connections()
+	for view in _node_views.values():
+		var v: GraphNode = view as GraphNode
+		if v == null or not is_instance_valid(v):
+			continue
+		v.free()
+	_node_views.clear()
+	attach_project(null)
 
 
 func attach_runtime(runtime: CodaRuntime) -> void:

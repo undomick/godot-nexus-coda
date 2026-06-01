@@ -103,7 +103,7 @@ func _add_track_effect(event_id: String, track_id: String, effect_type: CodaTrac
 	e.type = effect_type
 	e.params = CodaEffectCatalogScript.default_params(effect_type).duplicate(true)
 	tr.effects.append(e)
-	_state.project_dirty.emit()
+	_state.structure_changed.emit()
 	return ""
 
 
@@ -117,7 +117,7 @@ func _remove_track_effect(event_id: String, track_id: String, effect_id: String)
 	for i in range(tr.effects.size()):
 		if tr.effects[i].id == effect_id:
 			tr.effects.remove_at(i)
-			_state.project_dirty.emit()
+			_state.structure_changed.emit()
 			return
 
 
@@ -135,7 +135,7 @@ func _move_track_effect(event_id: String, track_id: String, from_index: int, to_
 	var e: CodaTrackEffect = tr.effects[from_index]
 	tr.effects.remove_at(from_index)
 	tr.effects.insert(to_index, e)
-	_state.project_dirty.emit()
+	_state.structure_changed.emit()
 
 
 func _set_track_effect_params(event_id: String, track_id: String, effect_id: String, params: Dictionary) -> void:
@@ -181,7 +181,7 @@ func _add_clip_effect(event_id: String, clip_id: String, effect_type: CodaTrackE
 	e.type = effect_type
 	e.params = CodaEffectCatalogScript.default_params(effect_type).duplicate(true)
 	clip.effects.append(e)
-	_state.project_dirty.emit()
+	_state.structure_changed.emit()
 	return ""
 
 
@@ -198,7 +198,7 @@ func _remove_clip_effect(event_id: String, clip_id: String, effect_id: String) -
 	for i in range(clip.effects.size()):
 		if clip.effects[i].id == effect_id:
 			clip.effects.remove_at(i)
-			_state.project_dirty.emit()
+			_state.structure_changed.emit()
 			return
 
 
@@ -219,7 +219,7 @@ func _move_clip_effect(event_id: String, clip_id: String, from_index: int, to_in
 	var e: CodaTrackEffect = clip.effects[from_index]
 	clip.effects.remove_at(from_index)
 	clip.effects.insert(to_index, e)
-	_state.project_dirty.emit()
+	_state.structure_changed.emit()
 
 
 func _set_clip_effect_params(event_id: String, clip_id: String, effect_id: String, params: Dictionary) -> void:

@@ -42,16 +42,17 @@ func _init() -> void:
 
 
 func set_properties_content(content: Control) -> void:
-	if _properties_content != null and is_instance_valid(_properties_content):
-		if _properties_content.get_parent() == _properties_slot:
-			_properties_slot.remove_child(_properties_content)
+	if _properties_content != null and is_instance_valid(_properties_content) and _properties_content != content:
+		_properties_content.free()
 	_properties_content = content
 	if _properties_slot == null:
 		return
 	for child in _properties_slot.get_children():
-		_properties_slot.remove_child(child)
+		if child != content:
+			child.free()
 	if content != null and is_instance_valid(content):
-		_properties_slot.add_child(content)
+		if content.get_parent() != _properties_slot:
+			_properties_slot.add_child(content)
 		_properties_slot.visible = true
 	else:
 		_properties_slot.visible = false

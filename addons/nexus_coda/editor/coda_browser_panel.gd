@@ -92,10 +92,25 @@ func get_project():
 
 func set_project(project: Variant) -> void:
 	if project == null:
+		release_project()
 		return
+	if _project != null and _project != project:
+		_project.release_owned_references()
 	_project = project
 	for tab in _all_tabs():
 		tab.attach_state(_project)
+
+
+func release_project() -> void:
+	for tab in _all_tabs():
+		tab.attach_state(null)
+	if _project != null:
+		_project.release_owned_references()
+		_project = null
+
+
+func editor_teardown() -> void:
+	release_project()
 
 
 ## Re-emit current Events tab selection (used after layout changes / on initial bind so the

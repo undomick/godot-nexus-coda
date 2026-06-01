@@ -165,10 +165,25 @@ func clamp_time_to_work_area(t: float) -> float:
 
 func clear_in_point() -> void:
 	in_point_seconds = UNSET_WORK_POINT
+	_reconcile_loop_region_after_work_area_change()
 
 
 func clear_out_point() -> void:
 	out_point_seconds = UNSET_WORK_POINT
+	_reconcile_loop_region_after_work_area_change()
+
+
+func _reconcile_loop_region_after_work_area_change() -> void:
+	if not loop_enabled:
+		return
+	# While a work-area exists, loop follows it. If the work-area gets cleared,
+	# ensure we don't keep looping a stale range (e.g. deleted In/Out during playback).
+	if has_work_area():
+		loop_start_seconds = work_area_start()
+		loop_end_seconds = work_area_end()
+		return
+	loop_start_seconds = 0.0
+	loop_end_seconds = length_seconds
 
 
 func clamp_work_points_to_length() -> void:

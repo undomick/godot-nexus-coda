@@ -30,6 +30,36 @@ const _SPINBOX_COL_WIDTH := 96
 const _BTN_SIZE := Vector2(28, 24)
 const _HEADER_HEIGHT := 30
 
+
+class EffectDragGrip extends Label:
+	var _effect_id: String = ""
+	var _type_label: String = ""
+
+	func configure(eff: CodaTrackEffect) -> void:
+		_effect_id = eff.id
+		_type_label = CodaEffectCatalogScript.display_name_for_type(eff.type)
+
+	func _get_drag_data(_at_position: Vector2) -> Variant:
+		if _effect_id.is_empty():
+			return null
+		var chain: CodaEffectsChainView = _owner_chain_view()
+		var preview := EffectDragPreviewScript.new(_type_label)
+		var w: float = 220.0
+		if chain != null:
+			w = maxf(180.0, chain.size.x - 24.0)
+		preview.custom_minimum_size = Vector2(w, 36.0)
+		set_drag_preview(preview)
+		return {"type": ChainListScript.DND_TYPE, "effect_id": _effect_id}
+
+	func _owner_chain_view() -> CodaEffectsChainView:
+		var n: Node = self
+		while n != null:
+			if n is CodaEffectsChainView:
+				return n as CodaEffectsChainView
+			n = n.get_parent()
+		return null
+
+
 signal effect_add_menu_opened
 signal effect_add_requested(effect_type: int)
 signal effect_remove_requested(effect_id: String)
@@ -53,6 +83,8 @@ var _pending_bind: bool = false
 
 
 func _ready() -> void:
+	if _ready_done:
+		return
 	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	add_theme_constant_override(&"separation", Tokens.SPACING_SM)
 
@@ -100,6 +132,8 @@ func _ready() -> void:
 	if not _list.effect_drop_requested.is_connected(_on_effect_drop_requested):
 		_list.effect_drop_requested.connect(_on_effect_drop_requested)
 	add_child(_list)
+	if not _list.is_node_ready():
+		_list._ready()
 
 	_empty_hint = Label.new()
 	_empty_hint.text = "No effects yet. Use + Effect to add one."
@@ -107,6 +141,11 @@ func _ready() -> void:
 	_empty_hint.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
 	_empty_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_empty_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_empty_hint.set_drag_forwarding(
+		Callable(),
+		_can_forward_effect_drop,
+		_forward_effect_drop_to_list
+	)
 	_list.add_child(_empty_hint)
 
 	_footer = Label.new()
@@ -190,13 +229,8 @@ func _build_add_menu(menu: PopupMenu) -> void:
 		if not by_cat.has(cat):
 			by_cat[cat] = []
 		(by_cat[cat] as Array).append(t)
-	var first: bool = true
 	for cat in by_cat.keys():
-		if not first:
-			menu.add_separator(str(cat))
-		else:
-			menu.add_separator(str(cat))
-			first = false
+		menu.add_separator(str(cat))
 		for t in by_cat[cat]:
 			# Menu IDs start at 1 — Godot treats 0 as "unset" for some PopupMenu paths.
 			menu.add_item(CodaEffectCatalogScript.display_name_for_type(t), int(t) + 1)
@@ -230,35 +264,20 @@ func _on_effect_drop_requested(effect_id: String, insert_before: int) -> void:
 	var to_i: int = insert_before
 	if to_i > from_i:
 		to_i -= 1
-	to_i = clampi(to_i, 0, max(0, _effects_ref.size() - 1))
+	to_i = clampi(to_i, 0, maxi(0, _effects_ref.size() - 1))
 	if from_i == to_i:
 		return
 	effect_move_requested.emit(from_i, to_i)
 
 
-func _effect_drag_data(eff: CodaTrackEffect, grip: Control) -> Variant:
-	var preview := EffectDragPreviewScript.new(
-		CodaEffectCatalogScript.display_name_for_type(eff.type)
-	)
-	preview.custom_minimum_size = Vector2(maxf(180.0, size.x - 24.0), 36.0)
-	grip.set_drag_preview(preview)
-	return {"type": ChainListScript.DND_TYPE, "effect_id": eff.id}
+func _forward_effect_drop_to_list(_at: Vector2, data: Variant) -> void:
+	if _list == null:
+		return
+	_list.drop_effect_at_local_y(data, _list.get_local_mouse_position().y)
 
 
-func _wire_effect_card_drag(grip: Control, eff: CodaTrackEffect, card: PanelContainer) -> void:
-	grip.set_drag_forwarding(
-		func(_at: Vector2) -> Variant:
-			return _effect_drag_data(eff, grip),
-		Callable(),
-		Callable()
-	)
-	card.set_drag_forwarding(
-		Callable(),
-		func(_at: Vector2, data: Variant) -> bool:
-			return ChainListScript.is_effect_drag_data(data),
-		func(_at: Vector2, data: Variant) -> void:
-			_list.drop_effect_at_local_y(data, _list.get_local_mouse_position().y)
-	)
+func _can_forward_effect_drop(_at: Vector2, data: Variant) -> bool:
+	return ChainListScript.is_effect_drag_data(data)
 
 
 # ---------- Rendering ----------
@@ -266,14 +285,13 @@ func _wire_effect_card_drag(grip: Control, eff: CodaTrackEffect, card: PanelCont
 func _rebuild_rows() -> void:
 	_row_by_effect_id.clear()
 	for c in _list.get_children():
-		_list.remove_child(c)
-		if c == _empty_hint:
-			continue
-		c.queue_free()
+		if c is PanelContainer:
+			c.free()
 
 	if _effects_ref.is_empty():
 		_empty_hint.visible = true
-		_list.add_child(_empty_hint)
+		if _empty_hint.get_parent() != _list:
+			_list.add_child(_empty_hint)
 		return
 	_empty_hint.visible = false
 
@@ -281,6 +299,7 @@ func _rebuild_rows() -> void:
 		var eff: CodaTrackEffect = _effects_ref[i]
 		var card: PanelContainer = _make_effect_card(eff, i)
 		_list.add_child(card)
+	_list.keep_insert_line_on_top()
 	_list.update_minimum_size()
 
 
@@ -295,6 +314,9 @@ func _sync_rows_from_data() -> void:
 			var btn: CheckBox = meta["bypass_btn"] as CheckBox
 			if btn != null and btn.button_pressed != eff.bypass:
 				btn.set_pressed_no_signal(eff.bypass)
+		var card: PanelContainer = meta.get("card") as PanelContainer
+		if card != null:
+			_apply_card_bypass_look(card, eff, meta)
 		var widgets: Dictionary = meta.get("param_widgets", {}) as Dictionary
 		var params: Dictionary = eff.params
 		for k in widgets.keys():
@@ -324,6 +346,11 @@ static func _slider_is_being_edited(ctrl: Control) -> bool:
 func _make_effect_card(eff: CodaTrackEffect, index: int) -> PanelContainer:
 	var card := PanelContainer.new()
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.set_drag_forwarding(
+		Callable(),
+		_can_forward_effect_drop,
+		_forward_effect_drop_to_list
+	)
 	var border: Color = Tokens.ACCENT_DIM if not eff.bypass else Tokens.SURFACE_BORDER
 	card.add_theme_stylebox_override(
 		&"panel", Tokens.make_panel_stylebox(Tokens.SURFACE_RAISED, border, Tokens.RADIUS_MD)
@@ -335,11 +362,6 @@ func _make_effect_card(eff: CodaTrackEffect, index: int) -> PanelContainer:
 
 	var header: HBoxContainer = _make_card_header(eff, index)
 	body.add_child(header)
-
-	var grip: Control = header.get_meta(&"drag_grip") as Control
-	if grip != null:
-		_wire_effect_card_drag(grip, eff, card)
-
 	body.add_child(_make_hairline_separator())
 
 	var params_box := VBoxContainer.new()
@@ -357,9 +379,22 @@ func _make_effect_card(eff: CodaTrackEffect, index: int) -> PanelContainer:
 	_row_by_effect_id[eff.id] = {
 		"card": card,
 		"bypass_btn": header.get_meta(&"bypass_btn"),
+		"title_label": header.get_meta(&"title_label"),
 		"param_widgets": widgets,
 	}
 	return card
+
+
+func _apply_card_bypass_look(card: PanelContainer, eff: CodaTrackEffect, meta: Dictionary) -> void:
+	var border: Color = Tokens.ACCENT_DIM if not eff.bypass else Tokens.SURFACE_BORDER
+	card.add_theme_stylebox_override(
+		&"panel", Tokens.make_panel_stylebox(Tokens.SURFACE_RAISED, border, Tokens.RADIUS_MD)
+	)
+	var title: Label = meta.get("title_label") as Label
+	if title != null:
+		title.add_theme_color_override(
+			&"font_color", Tokens.TEXT_MUTED if eff.bypass else Tokens.TEXT_PRIMARY
+		)
 
 
 func _make_card_header(eff: CodaTrackEffect, index: int) -> HBoxContainer:
@@ -367,8 +402,8 @@ func _make_card_header(eff: CodaTrackEffect, index: int) -> HBoxContainer:
 	row.add_theme_constant_override(&"separation", Tokens.SPACING_SM)
 	row.custom_minimum_size = Vector2(0, _HEADER_HEIGHT)
 
-	var grip := Label.new()
-	grip.text = "="
+	var grip := EffectDragGrip.new()
+	grip.configure(eff)
 	grip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	grip.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	grip.custom_minimum_size = Vector2(14, _HEADER_HEIGHT)
@@ -376,11 +411,11 @@ func _make_card_header(eff: CodaTrackEffect, index: int) -> HBoxContainer:
 	grip.mouse_default_cursor_shape = Control.CURSOR_MOVE
 	grip.focus_mode = Control.FOCUS_NONE
 	grip.tooltip_text = "Drag to reorder"
+	grip.text = "="
 	grip.add_theme_font_size_override(&"font_size", Tokens.FONT_LABEL_SIZE)
 	grip.add_theme_color_override(&"font_color", Tokens.TEXT_MUTED)
 	grip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(grip)
-	row.set_meta(&"drag_grip", grip)
 
 	var bypass := CheckBox.new()
 	bypass.text = ""
@@ -403,6 +438,7 @@ func _make_card_header(eff: CodaTrackEffect, index: int) -> HBoxContainer:
 	)
 	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(title)
+	row.set_meta(&"title_label", title)
 
 	var category := Label.new()
 	category.text = CodaEffectCatalogScript.category_for_type(eff.type)

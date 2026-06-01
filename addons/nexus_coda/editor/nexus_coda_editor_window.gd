@@ -45,6 +45,9 @@ const CodaEditorShortcutRouterScript := preload(
 const CodaEditorSelectionRouterScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_editor_selection_router.gd"
 )
+const CodaBrowserTabScript := preload(
+	"res://addons/nexus_coda/editor/browser/tabs/coda_browser_tab.gd"
+)
 const CodaInspectorSelectionScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_inspector_selection.gd"
 )
@@ -62,6 +65,9 @@ const CodaEditorFileDialogsScript := preload(
 )
 const CodaEditorProjectSessionScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_editor_project_session.gd"
+)
+const CodaEditorLifecycleScript := preload(
+	"res://addons/nexus_coda/editor/shell/coda_editor_lifecycle.gd"
 )
 const CodaEditorMenuActionsScript := preload(
 	"res://addons/nexus_coda/editor/shell/coda_editor_menu_actions.gd"
@@ -144,6 +150,8 @@ const UNSAVED_LAYER_NODEPATH := NodePath("UnsavedPromptLayer")
 var _restore_autosave_on_start: bool = true
 
 var _teardown_done: bool = false
+var _session_bind_complete: bool = false
+var _runtime_wired_to_panels: bool = false
 var _fs_asset_import_boot_attempts: int = 0
 var _selection_router: CodaEditorSelectionRouter
 var _authoring_focus: CodaEditorAuthoringFocus
@@ -325,6 +333,10 @@ func _register_panels() -> void:
 	_preview_controller.bind_panels(_timeline_panel, _player_panel)
 	_pool_exhausted_slot = Callable(self, &"_on_runtime_voice_pool_exhausted")
 	_preview_controller.set_pool_exhausted_handler(_pool_exhausted_slot)
+	if _timeline_panel != null and _timeline_panel.has_method(&"set_ensure_runtime_handler"):
+		_timeline_panel.set_ensure_runtime_handler(
+			Callable(self, &"_ensure_runtime_wired_to_panels")
+		)
 
 	_setup_shell_helpers()
 
@@ -399,6 +411,11 @@ func _session_initial_bind() -> void:
 	if _project_session != null:
 		_project_session.initial_bind(_restore_autosave_on_start)
 	_refresh_view_menu_check_marks()
+	_session_bind_complete = true
+
+
+func is_exit_leak_test_session_ready() -> bool:
+	return _session_bind_complete
 
 
 func _session_new_async() -> void:
@@ -453,6 +470,10 @@ func _current_state() -> Variant:
 	return null
 
 
+func get_authoring_state_for_preview() -> Variant:
+	return _current_state()
+
+
 func _wire_browser_to_others() -> void:
 	if _browser_panel == null:
 		return
@@ -492,6 +513,10 @@ func _wire_browser_to_others() -> void:
 				_inspector_panel.event_output_bus_changed.connect(bus_slot)
 	if _player_panel != null:
 		_player_panel.attach_browser_panel(_browser_panel)
+		if _player_panel.has_method(&"set_ensure_runtime_handler"):
+			_player_panel.set_ensure_runtime_handler(
+				Callable(self, &"_ensure_runtime_wired_to_panels")
+			)
 	if _graph_panel != null and _browser_panel.has_method(&"get_project"):
 		_graph_panel.attach_project(_browser_panel.get_project())
 
@@ -737,15 +762,23 @@ func _focus_panel(panel_id: StringName) -> void:
 
 
 func _wire_runtime_to_panels() -> void:
+	# Playhead wiring only; CodaEditorRuntime is created on first preview/play (not at window open).
+	if _player_panel != null and _editor_transport != null:
+		_playhead_sync_slot = Callable(_editor_transport, &"sync_playhead_seconds")
+
+
+func _ensure_runtime_wired_to_panels() -> void:
+	if _runtime_wired_to_panels:
+		return
 	var rt: CodaRuntime = _preview_controller.ensure_runtime()
 	if rt == null:
 		return
+	_runtime_wired_to_panels = true
 	if _graph_panel != null:
 		_graph_panel.attach_runtime(rt)
 	if _player_panel != null:
 		_player_panel.attach_runtime(rt)
 		if _player_panel.has_signal(&"playhead_changed") and _editor_transport != null:
-			_playhead_sync_slot = Callable(_editor_transport, &"sync_playhead_seconds")
 			if not _player_panel.playhead_changed.is_connected(_playhead_sync_slot):
 				_player_panel.playhead_changed.connect(_playhead_sync_slot)
 	if _timeline_panel != null and _timeline_panel.has_method(&"attach_runtime"):
@@ -764,11 +797,16 @@ func _on_runtime_voice_pool_exhausted(_context: Dictionary) -> void:
 
 
 func _ensure_editor_runtime() -> void:
-	_preview_controller.ensure_runtime()
+	_ensure_runtime_wired_to_panels()
 
 
 func _dispose_editor_runtime() -> void:
+	if _preview_controller == null:
+		return
+	_preview_controller.stop_panel_previews()
+	_preview_controller.stop_runtime_voices()
 	_preview_controller.dispose_runtime()
+	_runtime_wired_to_panels = false
 
 
 func on_gameplay_play_started() -> void:
@@ -794,9 +832,48 @@ func _unwire_runtime_from_panels() -> void:
 		_project_session.bind_project_signals(null)
 
 
+func _release_editor_project_state() -> void:
+	_unwire_runtime_from_panels()
+	if _graph_panel != null and is_instance_valid(_graph_panel):
+		_graph_panel.on_browser_event_selected(null)
+		_graph_panel.attach_project(null)
+	if _inspector_panel != null and is_instance_valid(_inspector_panel):
+		_inspector_panel.on_browser_event_selected(null)
+		_inspector_panel.attach_project(null)
+	if _player_panel != null and is_instance_valid(_player_panel):
+		_player_panel.on_browser_event_selected(null)
+		_player_panel.attach_project(null)
+	if _timeline_panel != null and is_instance_valid(_timeline_panel):
+		_timeline_panel.on_browser_event_selected(null)
+		_timeline_panel.attach_project(null)
+	if _mixer_panel != null and is_instance_valid(_mixer_panel):
+		_mixer_panel.attach_project(null)
+	if _inspector_selection != null:
+		_inspector_selection.project = null
+		_inspector_selection.apply(CodaInspectorSelection.Subject.EMPTY)
+	if (
+		_browser_panel != null
+		and is_instance_valid(_browser_panel)
+		and _browser_panel.has_method(&"release_project")
+	):
+		_browser_panel.release_project()
+	if _project_session != null:
+		_project_session.teardown()
+	_dispose_editor_runtime()
+	if _menu_actions != null:
+		_menu_actions.session = null
+	if _preview_controller != null:
+		_preview_controller.bind_panels(null, null)
+		_preview_controller.bind_host(null)
+	_preview_controller = null
+	_inspector_selection = null
+	_project_session = null
+
+
 func _push_project_to_runtime(state: Variant) -> void:
 	if state == null:
 		return
+	_ensure_runtime_wired_to_panels()
 	_preview_controller.push_project(state)
 
 
@@ -1046,8 +1123,134 @@ func _on_close_requested() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE:
 		_teardown_before_close()
-		if has_node(UNSAVED_LAYER_NODEPATH):
-			get_node(UNSAVED_LAYER_NODEPATH).queue_free()
+
+
+func _disconnect_menus() -> void:
+	if _file_menu != null and is_instance_valid(_file_menu):
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_file_menu.id_pressed, Callable(self, &"_on_file_id_pressed")
+		)
+	if _view_menu != null and is_instance_valid(_view_menu):
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_view_menu.id_pressed, Callable(self, &"_on_view_id_pressed")
+		)
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_view_menu.about_to_popup, Callable(self, &"_refresh_view_menu_check_marks")
+		)
+	if _build_menu != null and is_instance_valid(_build_menu):
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_build_menu.id_pressed, Callable(self, &"_on_build_id_pressed")
+		)
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_build_menu.about_to_popup, Callable(self, &"_on_build_menu_about_to_popup")
+		)
+	if _help_menu != null and is_instance_valid(_help_menu):
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_help_menu.id_pressed, Callable(self, &"_on_help_id_pressed")
+		)
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_help_menu.about_to_popup, Callable(self, &"_on_help_menu_about_to_popup")
+		)
+	if _recent_menu != null and is_instance_valid(_recent_menu):
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_recent_menu.id_pressed, Callable(self, &"_on_recent_id_pressed")
+		)
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_recent_menu.about_to_popup, Callable(self, &"_on_recent_menu_about_to_popup")
+		)
+
+
+func _disconnect_panel_wiring() -> void:
+	CodaEditorLifecycleScript.disconnect_if_connected(
+		close_requested, Callable(self, &"_on_close_requested")
+	)
+	if _dock_host != null and _dock_host.dock_manager != null:
+		var dm: CodaDockManager = _dock_host.dock_manager
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			dm.panel_visibility_changed, Callable(self, &"_on_panel_visibility_changed")
+		)
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			dm.layout_changed, Callable(self, &"_on_layout_changed")
+		)
+	if _browser_panel != null and is_instance_valid(_browser_panel):
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_browser_panel.event_selection_changed,
+			Callable(self, &"_on_browser_event_selection_for_inspector")
+		)
+		if _graph_panel != null:
+			CodaEditorLifecycleScript.disconnect_if_connected(
+				_browser_panel.event_selection_changed,
+				Callable(_graph_panel, &"on_browser_event_selected")
+			)
+		if _player_panel != null:
+			CodaEditorLifecycleScript.disconnect_if_connected(
+				_browser_panel.event_selection_changed,
+				Callable(_player_panel, &"on_browser_event_selected")
+			)
+		if _timeline_panel != null:
+			CodaEditorLifecycleScript.disconnect_if_connected(
+				_browser_panel.event_selection_changed,
+				Callable(_timeline_panel, &"on_browser_event_selected")
+			)
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_browser_panel.asset_selection_changed,
+			Callable(self, &"_on_browser_asset_selection_for_inspector")
+		)
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_browser_panel.external_selection_requested,
+			Callable(self, &"_on_browser_external_selection_requested")
+		)
+	var events_tab: CodaEventsTab = _events_tab_from_browser()
+	if events_tab != null and is_instance_valid(events_tab):
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			events_tab.event_authoring_open_requested,
+			Callable(self, &"_on_event_authoring_open_requested")
+		)
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			events_tab.event_open_graph_requested,
+			Callable(self, &"_on_event_open_graph_requested")
+		)
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			events_tab.event_open_timeline_requested,
+			Callable(self, &"_on_event_open_timeline_requested")
+		)
+	if _inspector_panel != null and is_instance_valid(_inspector_panel):
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_inspector_panel.authoring_mode_changed,
+			Callable(self, &"_on_inspector_authoring_mode_changed")
+		)
+		if _preview_controller != null:
+			CodaEditorLifecycleScript.disconnect_if_connected(
+				_inspector_panel.event_output_bus_changed,
+				Callable(_preview_controller, &"on_event_output_bus_changed")
+			)
+	if _timeline_panel != null and is_instance_valid(_timeline_panel):
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_timeline_panel.track_selection_changed,
+			Callable(self, &"_on_timeline_track_selection_for_inspector")
+		)
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_timeline_panel.clip_selection_changed,
+			Callable(self, &"_on_timeline_clip_selection_for_inspector")
+		)
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_timeline_panel.track_effects_focus_requested,
+			Callable(self, &"_on_track_effects_focus_requested")
+		)
+	if _mixer_panel != null and is_instance_valid(_mixer_panel):
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_mixer_panel.bus_user_selected,
+			Callable(self, &"_on_mixer_bus_selection_for_inspector")
+		)
+	if (
+		_player_panel != null
+		and is_instance_valid(_player_panel)
+		and _playhead_sync_slot.is_valid()
+	):
+		CodaEditorLifecycleScript.disconnect_if_connected(
+			_player_panel.playhead_changed, _playhead_sync_slot
+		)
+	_playhead_sync_slot = Callable()
 
 
 func _teardown_before_close() -> void:
@@ -1057,54 +1260,141 @@ func _teardown_before_close() -> void:
 		_project_session.autosave_if_dirty()
 	_teardown_done = true
 
-	_unwire_runtime_from_panels()
+	if _layout_persistence != null:
+		_layout_persistence.cancel_pending()
+	_release_editor_project_state()
+	CodaEditorLifecycleScript.clear_editor_static_caches()
+	_disconnect_panel_wiring()
+	_disconnect_menus()
 
-	# Detach docked panels so their controls don't keep references alive through TabContainer internals.
 	if _dock_host != null and _dock_host.dock_manager != null:
-		var dm: CodaDockManager = _dock_host.dock_manager
-		var state: Dictionary = dm.get_layout_state()
-		for zone_id_s in state.keys():
-			var zone := dm.get_zone(StringName(str(zone_id_s)))
-			if zone == null:
-				continue
-			for ctrl in zone.panel_controls():
-				if ctrl != null and ctrl.get_parent() != null:
-					ctrl.get_parent().remove_child(ctrl)
+		_dock_host.dock_manager.teardown()
 
-	# Free overlays explicitly (they may create internal fonts/textures/RIDs).
-	if _command_palette != null and is_instance_valid(_command_palette):
-		_command_palette.queue_free()
-	_command_palette = null
-	if _shortcut_sheet != null and is_instance_valid(_shortcut_sheet):
-		_shortcut_sheet.queue_free()
-	_shortcut_sheet = null
-	if _status_bar != null and is_instance_valid(_status_bar):
-		_status_bar.queue_free()
-	_status_bar = null
+	if _file_dialogs != null:
+		_file_dialogs.teardown()
 	if _menu_actions != null:
 		_menu_actions.teardown()
 	_menu_actions = null
+	_file_dialogs = null
 
-	# Free panels explicitly (they are re-created on next open anyway).
-	if _browser_panel != null and is_instance_valid(_browser_panel):
-		_browser_panel.queue_free()
+	if _command_palette != null and is_instance_valid(_command_palette):
+		CodaEditorLifecycleScript.detach_and_free(_command_palette)
+	_command_palette = null
+	if _shortcut_sheet != null and is_instance_valid(_shortcut_sheet):
+		CodaEditorLifecycleScript.detach_and_free(_shortcut_sheet)
+	_shortcut_sheet = null
+
+	if has_node(UNSAVED_LAYER_NODEPATH):
+		var unsaved_layer: Node = get_node(UNSAVED_LAYER_NODEPATH)
+		if is_instance_valid(unsaved_layer):
+			CodaEditorLifecycleScript.detach_and_free(unsaved_layer)
+
+	_project_theme = null
+	_selection_router = null
+	_authoring_focus = null
+	_editor_transport = null
+	_layout_persistence = null
+	var root_vbox: Node = get_node_or_null("RootVBox")
+	if root_vbox != null and is_instance_valid(root_vbox):
+		if root_vbox is Control:
+			(root_vbox as Control).theme = null
+		# Must free synchronously: queue_free() on the window shell does not run during editor exit.
+		root_vbox.free()
+
+	_dock_host = null
+	_status_bar = null
+	_menu_bar = null
+
 	_browser_panel = null
-	if _graph_panel != null and is_instance_valid(_graph_panel):
-		_graph_panel.queue_free()
 	_graph_panel = null
-	if _inspector_panel != null and is_instance_valid(_inspector_panel):
-		_inspector_panel.queue_free()
 	_inspector_panel = null
-	if _player_panel != null and is_instance_valid(_player_panel):
-		_player_panel.queue_free()
 	_player_panel = null
-	if _timeline_panel != null and is_instance_valid(_timeline_panel):
-		_timeline_panel.queue_free()
 	_timeline_panel = null
-	if _mixer_panel != null and is_instance_valid(_mixer_panel):
-		_mixer_panel.queue_free()
 	_mixer_panel = null
-	if _log_panel != null and is_instance_valid(_log_panel):
-		_log_panel.queue_free()
 	_log_panel = null
-	_dispose_editor_runtime()
+	_file_menu = null
+	_view_menu = null
+	_build_menu = null
+	_help_menu = null
+	_recent_menu = null
+	_file_dialogs = null
+	_project_session = null
+	_inspector_selection = null
+	_preview_controller = null
+
+
+func run_exit_leak_smoke_edits() -> void:
+	## Exercises timeline/inspector/mixer UI paths used during manual editing (fade curves, etc.).
+	var st: CodaState = _current_state()
+	if st == null:
+		return
+	var ev: CodaBrowserNode = _find_first_event_node(st.events_root)
+	if ev == null:
+		return
+	if _browser_panel != null and _browser_panel.has_method(&"select_event_by_id"):
+		_browser_panel.select_event_by_id(ev.id)
+	ev.event_authoring_mode = CodaBrowserNode.AuthoringMode.TIMELINE
+	if ev.event_timeline == null:
+		ev.event_timeline = CodaEventTimeline.make_default()
+	var tl: CodaEventTimeline = ev.event_timeline
+	if tl.tracks.is_empty():
+		tl.tracks.append(CodaTimelineTrack.new())
+	var track: CodaTimelineTrack = tl.tracks[0]
+	if track.clips.is_empty():
+		var clip := CodaTimelineClip.new()
+		clip.duration_seconds = 2.0
+		track.clips.append(clip)
+	var clip0: CodaTimelineClip = track.clips[0]
+	clip0.fade_in_curve = 0.25
+	clip0.fade_out_curve = 0.75
+	st.notify_event_timeline_changed(ev.id)
+
+	if _timeline_panel != null:
+		if _timeline_panel.has_method(&"set_ensure_runtime_handler"):
+			_timeline_panel.set_ensure_runtime_handler(
+				Callable(self, &"_ensure_runtime_wired_to_panels")
+			)
+		_timeline_panel.on_browser_event_selected(ev)
+	if _inspector_panel != null:
+		_inspector_panel.on_browser_event_selected(ev)
+	if _player_panel != null:
+		_player_panel.on_browser_event_selected(ev)
+	if _mixer_panel != null:
+		_mixer_panel.attach_project(st)
+	if _timeline_panel != null and _inspector_selection != null:
+		_apply_inspector_selection(
+			CodaInspectorSelection.Subject.TIMELINE_CLIP,
+			{"event_id": ev.id, "track_id": track.id, "clip_id": clip0.id},
+			&""
+		)
+	if _timeline_panel != null and _timeline_panel.has_method(&"_refresh_view_state"):
+		_timeline_panel.call(&"_refresh_view_state")
+	if _preview_controller != null:
+		_push_project_to_runtime(st)
+	if _player_panel != null and _player_panel.has_method(&"play_current_selection"):
+		_player_panel.play_current_selection()
+	if _selection_router != null and not st.game_sync_rules.is_empty():
+		var rule := st.game_sync_rules[0]
+		_selection_router.route(
+			PANEL_INSPECTOR,
+			CodaBrowserTabScript.CATEGORY_GAME_SYNC,
+			{"kind": "rule", "item_id": rule.id, "event_id": ""}
+		)
+	if st.bus_root != null:
+		_apply_inspector_selection(
+			CodaInspectorSelection.Subject.MIXER_BUS,
+			{"bus_id": st.bus_root.id},
+			&"mixer"
+		)
+
+
+func _find_first_event_node(root: CodaBrowserNode) -> CodaBrowserNode:
+	if root == null:
+		return null
+	if root.kind == CodaBrowserNode.Kind.EVENT:
+		return root
+	for child in root.children:
+		var found: CodaBrowserNode = _find_first_event_node(child)
+		if found != null:
+			return found
+	return null

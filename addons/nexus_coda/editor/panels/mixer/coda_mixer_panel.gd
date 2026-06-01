@@ -150,6 +150,18 @@ func attach_project(project: CodaState) -> void:
 	_refresh_vca_picker()
 
 
+func editor_teardown() -> void:
+	set_process(false)
+	if _strip_row != null:
+		for child in _strip_row.get_children():
+			if is_instance_valid(child):
+				child.free()
+	_strips_by_bus_id.clear()
+	_selected_bus_id = ""
+	attach_project(null)
+	_runtime = null
+
+
 func attach_runtime(runtime: CodaRuntime) -> void:
 	_runtime = runtime
 
@@ -222,8 +234,7 @@ func _process(delta: float) -> void:
 
 func _rebuild_strips() -> void:
 	for c in _strip_row.get_children():
-		_strip_row.remove_child(c)
-		c.queue_free()
+		c.free()
 	_strips_by_bus_id.clear()
 	if _project == null or _project.bus_root == null:
 		_empty_state.visible = true

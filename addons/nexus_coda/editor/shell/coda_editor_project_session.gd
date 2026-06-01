@@ -75,8 +75,6 @@ func initial_bind(restore_autosave: bool = true) -> void:
 	if browser_panel != null and browser_panel.has_method(&"get_project"):
 		var st: Variant = browser_panel.get_project()
 		bind_project_signals(st)
-		if on_push_runtime.is_valid():
-			on_push_runtime.call(st)
 		if graph_panel != null and st is CodaState:
 			graph_panel.attach_project(st as CodaState)
 		if inspector_panel != null and st is CodaState:
@@ -115,8 +113,6 @@ func apply_state_to_panels(st: CodaState) -> void:
 	if browser_panel != null and browser_panel.has_method(&"set_project"):
 		browser_panel.set_project(st)
 	bind_project_signals(st)
-	if on_push_runtime.is_valid():
-		on_push_runtime.call(st)
 	if graph_panel != null:
 		graph_panel.attach_project(st)
 		graph_panel.on_browser_event_selected(null)
@@ -379,3 +375,27 @@ func emit_title_update() -> void:
 func _notify(message: String, is_error: bool) -> void:
 	if on_notify.is_valid():
 		on_notify.call(message, is_error)
+
+
+func teardown() -> void:
+	bind_project_signals(null)
+	browser_panel = null
+	graph_panel = null
+	inspector_panel = null
+	player_panel = null
+	timeline_panel = null
+	mixer_panel = null
+	inspector_selection = null
+	file_dialogs = null
+	plugin = null
+	on_apply_theme = Callable()
+	on_push_runtime = Callable()
+	on_apply_inspector = Callable()
+	on_update_title = Callable()
+	on_notify = Callable()
+	on_spawn_new_window = Callable()
+	on_request_close = Callable()
+	on_refresh_filesystem = Callable()
+	current_path = ""
+	dirty = false
+	_recent_paths_snapshot = PackedStringArray()

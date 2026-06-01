@@ -11,66 +11,64 @@ const DND_TYPE := &"coda_effect_card"
 signal effect_drop_requested(effect_id: String, insert_before: int)
 
 
-class DragShield extends Control:
+class InsertLineOverlay extends Control:
 	var _list: CodaEffectsChainList
-	var _mouse_y: float = 0.0
 
 	func _init(list: CodaEffectsChainList) -> void:
 		_list = list
-		mouse_filter = Control.MOUSE_FILTER_STOP
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		focus_mode = Control.FOCUS_NONE
-		visible = false
-		z_index = 1000
+		z_index = 100
 		set_as_top_level(true)
 
-	func set_mouse_y(y: float) -> void:
-		_mouse_y = y
-
-	func _gui_input(event: InputEvent) -> void:
-		if event is InputEventMouseMotion:
-			_mouse_y = (event as InputEventMouseMotion).position.y
-			queue_redraw()
-		accept_event()
+	func _process(_delta: float) -> void:
+		if _list == null or not is_instance_valid(_list):
+			return
+		var active: bool = _list._is_effect_drag_active()
+		visible = active
+		if not active:
+			return
+		global_position = _list.global_position
+		size = _list.size
+		queue_redraw()
 
 	func _draw() -> void:
-		if _list == null or not _list._drop_line_active or not _list._is_effect_drag_active():
+		if _list == null:
 			return
-		var ix: int = _list._insert_before_index_from_local_y(_mouse_y)
+		var ly: float = _list.get_local_mouse_position().y
+		var ix: int = _list._insert_before_index_from_local_y(ly)
 		var line_y: float = _list._line_y_for_insert_index(ix)
 		if line_y < 0.0:
 			return
+		var col: Color = Tokens.ACCENT
+		col.a = 1.0
 		var x0: float = 4.0
 		var x1: float = maxf(x0 + 1.0, size.x - 4.0)
-		draw_line(Vector2(x0, line_y), Vector2(x1, line_y), Tokens.ACCENT, 2.0)
+		draw_line(Vector2(x0, line_y), Vector2(x1, line_y), col, 3.0)
 
 
-var _drop_line_active: bool = false
-var _shield: DragShield = null
+var _insert_line: InsertLineOverlay = null
+var _ready_done: bool = false
 
 
 func _ready() -> void:
+	if _ready_done:
+		return
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	_shield = DragShield.new(self)
-	add_child(_shield)
+	_insert_line = InsertLineOverlay.new(self)
+	add_child(_insert_line)
 	set_process(true)
+	_ready_done = true
 
 
 func _process(_delta: float) -> void:
-	var active := _is_effect_drag_active()
-	if active != _drop_line_active:
-		_drop_line_active = active
-		if _shield != null:
-			_shield.visible = active
-			if active:
-				_shield.global_position = global_position
-				_shield.size = size
-				_shield.set_mouse_y(get_local_mouse_position().y)
-			_shield.queue_redraw()
-	elif active and _shield != null:
-		_shield.global_position = global_position
-		_shield.size = size
-		_shield.set_mouse_y(get_local_mouse_position().y)
-		_shield.queue_redraw()
+	if _insert_line != null and is_instance_valid(_insert_line):
+		_insert_line.queue_redraw()
+
+
+func keep_insert_line_on_top() -> void:
+	if _insert_line != null and is_instance_valid(_insert_line) and _insert_line.get_parent() == self:
+		move_child(_insert_line, get_child_count() - 1)
 
 
 static func is_effect_drag_data(data: Variant) -> bool:
@@ -96,8 +94,8 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	return is_effect_drag_data(data)
 
 
-func _drop_data(_at_position: Vector2, data: Variant) -> void:
-	drop_effect_at_local_y(data, get_local_mouse_position().y)
+func _drop_data(at_position: Vector2, data: Variant) -> void:
+	drop_effect_at_local_y(data, at_position.y)
 
 
 func drop_effect_at_local_y(data: Variant, local_y: float) -> void:
@@ -116,7 +114,8 @@ func _insert_before_index_from_local_y(ly: float) -> int:
 		return 0
 	for i in cards.size():
 		var c: Control = cards[i] as Control
-		var mid_y: float = c.position.y + c.size.y * 0.5
+		var bounds: Rect2 = _card_bounds_in_list(c)
+		var mid_y: float = bounds.position.y + bounds.size.y * 0.5
 		if ly < mid_y:
 			return i
 	return cards.size()
@@ -127,9 +126,29 @@ func _line_y_for_insert_index(insert_before: int) -> float:
 	if cards.is_empty():
 		return -1.0
 	if insert_before <= 0:
-		return (cards[0] as Control).position.y + 1.0
+		var first: Control = cards[0] as Control
+		return _card_bounds_in_list(first).position.y
 	if insert_before >= cards.size():
 		var last: Control = cards[cards.size() - 1] as Control
-		return last.position.y + last.size.y + 2.0
-	var tgt: Control = cards[insert_before] as Control
-	return tgt.position.y + 1.0
+		var lb: Rect2 = _card_bounds_in_list(last)
+		return lb.position.y + lb.size.y
+	var prev: Control = cards[insert_before - 1] as Control
+	var next: Control = cards[insert_before] as Control
+	var pb: Rect2 = _card_bounds_in_list(prev)
+	var nb: Rect2 = _card_bounds_in_list(next)
+	var gap_top: float = pb.position.y + pb.size.y
+	var gap_bottom: float = nb.position.y
+	return gap_top + (gap_bottom - gap_top) * 0.5
+
+
+func _card_bounds_in_list(card: Control) -> Rect2:
+	if card == null or not is_instance_valid(card):
+		return Rect2()
+	var top_left: Vector2 = card.position
+	if is_inside_tree() and card.is_inside_tree():
+		var gpos: Vector2 = card.get_global_rect().position
+		top_left = get_global_transform_with_canvas().affine_inverse() * gpos
+	var h: float = card.size.y
+	if h < 1.0:
+		h = card.get_minimum_size().y
+	return Rect2(top_left.x, top_left.y, card.size.x, h)

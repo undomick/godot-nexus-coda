@@ -113,11 +113,12 @@ func _ready() -> void:
 
 
 func attach_state(state: Variant) -> void:
-	if state == null:
-		return
 	_project = CodaBrowserTab.bind_structure_changed(state, _project, _on_project_structure_changed)
 	if _tree != null:
-		_apply_project_to_tree()
+		if _project == null:
+			_tree.clear()
+		else:
+			_apply_project_to_tree()
 		_queue_rebuild()
 
 

@@ -136,7 +136,7 @@ func action_validate_banks() -> void:
 			NexusCodaLog.warn("bank", '"%s": %s' % [b.bank_name, p])
 	_notify(
 		"Validation finished: %d issue(s) — see Log panel." % problems_total,
-		problems_total > 0
+		false
 	)
 
 
@@ -154,7 +154,7 @@ func action_export_bank_async(bank_index: int) -> void:
 		_notify(
 			'Bank "%s" has %d validation issue(s) — fix in Log panel before exporting.'
 			% [bank.bank_name, problems.size()],
-			true
+			false
 		)
 		return
 	var p: String = await _pick_bank_save_path(bank.bank_name)
@@ -334,8 +334,21 @@ func collect_palette_entries() -> Array[Dictionary]:
 
 func teardown() -> void:
 	if _color_picker_dialog != null and is_instance_valid(_color_picker_dialog):
-		_color_picker_dialog.queue_free()
+		_color_picker_dialog.free()
 	_color_picker_dialog = null
+	_project_theme = null
+	session = null
+	plugin = null
+	file_dialogs = null
+	host = null
+	dock_host = null
+	player_panel = null
+	browser_panel = null
+	on_apply_theme = Callable()
+	on_notify = Callable()
+	on_open_command_palette = Callable()
+	on_open_shortcut_sheet = Callable()
+	on_select_event = Callable()
 
 
 func _pick_bank_save_path(suggest_name: String) -> String:

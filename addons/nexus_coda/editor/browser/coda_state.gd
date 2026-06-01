@@ -33,6 +33,15 @@ func _init() -> void:
 	_effects_mutator = CodaEffectsMutatorScript.new(self)
 
 
+func release_owned_references() -> void:
+	_events_store = null
+	_assets_store = null
+	_mixer_store = null
+	_banks_store = null
+	_effects_mutator = null
+	super.release_owned_references()
+
+
 func parent_of(target_id: String) -> CodaBrowserNode:
 	var p: CodaBrowserNode = _events_store.events_parent_of(target_id)
 	if p != null:

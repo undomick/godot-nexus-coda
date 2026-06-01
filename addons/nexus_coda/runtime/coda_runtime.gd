@@ -143,6 +143,27 @@ func _process(delta: float) -> void:
 		_parameter_pipeline.apply_modulations(hh)
 
 
+func _exit_tree() -> void:
+	# Autoload and editor-preview runtimes should leave no active voices/dispatchers behind.
+	stop_all()
+	set_project(null)
+
+
+func _drop_project_reference() -> void:
+	if _project == null:
+		return
+	if _project.structure_changed.is_connected(_on_project_bus_structure_changed):
+		_project.structure_changed.disconnect(_on_project_bus_structure_changed)
+	_project.release_owned_references()
+	_project = null
+
+
+func sync_editor_playback_copy(source: CodaProject) -> void:
+	if not is_editor_preview or source == null:
+		return
+	set_project(source.duplicate_for_playback())
+
+
 func set_project(project: Variant) -> void:
 	# Editor project loads and gameplay project swaps must not keep dispatchers tied to the
 	# previous CodaState (timeline cursors, graph plans, pooled players).
@@ -150,11 +171,8 @@ func set_project(project: Variant) -> void:
 	CodaAudioStreamCacheScript.clear()
 	if project != null:
 		_bank_registry.clear()
-	if _project != null:
-		if _project.structure_changed.is_connected(_on_project_bus_structure_changed):
-			_project.structure_changed.disconnect(_on_project_bus_structure_changed)
+	_drop_project_reference()
 	if project == null:
-		_project = null
 		if _snapshot_blender != null:
 			_snapshot_blender.setup(
 				_project, Callable(_bus_sync, "sync_buses"), _snapshot_sync_caller()

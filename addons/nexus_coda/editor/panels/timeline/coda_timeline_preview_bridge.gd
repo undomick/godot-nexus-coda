@@ -14,6 +14,8 @@ const CodaEditorPlaybackSyncScript := preload(
 )
 
 var _runtime: CodaRuntime = null
+var _authoring_project: CodaProject = null
+var _ensure_runtime_handler: Callable = Callable()
 var _view: CodaTimelineView = null
 var _selected_event: CodaBrowserNode = null
 var _live_handle: CodaEventHandle = null
@@ -32,6 +34,10 @@ func set_view(view: CodaTimelineView) -> void:
 	_view = view
 
 
+func set_authoring_project(project: CodaProject) -> void:
+	_authoring_project = project
+
+
 func set_selected_event(event: CodaBrowserNode) -> void:
 	_selected_event = event
 	_live_handle = null
@@ -48,6 +54,18 @@ func clear_live_handle() -> void:
 func stop_all_previews() -> void:
 	if _runtime != null:
 		_runtime.stop_all()
+	_live_handle = null
+
+
+func teardown() -> void:
+	_authoring_project = null
+	stop_all_previews()
+	if _runtime != null and is_instance_valid(_runtime):
+		if _runtime.voice_finished.is_connected(_on_runtime_voice_finished):
+			_runtime.voice_finished.disconnect(_on_runtime_voice_finished)
+	_runtime = null
+	_view = null
+	_selected_event = null
 	_live_handle = null
 
 
@@ -138,8 +156,16 @@ func get_runtime() -> CodaRuntime:
 	return _runtime
 
 
+func set_ensure_runtime_handler(handler: Callable) -> void:
+	_ensure_runtime_handler = handler
+
+
 func toggle_audition() -> void:
-	if _selected_event == null or _runtime == null or _view == null:
+	if _selected_event == null or _view == null:
+		return
+	if _runtime == null and _ensure_runtime_handler.is_valid():
+		_ensure_runtime_handler.call()
+	if _runtime == null:
 		return
 	if _selected_event.event_authoring_mode != CodaBrowserNode.AuthoringMode.TIMELINE:
 		return
@@ -161,6 +187,8 @@ func toggle_audition() -> void:
 	var ph: float = clampf(_view.get_playhead(), 0.0, t.length_seconds)
 	if t.has_work_area():
 		ph = t.clamp_time_to_work_area(ph)
+	if _runtime.is_editor_preview and _authoring_project != null:
+		_runtime.sync_editor_playback_copy(_authoring_project)
 	var opts := CodaPlayOptionsScript.new()
 	opts.loop = t.loop_enabled
 	opts.timeline_cursor_start = ph

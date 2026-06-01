@@ -52,10 +52,15 @@ func dispose_runtime() -> void:
 			_pool_exhausted_slot
 		):
 			_runtime.voice_pool_exhausted.disconnect(_pool_exhausted_slot)
+		_runtime.set_project(null)
 		CodaAudioBusSyncGateScript.unregister_editor_preview(_runtime.get_instance_id())
 		_runtime.stop_all()
-		_runtime.queue_free()
+		# During editor shutdown/unload, queued frees may not run.
+		_runtime.free()
 	_runtime = null
+	_host = null
+	_timeline_panel = null
+	_player_panel = null
 
 
 func push_project(state: Variant) -> void:
@@ -71,10 +76,22 @@ func push_project(state: Variant) -> void:
 func on_event_output_bus_changed(live_event: CodaBrowserNode) -> void:
 	if live_event == null:
 		return
-	ensure_runtime()
+	var st: Variant = _authoring_state_from_host()
+	if st != null:
+		push_project(st)
+	else:
+		ensure_runtime()
 	if _runtime == null:
 		return
 	_runtime.apply_event_output_bus_from_authoring(live_event)
+
+
+func _authoring_state_from_host() -> Variant:
+	if _host == null or not is_instance_valid(_host):
+		return null
+	if _host.has_method(&"get_authoring_state_for_preview"):
+		return _host.call(&"get_authoring_state_for_preview")
+	return null
 
 
 func stop_panel_previews() -> void:

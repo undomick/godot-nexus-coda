@@ -29,6 +29,10 @@ func setup(host: Node, plugin_ref: EditorPlugin, dock_host_ref: CodaDockHost) ->
 	dock_host = dock_host_ref
 
 
+func cancel_pending() -> void:
+	_autosave_queued = false
+
+
 func on_layout_changed() -> void:
 	if _autosave_queued:
 		return

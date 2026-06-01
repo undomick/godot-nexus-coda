@@ -10,14 +10,22 @@ var _dirty: bool = true
 
 
 func bind_project(project: CodaProject) -> void:
-	if _project != null and is_instance_valid(_project):
-		if _project.structure_changed.is_connected(_mark_dirty):
-			_project.structure_changed.disconnect(_mark_dirty)
+	unbind_project()
 	_project = project
 	_dirty = true
 	if _project != null:
 		if not _project.structure_changed.is_connected(_mark_dirty):
 			_project.structure_changed.connect(_mark_dirty)
+
+
+func unbind_project() -> void:
+	if _project != null and is_instance_valid(_project):
+		if _project.structure_changed.is_connected(_mark_dirty):
+			_project.structure_changed.disconnect(_mark_dirty)
+	_project = null
+	_node_by_id.clear()
+	_clip_by_id.clear()
+	_dirty = true
 
 
 func find_node_anywhere(target_id: String) -> CodaBrowserNode:

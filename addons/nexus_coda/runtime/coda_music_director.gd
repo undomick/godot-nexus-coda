@@ -138,6 +138,14 @@ func _process(_delta: float) -> void:
 	_pending_quantized = remaining
 
 
+func _exit_tree() -> void:
+	# Ensure we release handles and pending work so the autoload can unload cleanly.
+	_pending_quantized.clear()
+	_slots.clear()
+	_runtime = null
+	_policy = null
+
+
 func _set_music_immediate(
 	event_path: String, fade_ms: int, slot_key: String, params: Dictionary
 ) -> CodaEventHandle:

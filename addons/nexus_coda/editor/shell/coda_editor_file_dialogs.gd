@@ -182,3 +182,10 @@ func _on_canceled() -> void:
 		return
 	_file_dialog_user_canceled = true
 	_file_dialog_pick_complete = true
+
+
+func teardown() -> void:
+	if _host != null and is_instance_valid(_host) and _host.has_node(UNSAVED_LAYER_NODEPATH):
+		_host.get_node(UNSAVED_LAYER_NODEPATH).free()
+	_host = null
+	_plugin = null

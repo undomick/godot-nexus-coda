@@ -39,6 +39,7 @@ const STATUS_PAUSED := "Paused"
 const SOUND_NODE_KIND := 5
 
 var _project: CodaState = null
+var _ensure_runtime_handler: Callable = Callable()
 var _runtime: CodaRuntime = null
 
 var _selected_event: CodaBrowserNode = null
@@ -62,6 +63,7 @@ var _meter_value_label: Label
 var _params_header: CodaSectionHeader
 var _param_grid: CodaPlayerParamGrid
 var _last_playhead_broadcast: float = NAN
+var _idle_playhead_seconds: float = 0.0
 
 
 func _ready() -> void:
@@ -226,6 +228,12 @@ func attach_project(project: CodaState) -> void:
 		if _project.event_parameters_changed.is_connected(_on_event_parameters_changed):
 			_project.event_parameters_changed.disconnect(_on_event_parameters_changed)
 	_project = project
+	if _project == null:
+		_selected_event = null
+		_active_handle = null
+		_transport_armed_for_handle_id = -1
+		_refresh_play_enabled()
+		return
 	if _project != null:
 		_project.structure_changed.connect(_on_project_structure_changed)
 		# Timeline drops fire only `project_dirty` (no structural shape change). Listen for it
@@ -253,9 +261,21 @@ func _on_event_parameters_changed(event_id: String) -> void:
 	_rebuild_param_rows()
 
 
+func set_ensure_runtime_handler(handler: Callable) -> void:
+	_ensure_runtime_handler = handler
+
+
 func attach_runtime(runtime: CodaRuntime) -> void:
 	_runtime = runtime
 	_refresh_play_enabled()
+
+
+func editor_teardown() -> void:
+	set_process(false)
+	stop_current_voice()
+	on_browser_event_selected(null)
+	attach_project(null)
+	_runtime = null
 
 
 ## Browser-selection slot. Same signature as Inspector/Graph so the editor window can wire
@@ -384,8 +404,14 @@ func _arm_transport_for_handle(h: CodaEventHandle) -> void:
 # ---- Transport handlers ----
 
 func _on_play_requested() -> void:
-	if _selected_event == null or _runtime == null:
+	if _selected_event == null:
 		return
+	if _runtime == null and _ensure_runtime_handler.is_valid():
+		_ensure_runtime_handler.call()
+	if _runtime == null:
+		return
+	if _runtime.is_editor_preview and _project != null:
+		_runtime.sync_editor_playback_copy(_project)
 	_stop_active_voice()
 	var opts := CodaPlayOptionsScript.new()
 	opts.loop = _transport_bar.is_loop_enabled()
@@ -454,6 +480,12 @@ func _on_seek_drag_ended(_value_changed: bool) -> void:
 	var r: CodaEventHandle = _resolve_preview_handle()
 	if r != null:
 		r.seek(_seek_slider.value)
+		return
+	# No active handle (stopped): keep an "idle playhead" so the next Play starts here.
+	_idle_playhead_seconds = _seek_slider.value
+	_last_playhead_broadcast = _idle_playhead_seconds
+	playhead_changed.emit(_idle_playhead_seconds)
+	_update_time_display()
 
 
 func _on_pin_toggled(on: bool) -> void:
@@ -476,8 +508,9 @@ func _stop_active_voice() -> void:
 	if _transport_bar != null:
 		_transport_bar.set_playing(false)
 	if _seek_slider != null:
-		_seek_slider.editable = false
-		_seek_slider.set_value_no_signal(0.0)
+		_seek_slider.editable = _is_idle_seek_enabled()
+		# Preserve the current slider position when stopping, so users can scrub and restart.
+		_idle_playhead_seconds = _seek_slider.value
 	_set_status(STATUS_IDLE)
 
 
@@ -498,7 +531,7 @@ func _process(_delta: float) -> void:
 		if _transport_bar != null:
 			_transport_bar.set_playing(false)
 		if _seek_slider != null:
-			_seek_slider.editable = false
+			_seek_slider.editable = _is_idle_seek_enabled()
 		_set_status(STATUS_IDLE)
 	elif not r.is_timeline and not r.is_playing():
 		_active_handle = null
@@ -506,7 +539,7 @@ func _process(_delta: float) -> void:
 		if _transport_bar != null:
 			_transport_bar.set_playing(false)
 		if _seek_slider != null:
-			_seek_slider.editable = false
+			_seek_slider.editable = _is_idle_seek_enabled()
 		_set_status(STATUS_IDLE)
 	else:
 		if not r.is_timeline:
@@ -525,6 +558,14 @@ func _process(_delta: float) -> void:
 	_update_meter()
 
 
+func _is_idle_seek_enabled() -> bool:
+	if _selected_event == null:
+		return false
+	if _selected_event.event_authoring_mode != CodaBrowserNode.AuthoringMode.TIMELINE:
+		return false
+	return _selected_event.event_timeline != null
+
+
 func _update_time_display() -> void:
 	var pos: float = 0.0
 	var length: float = 0.0
@@ -532,6 +573,11 @@ func _update_time_display() -> void:
 	if r != null:
 		pos = r.get_position()
 		length = r.get_length()
+	elif _selected_event != null and _selected_event.event_authoring_mode == CodaBrowserNode.AuthoringMode.TIMELINE:
+		var tline: CodaEventTimeline = _selected_event.event_timeline
+		if tline != null:
+			length = tline.length_seconds
+			pos = clampf(_seek_slider.value if _seek_slider != null else _idle_playhead_seconds, 0.0, length)
 	if _time_label != null:
 		_time_label.text = _format_time_pair(pos, length)
 	if _seek_slider != null and not _seek_slider_dragging:

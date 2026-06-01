@@ -247,6 +247,13 @@ func attach_project(project: CodaState) -> void:
 		_clip_section.attach_project(project)
 
 
+func editor_teardown() -> void:
+	on_browser_event_selected(null)
+	attach_project(null)
+	_project = null
+	_browser_panel = null
+
+
 func apply_view_state(state: Dictionary) -> void:
 	var subject: int = int(state.get("subject", CodaInspectorSelectionScript.Subject.EMPTY))
 	if subject == CodaInspectorSelectionScript.Subject.EMPTY:

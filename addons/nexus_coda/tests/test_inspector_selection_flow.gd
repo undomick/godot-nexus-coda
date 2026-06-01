@@ -19,6 +19,9 @@ const CodaEffectsChainBindingScript := preload(
 const CodaEffectsChainViewScript := preload(
 	"res://addons/nexus_coda/editor/panels/effects/coda_effects_chain_view.gd"
 )
+const CodaEffectsChainListScript := preload(
+	"res://addons/nexus_coda/editor/panels/effects/coda_effects_chain_list.gd"
+)
 const CodaTrackEffectScript := preload(
 	"res://addons/nexus_coda/domain/effects/coda_track_effect.gd"
 )
@@ -33,6 +36,10 @@ static func run_all() -> int:
 	failed += _test_add_track_effect_via_section_chain()
 	failed += _test_add_clip_effect_via_section_chain()
 	failed += _test_mutation_target_survives_empty_binding_scope()
+	failed += _test_track_effect_remove_rebinds_cards()
+	failed += _test_track_effect_move_reorders_data()
+	failed += _test_effect_chain_survives_double_ready()
+	failed += _test_effect_drop_via_list_reorders()
 	return failed
 
 
@@ -224,3 +231,128 @@ static func _test_mutation_target_survives_empty_binding_scope() -> int:
 		push_error("mutation target track id missing")
 		return 1
 	return 0
+
+
+static func _test_track_effect_remove_rebinds_cards() -> int:
+	var pack: Dictionary = _make_timeline_event()
+	var state: CodaState = pack["state"] as CodaState
+	var ev: CodaBrowserNode = pack["event"] as CodaBrowserNode
+	var track: CodaTimelineTrack = pack["track"] as CodaTimelineTrack
+
+	var section = CodaInspectorEffectsSectionScript.new()
+	section._ready()
+	section.attach_project(state)
+	section.set_fx_scope(
+		CodaInspectorEffectsSectionScript.FxScope.TIMELINE_TRACK,
+		{"event_id": ev.id, "track_id": track.id}
+	)
+	var chain: CodaEffectsChainView = section.get_track_chain_control() as CodaEffectsChainView
+	state.add_track_effect(ev.id, track.id, CodaTrackEffect.Type.GAIN)
+	if chain.get_effect_card_count() != 1:
+		push_error("track chain should show one card after add")
+		return 1
+	var effect_id: String = track.effects[0].id
+	chain.effect_remove_requested.emit(effect_id)
+	if not track.effects.is_empty():
+		push_error("track effect should be removed from data")
+		return 1
+	if chain.get_effect_card_count() != 0:
+		push_error("track chain should show no cards after remove")
+		return 1
+	return 0
+
+
+static func _test_track_effect_move_reorders_data() -> int:
+	var pack: Dictionary = _make_timeline_event()
+	var state: CodaState = pack["state"] as CodaState
+	var ev: CodaBrowserNode = pack["event"] as CodaBrowserNode
+	var track: CodaTimelineTrack = pack["track"] as CodaTimelineTrack
+
+	var section = CodaInspectorEffectsSectionScript.new()
+	section._ready()
+	section.attach_project(state)
+	section.set_fx_scope(
+		CodaInspectorEffectsSectionScript.FxScope.TIMELINE_TRACK,
+		{"event_id": ev.id, "track_id": track.id}
+	)
+	var chain: CodaEffectsChainView = section.get_track_chain_control() as CodaEffectsChainView
+	state.add_track_effect(ev.id, track.id, CodaTrackEffect.Type.GAIN)
+	state.add_track_effect(ev.id, track.id, CodaTrackEffect.Type.COMPRESSOR)
+	if chain.get_effect_card_count() != 2:
+		push_error("track chain should show two cards")
+		return 1
+	var second_id: String = track.effects[1].id
+	chain.effect_move_requested.emit(1, 0)
+	if track.effects[0].id != second_id:
+		push_error("track effect move should reorder data")
+		return 1
+	if chain.get_effect_card_count() != 2:
+		push_error("track chain should still show two cards after move")
+		return 1
+	return 0
+
+
+static func _test_effect_chain_survives_double_ready() -> int:
+	var view: CodaEffectsChainView = CodaEffectsChainViewScript.new()
+	view._ready()
+	view._ready()
+	if view.get_child_count() != 3:
+		push_error("double _ready should not duplicate chain chrome (header, list, footer)")
+		return 1
+	var effects: Array[CodaTrackEffect] = []
+	var eff: CodaTrackEffect = CodaTrackEffectScript.new()
+	effects.append(eff)
+	view.bind_effects_array(effects)
+	if view.get_effect_card_count() != 1:
+		push_error("effect card missing after bind")
+		return 1
+	var list: CodaEffectsChainList = _chain_list_from_view(view)
+	if list == null:
+		push_error("effects chain list missing")
+		return 1
+	var empty_hints: int = 0
+	for child in list.get_children():
+		if child is Label and not (child is PanelContainer):
+			empty_hints += 1
+	if empty_hints > 1:
+		push_error("expected at most one empty-state label in list")
+		return 1
+	return 0
+
+
+static func _test_effect_drop_via_list_reorders() -> int:
+	var pack: Dictionary = _make_timeline_event()
+	var state: CodaState = pack["state"] as CodaState
+	var ev: CodaBrowserNode = pack["event"] as CodaBrowserNode
+	var track: CodaTimelineTrack = pack["track"] as CodaTimelineTrack
+
+	var section = CodaInspectorEffectsSectionScript.new()
+	section._ready()
+	section.attach_project(state)
+	section.set_fx_scope(
+		CodaInspectorEffectsSectionScript.FxScope.TIMELINE_TRACK,
+		{"event_id": ev.id, "track_id": track.id}
+	)
+	state.add_track_effect(ev.id, track.id, CodaTrackEffect.Type.GAIN)
+	state.add_track_effect(ev.id, track.id, CodaTrackEffect.Type.COMPRESSOR)
+	var chain: CodaEffectsChainView = section.get_track_chain_control() as CodaEffectsChainView
+	var list: CodaEffectsChainList = _chain_list_from_view(chain)
+	if list == null:
+		push_error("list missing for drop test")
+		return 1
+	var second_id: String = track.effects[1].id
+	list.drop_effect_at_local_y(
+		{"type": CodaEffectsChainListScript.DND_TYPE, "effect_id": second_id},
+		0.0
+	)
+	if track.effects[0].id != second_id:
+		push_error("drop should move effect to start of chain")
+		return 1
+	return 0
+
+
+static func _chain_list_from_view(view: CodaEffectsChainView) -> CodaEffectsChainList:
+	for child in view.get_children():
+		if child is CodaEffectsChainList:
+			return child as CodaEffectsChainList
+	return null

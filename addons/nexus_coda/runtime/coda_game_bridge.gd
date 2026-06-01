@@ -112,6 +112,16 @@ func disconnect_game_signals() -> void:
 	_signal_connections.clear()
 
 
+func _exit_tree() -> void:
+	disconnect_game_signals()
+	if _runtime != null and is_instance_valid(_runtime) and _runtime.project_loaded.is_connected(_on_project_loaded):
+		_runtime.project_loaded.disconnect(_on_project_loaded)
+	_runtime = null
+	_music = null
+	_ctx = null
+	_rules.clear()
+
+
 func _connect_node_signals_recursive(node: Node) -> void:
 	for sig_info in node.get_signal_list():
 		var sig_name: String = String(sig_info.get("name", ""))

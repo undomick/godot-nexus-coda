@@ -125,6 +125,20 @@ func _apply_snapshot_wet_sends(bus: CodaBus, entry: Dictionary) -> void:
 			send.level = clampf(float(ov.get("level", send.level)), 0.0, 1.0)
 
 
+## Break RefCounted cycles (project <-> index, stores) so editor shutdown can drop the graph.
+func release_owned_references() -> void:
+	if _project_index != null:
+		_project_index.unbind_project()
+		_project_index = null
+	events_root = null
+	assets_root = null
+	bus_root = null
+	snapshots.clear()
+	vcas.clear()
+	banks.clear()
+	game_sync_rules.clear()
+
+
 ## Immutable playback copy; editor preview runtime must not share live authoring state.
 func duplicate_for_playback() -> CodaProject:
 	var copy := CodaProject.new()

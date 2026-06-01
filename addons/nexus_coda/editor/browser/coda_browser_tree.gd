@@ -8,7 +8,7 @@ signal rename_committed(node_id: String, new_name: String)
 
 const CodaStateScript := preload("res://addons/nexus_coda/editor/browser/coda_state.gd")
 
-var _project = CodaStateScript.new()
+var _project: CodaState = null
 var _use_events: bool = true
 
 

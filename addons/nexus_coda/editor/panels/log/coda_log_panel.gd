@@ -73,6 +73,11 @@ func _exit_tree() -> void:
 	NexusCodaLog.unsubscribe(self)
 
 
+func editor_teardown() -> void:
+	NexusCodaLog.unsubscribe(self)
+	_entries.clear()
+
+
 func _hydrate_from_logger_buffer() -> void:
 	var ml: MainLoop = Engine.get_main_loop()
 	if ml is not SceneTree:
