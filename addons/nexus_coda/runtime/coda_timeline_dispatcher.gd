@@ -198,9 +198,11 @@ func tick_dispatchers(delta: float) -> void:
 			_clip_dispatch.fire_clips_in_range(handle, d, timeline, cursor_at_frame_start, wrap_target)
 			d["spent_clip_ids"] = {}
 			_lane_voice.stop_voices(d, handle)
+			# Always clear fired clips after wrap stop: stale ids block reprime when the
+			# wrapped cursor lands ahead of the pre-wrap position (large frame delta).
+			d["fired_clip_ids"] = {}
 			var loop_lo: float = loop_start if loop_start >= 0.0 else 0.0
 			if backward_landing:
-				d["fired_clip_ids"] = {}
 				_clip_dispatch.fire_clips_in_range(
 					handle, d, timeline, next_cursor, cursor_at_frame_start
 				)

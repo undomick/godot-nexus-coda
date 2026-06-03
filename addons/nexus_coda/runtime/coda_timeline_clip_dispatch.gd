@@ -166,6 +166,14 @@ func heal_orphaned_fired_clips(
 		d["fired_clip_ids"] = fired
 
 
+static func clip_id_from_wet_voice_key(voice_key: String) -> String:
+	var key_str: String = str(voice_key)
+	var wet_pos: int = key_str.rfind("_wet_")
+	if wet_pos < 0:
+		return ""
+	return key_str.substr(0, wet_pos)
+
+
 func refresh_voice_output_levels(
 	handle: CodaEventHandle, d: Dictionary, timeline: CodaEventTimeline
 ) -> void:
@@ -174,11 +182,15 @@ func refresh_voice_output_levels(
 		return
 	var has_solo: bool = CodaRuntimeTimelineLayoutScript.timeline_has_solo(timeline)
 	var override_db: float = float(handle.params.get("volume_db", 0.0))
+	var wet_levels: Dictionary = {}
 	for sound_key in voices.keys():
+		var key_str: String = str(sound_key)
+		if key_str.contains("_wet_"):
+			continue
 		var p: AudioStreamPlayer = voices[sound_key] as AudioStreamPlayer
 		if p == null or not is_instance_valid(p):
 			continue
-		var clip_id: String = str(sound_key)
+		var clip_id: String = key_str
 		var info: Dictionary = timeline.find_clip(clip_id)
 		if info.is_empty():
 			continue
@@ -202,3 +214,17 @@ func refresh_voice_output_levels(
 			)
 			p.volume_db = float(levels.get("volume_db", base_db))
 			p.pitch_scale = float(levels.get("pitch_scale", float(cl.pitch_scale)))
+		wet_levels[clip_id] = {"volume_db": p.volume_db, "pitch_scale": p.pitch_scale}
+	for sound_key in voices.keys():
+		var key_str: String = str(sound_key)
+		if not key_str.contains("_wet_"):
+			continue
+		var clip_id: String = clip_id_from_wet_voice_key(key_str)
+		if clip_id.is_empty() or not wet_levels.has(clip_id):
+			continue
+		var p: AudioStreamPlayer = voices[sound_key] as AudioStreamPlayer
+		if p == null or not is_instance_valid(p):
+			continue
+		var levels: Dictionary = wet_levels[clip_id]
+		p.volume_db = float(levels.get("volume_db", 0.0))
+		p.pitch_scale = float(levels.get("pitch_scale", 1.0))
