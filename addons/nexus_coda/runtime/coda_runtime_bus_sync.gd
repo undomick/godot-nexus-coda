@@ -46,7 +46,7 @@ func apply_loaded_bank_buses() -> void:
 			if not CodaAudioBusSyncGateScript.may_sync_to_audio_server(_bus_sync_caller()):
 				continue
 			var partial: Dictionary = CodaAudioBusMirrorScript.sync_to_audio_server(
-				root as CodaBus, false
+				root as CodaBus, false, project.vcas
 			)
 			for cid in partial.keys():
 				_bus_id_to_godot_name[cid] = partial[cid]
