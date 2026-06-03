@@ -39,6 +39,8 @@ static func run() -> int:
 	failed += _test_clip_id_from_wet_voice_key()
 	failed += _test_refresh_voice_output_levels_syncs_wet_layers()
 	failed += _test_refresh_preserves_wet_send_offset()
+	failed += _test_wet_volume_silence_when_send_disabled()
+	failed += _test_restart_wet_layers_for_prefix()
 	return failed
 
 
@@ -177,4 +179,73 @@ static func _test_refresh_preserves_wet_send_offset() -> int:
 		runtime.free()
 		return 1
 	runtime.free()
+	return 0
+
+
+static func _test_wet_volume_silence_when_send_disabled() -> int:
+	var bus_root: CodaBus = _make_return_bus_tree()
+	var ret: CodaBus = bus_root.children[bus_root.children.size() - 1]
+	var send: CodaBusSend = CodaBusSendScript.new()
+	send.target_bus_id = ret.id
+	send.level = 0.5
+	send.parameter_id = "wet_amount"
+	var merged: Array[CodaBusSend] = [send]
+	var muted_db: float = CodaVoiceWetLayersScript.wet_volume_db_for_layer(
+		0.0, 0, merged, bus_root, {"wet_amount": 0.0}
+	)
+	if muted_db > -79.0:
+		push_error("disabled RTPC send should silence wet layer, got %s" % muted_db)
+		return 1
+	var timeline: CodaEventTimeline = CodaEventTimelineScript.new()
+	timeline.length_seconds = 10.0
+	var track: CodaTimelineTrack = CodaTimelineTrackScript.new()
+	track.wet_sends.append(send)
+	var clip: CodaTimelineClip = CodaTimelineClipScript.new()
+	clip.id = "clip_a"
+	clip.start_seconds = 0.0
+	clip.duration_seconds = 5.0
+	track.clips.append(clip)
+	timeline.tracks.append(track)
+	var ev: CodaBrowserNode = CodaBrowserNodeScript.new()
+	ev.event_timeline = timeline
+	var project: CodaProject = CodaProjectScript.new()
+	project.bus_root = bus_root
+	var runtime: CodaRuntime = CodaRuntimeScript.new()
+	runtime._project = project
+	runtime._parameter_pipeline = CodaRuntimeParameterPipelineScript.new()
+	runtime._parameter_pipeline.setup(runtime)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle._alive = true
+	handle.event_node = ev
+	handle.param_values_smoothed = {"wet_amount": 0.0}
+	var dry: AudioStreamPlayer = AudioStreamPlayer.new()
+	var wet: AudioStreamPlayer = AudioStreamPlayer.new()
+	dry.volume_db = 0.0
+	wet.volume_db = 0.0
+	var d: Dictionary = {"timeline": timeline, "voices": {"clip_a": dry, "clip_a_wet_0": wet}}
+	var dispatcher: CodaTimelineDispatcher = CodaTimelineDispatcherScript.new()
+	dispatcher.setup(runtime, null, null)
+	dispatcher._clip_dispatch.refresh_voice_output_levels(handle, d, timeline)
+	if wet.volume_db > -79.0:
+		push_error("refresh should silence wet layer when RTPC disables send, got %s" % wet.volume_db)
+		runtime.free()
+		return 1
+	runtime.free()
+	return 0
+
+
+static func _test_restart_wet_layers_for_prefix() -> int:
+	var root: Node = Node.new()
+	add_child(root)
+	var wet: AudioStreamPlayer = AudioStreamPlayer.new()
+	wet.stream = AudioStreamMicrophone.new()
+	root.add_child(wet)
+	var d: Dictionary = {"voices": {"clip_a_wet_0": wet, "clip_b_wet_0": AudioStreamPlayer.new()}}
+	CodaVoiceWetLayersScript.restart_wet_layers_for_prefix(d, "clip_a", 1.5, true)
+	var paused: bool = wet.stream_paused
+	root.queue_free()
+	if not paused:
+		push_error("restart_wet_layers_for_prefix should sync stream_paused from dry")
+		return 1
 	return 0

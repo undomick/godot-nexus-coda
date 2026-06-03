@@ -20,7 +20,8 @@ static func wet_volume_db_for_layer(
 		merged_sends, bus_root, param_values
 	)
 	if wet_index >= active.size():
-		return dry_volume_db
+		# Send disabled via RTPC or filtered out; silence instead of full dry into return bus.
+		return -80.0
 	var amt: float = CodaBusSendRuntimeScript.effective_level(active[wet_index], param_values)
 	return dry_volume_db + CodaBusSendRuntimeScript.linear_to_db(amt)
 
@@ -79,6 +80,11 @@ static func spawn_wet_layers(
 			wet.set_meta(
 				&"_coda_clip_timeline_end",
 				dry_player.get_meta(&"_coda_clip_timeline_end")
+			)
+		if dry_player.has_meta(&"_coda_timeline_restart_offset"):
+			wet.set_meta(
+				&"_coda_timeline_restart_offset",
+				dry_player.get_meta(&"_coda_timeline_restart_offset")
 			)
 		var fx_nm: String = String(layer.get("fx_bus", ""))
 		if not fx_nm.is_empty():
@@ -159,6 +165,22 @@ static func resume_graph_wet_layers(handle: CodaEventHandle) -> void:
 		var wet: AudioStreamPlayer = p as AudioStreamPlayer
 		if wet != null and is_instance_valid(wet) and wet.playing:
 			wet.stream_paused = false
+
+
+static func restart_wet_layers_for_prefix(
+	d: Dictionary, voice_key_prefix: String, restart_at: float, stream_paused: bool
+) -> void:
+	var voices: Dictionary = d.get("voices", {})
+	var prefix: String = "%s_wet_" % voice_key_prefix
+	for k in voices.keys():
+		if not str(k).begins_with(prefix):
+			continue
+		var wet: AudioStreamPlayer = voices[k] as AudioStreamPlayer
+		if wet == null or not is_instance_valid(wet):
+			continue
+		wet.stream_paused = stream_paused
+		wet.play(maxf(0.0, restart_at))
+		wet.stream_paused = stream_paused
 
 
 static func teardown_wet_layers_for_prefix(d: Dictionary, voice_key_prefix: String) -> void:

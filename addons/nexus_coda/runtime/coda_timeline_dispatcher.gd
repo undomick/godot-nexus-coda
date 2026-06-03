@@ -19,6 +19,9 @@ const CodaPlayOptionsScript := preload("res://addons/nexus_coda/domain/coda_play
 const CodaTimelineTransportScript := preload(
 	"res://addons/nexus_coda/domain/coda_timeline_transport.gd"
 )
+const CodaVoiceWetLayersScript := preload(
+	"res://addons/nexus_coda/runtime/coda_voice_wet_layers.gd"
+)
 
 var _runtime: CodaRuntime = null
 var _voice_fader: CodaVoiceFader = null
@@ -374,6 +377,9 @@ func on_voice_finished(player: AudioStreamPlayer, key: int) -> void:
 		if gen >= 0:
 			_runtime.get_player_pending_finish_gen()[key] = gen
 		player.play(restart_at)
+		CodaVoiceWetLayersScript.restart_wet_layers_for_prefix(
+			d, finished_clip_id, restart_at, player.stream_paused
+		)
 		return
 	_lane_voice.finalize_lane_voice(player, key, h, d, finished_clip_id)
 	var spent: Dictionary = d.get("spent_clip_ids", {})
