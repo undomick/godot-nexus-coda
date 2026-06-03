@@ -190,6 +190,7 @@ func pause_graph_preview(handle: CodaEventHandle) -> void:
 			continue
 		_snapshot_pause_player(sib, snapshot)
 	handle.params["_coda_graph_pause_snapshot"] = snapshot
+	CodaVoiceWetLayersScript.pause_graph_wet_layers(handle)
 	if not _paused_graph_handles.has(handle):
 		_paused_graph_handles.append(handle)
 
@@ -215,6 +216,8 @@ func resume_graph_preview(handle: CodaEventHandle) -> void:
 			resumed += 1
 	if resumed != expected and handle._alive:
 		_runtime.stop(handle)
+		return
+	CodaVoiceWetLayersScript.resume_graph_wet_layers(handle)
 
 
 func _finalize_paused_preview(handle: CodaEventHandle) -> void:
@@ -306,6 +309,7 @@ func _start_parallel_step(
 	params: Dictionary,
 	event_loops: bool,
 ) -> Dictionary:
+	CodaVoiceWetLayersScript.stop_graph_wet_layers(owner)
 	var active_handles: Dictionary = _runtime.get_active_handles()
 	var primary_player: AudioStreamPlayer = null
 	var started_indices: Dictionary = {}
@@ -539,6 +543,7 @@ func _try_finish_graph_handle(h: CodaEventHandle) -> void:
 		mark_plan_resume(h)
 		return
 	unmark_plan_resume(h)
+	CodaVoiceWetLayersScript.stop_graph_wet_layers(h)
 	h._on_player_finished()
 	_runtime.runtime_emit_voice_finished(h)
 

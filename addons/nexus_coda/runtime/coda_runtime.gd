@@ -49,6 +49,7 @@ const CodaAudioStreamCacheScript := preload(
 	"res://addons/nexus_coda/runtime/coda_audio_stream_cache.gd"
 )
 const CodaPlayOptionsScript := preload("res://addons/nexus_coda/domain/coda_play_options.gd")
+const CodaVoiceWetLayersScript := preload("res://addons/nexus_coda/runtime/coda_voice_wet_layers.gd")
 const NexusCodaLogScript := preload("res://addons/nexus_coda/editor/nexus_coda_log.gd")
 
 const RUNTIME_LOG_SCOPE := "runtime"
@@ -386,6 +387,7 @@ func stop_all() -> void:
 		if bool(gh2.params.get("_coda_is_sibling", false)):
 			gh2._alive = false
 			continue
+		CodaVoiceWetLayersScript.stop_graph_wet_layers(gh2)
 		if gh2._alive:
 			gh2._alive = false
 			gh2.finished.emit()
@@ -526,12 +528,14 @@ func _fade_out_and_finalize_handle(
 	if handle == null:
 		return
 	if fade_ms <= 0:
+		CodaVoiceWetLayersScript.stop_graph_wet_layers(handle)
 		handle._stop_local(0)
 		if on_complete.is_valid():
 			on_complete.call()
 		return
 	var players: Array[AudioStreamPlayer] = _collect_handle_players(handle, fade_ms > 0)
 	if players.is_empty():
+		CodaVoiceWetLayersScript.stop_graph_wet_layers(handle)
 		handle._stop_local(0)
 		if on_complete.is_valid():
 			on_complete.call()
@@ -540,6 +544,7 @@ func _fade_out_and_finalize_handle(
 	var on_one_done := func() -> void:
 		remaining -= 1
 		if remaining <= 0:
+			CodaVoiceWetLayersScript.stop_graph_wet_layers(handle)
 			handle._stop_local(0)
 			if on_complete.is_valid():
 				on_complete.call()
@@ -566,6 +571,11 @@ func _collect_handle_players(handle: CodaEventHandle, include_idle: bool = false
 		if sib._player != null and is_instance_valid(sib._player):
 			if include_idle or sib._player.playing:
 				out.append(sib._player)
+	for p in handle.params.get("_coda_wet_players", []):
+		var wet: AudioStreamPlayer = p as AudioStreamPlayer
+		if wet != null and is_instance_valid(wet):
+			if include_idle or wet.playing:
+				out.append(wet)
 	return out
 
 
