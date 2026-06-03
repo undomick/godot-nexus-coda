@@ -23,6 +23,7 @@ static func run() -> int:
 	failed += _test_fade_stop_then_set_music_stops_outgoing()
 	failed += _test_fade_stop_slot_exposes_outgoing_handle()
 	failed += _test_fade_stop_same_path_updates_outgoing_only()
+	failed += _test_quantized_set_music_after_fade_stop_teardown()
 	return failed
 
 
@@ -343,6 +344,42 @@ static func _test_fade_stop_same_path_updates_outgoing_only() -> int:
 		return 1
 	if int(mock.set_parameter_calls[0].get("value", -1)) != 2:
 		push_error("parameter update should reach the outgoing handle")
+		mock.queue_free()
+		return 1
+	mock.queue_free()
+	return 0
+
+
+static func _test_quantized_set_music_after_fade_stop_teardown() -> int:
+	var mock: CodaTestMockRuntime = CodaTestMockRuntimeScript.new()
+	var policy: CodaMusicTransitionPolicy = CodaMusicTransitionPolicyScript.default_policy()
+	policy.quantize_to_bar = true
+	mock._policy = policy
+	var director: CodaMusicDirector = CodaMusicDirectorScript.new()
+	director.bind_runtime(mock)
+	_timeline_slot_setup(director)
+	var h1: CodaEventHandle = director.set_music("music/a", 800)
+	if h1 == null:
+		push_error("set_music should return handle")
+		mock.queue_free()
+		return 1
+	director.stop_music("default", 2000)
+	# Real runtime leaves fade-stopped handles paused and dead after teardown.
+	h1._alive = false
+	h1._paused = true
+	director.set_music("music/b", 500, "default", {}, true)
+	if director._pending_quantized.is_empty():
+		push_error("expected pending quantized set_music after fade stop")
+		mock.queue_free()
+		return 1
+	director._pending_quantized[0]["fire_at"] = 0
+	director._process(0.0)
+	if mock.play_calls.size() != 1:
+		push_error("quantized set_music must fire after fade-stop teardown")
+		mock.queue_free()
+		return 1
+	if str(mock.play_calls[0].get("path", "")) != "music/b":
+		push_error("quantized set_music should play the queued path")
 		mock.queue_free()
 		return 1
 	mock.queue_free()
