@@ -122,7 +122,9 @@ func _process(_delta: float) -> void:
 			continue
 		var slot_key: String = str(item.get("slot", "default"))
 		var slot_handle: CodaEventHandle = _slot_handle(slot_key)
-		if slot_handle != null and slot_handle.is_paused():
+		# Only defer while the slot voice is still alive and fading/preview-paused. After fade-stop
+		# teardown the outgoing handle stays paused but dead, which would block the queue forever.
+		if slot_handle != null and _runtime.is_alive(slot_handle) and slot_handle.is_paused():
 			remaining.append(item)
 			continue
 		match str(item.get("kind", "")):
