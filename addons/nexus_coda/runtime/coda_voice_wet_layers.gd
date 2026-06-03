@@ -7,6 +7,24 @@ const CodaBusSendRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_
 const CodaFxBusHelperScript := preload("res://addons/nexus_coda/runtime/coda_fx_bus_helper.gd")
 
 
+static func wet_volume_db_for_layer(
+	dry_volume_db: float,
+	wet_index: int,
+	merged_sends: Array[CodaBusSend],
+	bus_root: CodaBus,
+	param_values: Dictionary
+) -> float:
+	if wet_index < 0 or bus_root == null:
+		return dry_volume_db
+	var active: Array[CodaBusSend] = CodaBusSendRuntimeScript.filter_active_sends(
+		merged_sends, bus_root, param_values
+	)
+	if wet_index >= active.size():
+		return dry_volume_db
+	var amt: float = CodaBusSendRuntimeScript.effective_level(active[wet_index], param_values)
+	return dry_volume_db + CodaBusSendRuntimeScript.linear_to_db(amt)
+
+
 static func merge_sends(
 	event_sends: Array[CodaBusSend], track_sends: Array[CodaBusSend]
 ) -> Array[CodaBusSend]:

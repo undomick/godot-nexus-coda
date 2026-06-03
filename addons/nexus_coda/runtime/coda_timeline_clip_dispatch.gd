@@ -3,6 +3,7 @@ class_name CodaTimelineClipDispatch
 extends RefCounted
 
 const CodaVoiceFaderScript := preload("res://addons/nexus_coda/runtime/coda_voice_fader.gd")
+const CodaVoiceWetLayersScript := preload("res://addons/nexus_coda/runtime/coda_voice_wet_layers.gd")
 const CodaTimelineSegmentDriverScript := preload(
 	"res://addons/nexus_coda/runtime/coda_timeline_segment_driver.gd"
 )
@@ -174,6 +175,17 @@ static func clip_id_from_wet_voice_key(voice_key: String) -> String:
 	return key_str.substr(0, wet_pos)
 
 
+static func wet_index_from_wet_voice_key(voice_key: String) -> int:
+	var key_str: String = str(voice_key)
+	var wet_pos: int = key_str.rfind("_wet_")
+	if wet_pos < 0:
+		return -1
+	var idx_str: String = key_str.substr(wet_pos + 5)
+	if not idx_str.is_valid_int():
+		return -1
+	return int(idx_str)
+
+
 func refresh_voice_output_levels(
 	handle: CodaEventHandle, d: Dictionary, timeline: CodaEventTimeline
 ) -> void:
@@ -214,7 +226,19 @@ func refresh_voice_output_levels(
 			)
 			p.volume_db = float(levels.get("volume_db", base_db))
 			p.pitch_scale = float(levels.get("pitch_scale", float(cl.pitch_scale)))
-		wet_levels[clip_id] = {"volume_db": p.volume_db, "pitch_scale": p.pitch_scale}
+		var event_sends: Array[CodaBusSend] = []
+		if handle.event_node is CodaBrowserNode:
+			event_sends = (handle.event_node as CodaBrowserNode).event_wet_sends
+		var merged_sends: Array[CodaBusSend] = CodaVoiceWetLayersScript.merge_sends(
+			event_sends, tr.wet_sends
+		)
+		wet_levels[clip_id] = {
+			"volume_db": p.volume_db,
+			"pitch_scale": p.pitch_scale,
+			"merged_sends": merged_sends,
+		}
+	var bus_root: CodaBus = _runtime.get_playback_bus_root()
+	var param_values: Dictionary = handle.param_values_smoothed
 	for sound_key in voices.keys():
 		var key_str: String = str(sound_key)
 		if not key_str.contains("_wet_"):
@@ -226,5 +250,10 @@ func refresh_voice_output_levels(
 		if p == null or not is_instance_valid(p):
 			continue
 		var levels: Dictionary = wet_levels[clip_id]
-		p.volume_db = float(levels.get("volume_db", 0.0))
+		var dry_db: float = float(levels.get("volume_db", 0.0))
+		var merged: Array = levels.get("merged_sends", [])
+		var wet_idx: int = wet_index_from_wet_voice_key(key_str)
+		p.volume_db = CodaVoiceWetLayersScript.wet_volume_db_for_layer(
+			dry_db, wet_idx, merged, bus_root, param_values
+		)
 		p.pitch_scale = float(levels.get("pitch_scale", 1.0))
