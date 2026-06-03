@@ -23,6 +23,13 @@ const CodaRuntimeParameterPipelineScript := preload(
 const CodaTimelineDispatcherScript := preload(
 	"res://addons/nexus_coda/runtime/coda_timeline_dispatcher.gd"
 )
+const CodaBusSendScript := preload("res://addons/nexus_coda/domain/coda_bus_send.gd")
+const CodaBusScript := preload("res://addons/nexus_coda/domain/coda_bus.gd")
+const CodaProjectScript := preload("res://addons/nexus_coda/domain/coda_project.gd")
+const CodaTrackEffectScript := preload(
+	"res://addons/nexus_coda/domain/effects/coda_track_effect.gd"
+)
+const CodaBusSendRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_bus_send_runtime.gd")
 
 
 static func run() -> int:
@@ -31,6 +38,7 @@ static func run() -> int:
 	failed += _test_stop_graph_wet_layers_clears_handle()
 	failed += _test_clip_id_from_wet_voice_key()
 	failed += _test_refresh_voice_output_levels_syncs_wet_layers()
+	failed += _test_refresh_preserves_wet_send_offset()
 	return failed
 
 
@@ -100,8 +108,72 @@ static func _test_refresh_voice_output_levels_syncs_wet_layers() -> int:
 		push_error("muted track should silence dry voice")
 		runtime.free()
 		return 1
-	if abs(wet.volume_db - (-80.0)) > 0.05:
+	if wet.volume_db > -79.0:
 		push_error("muted track should silence wet send layers, got %s" % wet.volume_db)
+		runtime.free()
+		return 1
+	runtime.free()
+	return 0
+
+
+static func _make_return_bus_tree() -> CodaBus:
+	var master: CodaBus = CodaBusScript.make_default_master()
+	var ret: CodaBus = CodaBusScript.new("Reverb Return")
+	ret.bus_kind = CodaBus.BusKind.RETURN
+	var reverb: CodaTrackEffect = CodaTrackEffectScript.new()
+	reverb.type = CodaTrackEffect.Type.REVERB
+	ret.effects.append(reverb)
+	master.children.append(ret)
+	return master
+
+
+static func _test_refresh_preserves_wet_send_offset() -> int:
+	var bus_root: CodaBus = _make_return_bus_tree()
+	var ret: CodaBus = bus_root.children[bus_root.children.size() - 1]
+	var timeline: CodaEventTimeline = CodaEventTimelineScript.new()
+	timeline.length_seconds = 10.0
+	var track: CodaTimelineTrack = CodaTimelineTrackScript.new()
+	var send: CodaBusSend = CodaBusSendScript.new()
+	send.target_bus_id = ret.id
+	send.level = 0.25
+	track.wet_sends.append(send)
+	var clip: CodaTimelineClip = CodaTimelineClipScript.new()
+	clip.id = "clip_a"
+	clip.start_seconds = 0.0
+	clip.duration_seconds = 5.0
+	track.clips.append(clip)
+	timeline.tracks.append(track)
+	var ev: CodaBrowserNode = CodaBrowserNodeScript.new()
+	ev.event_timeline = timeline
+	var project: CodaProject = CodaProjectScript.new()
+	project.bus_root = bus_root
+	var runtime: CodaRuntime = CodaRuntimeScript.new()
+	runtime._project = project
+	runtime._parameter_pipeline = CodaRuntimeParameterPipelineScript.new()
+	runtime._parameter_pipeline.setup(runtime)
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle._alive = true
+	handle.event_node = ev
+	handle.param_values_smoothed = {}
+	var dry: AudioStreamPlayer = AudioStreamPlayer.new()
+	var wet: AudioStreamPlayer = AudioStreamPlayer.new()
+	dry.volume_db = 0.0
+	var expected_wet_db: float = CodaBusSendRuntimeScript.linear_to_db(0.25)
+	wet.volume_db = expected_wet_db
+	var d: Dictionary = {"timeline": timeline, "voices": {"clip_a": dry, "clip_a_wet_0": wet}}
+	var dispatcher: CodaTimelineDispatcher = CodaTimelineDispatcherScript.new()
+	dispatcher.setup(runtime, null, null)
+	dispatcher._clip_dispatch.refresh_voice_output_levels(handle, d, timeline)
+	if abs(dry.volume_db - 0.0) > 0.05:
+		push_error("unmuted dry voice should stay at 0 dB, got %s" % dry.volume_db)
+		runtime.free()
+		return 1
+	if abs(wet.volume_db - expected_wet_db) > 0.05:
+		push_error(
+			"refresh should preserve wet send offset, expected %s got %s"
+			% [expected_wet_db, wet.volume_db]
+		)
 		runtime.free()
 		return 1
 	runtime.free()
