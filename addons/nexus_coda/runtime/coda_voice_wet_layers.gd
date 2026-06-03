@@ -57,6 +57,11 @@ static func spawn_wet_layers(
 		wet.volume_db = float(layer.get("volume_db", dry_player.volume_db))
 		wet.pitch_scale = dry_player.pitch_scale
 		wet.stream_paused = dry_player.stream_paused
+		if dry_player.has_meta(&"_coda_clip_timeline_end"):
+			wet.set_meta(
+				&"_coda_clip_timeline_end",
+				dry_player.get_meta(&"_coda_clip_timeline_end")
+			)
 		var fx_nm: String = String(layer.get("fx_bus", ""))
 		if not fx_nm.is_empty():
 			wet.set_meta(&"_coda_fx_bus", fx_nm)
@@ -118,6 +123,24 @@ static func stop_graph_wet_layers(handle: CodaEventHandle) -> void:
 		if wet.playing:
 			wet.stop()
 	handle.params["_coda_wet_players"] = []
+
+
+static func pause_graph_wet_layers(handle: CodaEventHandle) -> void:
+	if handle == null:
+		return
+	for p in handle.params.get("_coda_wet_players", []):
+		var wet: AudioStreamPlayer = p as AudioStreamPlayer
+		if wet != null and is_instance_valid(wet) and wet.playing:
+			wet.stream_paused = true
+
+
+static func resume_graph_wet_layers(handle: CodaEventHandle) -> void:
+	if handle == null:
+		return
+	for p in handle.params.get("_coda_wet_players", []):
+		var wet: AudioStreamPlayer = p as AudioStreamPlayer
+		if wet != null and is_instance_valid(wet) and wet.playing:
+			wet.stream_paused = false
 
 
 static func teardown_wet_layers_for_prefix(d: Dictionary, voice_key_prefix: String) -> void:

@@ -147,6 +147,9 @@ func stop_voices_past_clip_end(
 		return
 	var stale_keys: Array = []
 	for sound_key in voices.keys():
+		var key_str: String = str(sound_key)
+		if key_str.contains("_wet_"):
+			continue
 		var p: AudioStreamPlayer = voices[sound_key] as AudioStreamPlayer
 		if p == null or not is_instance_valid(p):
 			stale_keys.append(sound_key)
@@ -157,6 +160,7 @@ func stop_voices_past_clip_end(
 		if cursor_seconds < end_at:
 			continue
 		_stop_dry_at_clip_end(p)
+		CodaVoiceWetLayersScript.teardown_wet_layers_for_prefix(d, str(sound_key))
 		stale_keys.append(sound_key)
 	for k in stale_keys:
 		voices.erase(k)
@@ -174,6 +178,7 @@ func retire_lane_voice(d: Dictionary, clip_id: String) -> void:
 	var p: AudioStreamPlayer = voices[clip_id] as AudioStreamPlayer
 	voices.erase(clip_id)
 	d["voices"] = voices
+	CodaVoiceWetLayersScript.teardown_wet_layers_for_prefix(d, clip_id)
 	_teardown_immediate(p, true)
 
 
@@ -184,6 +189,7 @@ func finalize_lane_voice(
 	d: Dictionary,
 	finished_clip_id: String,
 ) -> void:
+	CodaVoiceWetLayersScript.teardown_wet_layers_for_prefix(d, finished_clip_id)
 	_release_fx_bus_with_tail(player)
 	_runtime.get_timeline_voice_owner().erase(key)
 	_runtime.get_timeline_voice_playback_gen().erase(key)
