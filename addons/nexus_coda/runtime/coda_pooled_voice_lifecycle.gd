@@ -4,6 +4,8 @@ extends RefCounted
 
 ## Playback-generation guards for pooled [AudioStreamPlayer]s shared by graph and timeline paths.
 
+const CodaVoiceWetLayersScript := preload("res://addons/nexus_coda/runtime/coda_voice_wet_layers.gd")
+
 
 static func detach_player_from_timeline_dispatchers(
 	player: AudioStreamPlayer,
@@ -34,6 +36,11 @@ static func detach_player_from_timeline_dispatchers(
 		if stale_clip_ids.is_empty():
 			continue
 		for clip_id in stale_clip_ids:
+			var key_str: String = str(clip_id)
+			# Dry lane keys own parallel wet layers; erasing only the dry player leaves
+			# orphaned return-bus voices when the pool reuses the dry player (stale finish).
+			if not key_str.contains("_wet_"):
+				CodaVoiceWetLayersScript.teardown_wet_layers_for_prefix(d, key_str)
 			voices.erase(clip_id)
 		d["voices"] = voices
 
