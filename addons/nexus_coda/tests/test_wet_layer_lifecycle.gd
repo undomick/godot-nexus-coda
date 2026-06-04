@@ -30,10 +30,14 @@ const CodaTrackEffectScript := preload(
 	"res://addons/nexus_coda/domain/effects/coda_track_effect.gd"
 )
 const CodaBusSendRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_bus_send_runtime.gd")
+const CodaPooledVoiceLifecycleScript := preload(
+	"res://addons/nexus_coda/runtime/coda_pooled_voice_lifecycle.gd"
+)
 
 
 static func run() -> int:
 	var failed: int = 0
+	failed += _test_detach_dry_player_teardowns_wet_layers()
 	failed += _test_teardown_wet_layers_for_prefix()
 	failed += _test_stop_graph_wet_layers_clears_handle()
 	failed += _test_clip_id_from_wet_voice_key()
@@ -42,6 +46,24 @@ static func run() -> int:
 	failed += _test_wet_volume_silence_when_send_disabled()
 	failed += _test_restart_wet_layers_for_prefix()
 	return failed
+
+
+static func _test_detach_dry_player_teardowns_wet_layers() -> int:
+	var dry: AudioStreamPlayer = AudioStreamPlayer.new()
+	var wet: AudioStreamPlayer = AudioStreamPlayer.new()
+	var d: Dictionary = {"voices": {"clip_a": dry, "clip_a_wet_0": wet, "clip_b": null}}
+	var dispatchers: Dictionary = {null: d}
+	CodaPooledVoiceLifecycleScript.detach_player_from_timeline_dispatchers(
+		dry, dispatchers, {}, {}, Callable(), Callable()
+	)
+	var voices: Dictionary = d.get("voices", {})
+	if voices.has("clip_a") or voices.has("clip_a_wet_0"):
+		push_error("detaching dry timeline player should tear down wet layer keys")
+		return 1
+	if not voices.has("clip_b"):
+		push_error("detach should only remove voices bound to the detached player")
+		return 1
+	return 0
 
 
 static func _test_teardown_wet_layers_for_prefix() -> int:
@@ -236,15 +258,10 @@ static func _test_wet_volume_silence_when_send_disabled() -> int:
 
 
 static func _test_restart_wet_layers_for_prefix() -> int:
-	var root: Node = Node.new()
-	add_child(root)
 	var wet: AudioStreamPlayer = AudioStreamPlayer.new()
-	wet.stream = AudioStreamMicrophone.new()
-	root.add_child(wet)
 	var d: Dictionary = {"voices": {"clip_a_wet_0": wet, "clip_b_wet_0": AudioStreamPlayer.new()}}
 	CodaVoiceWetLayersScript.restart_wet_layers_for_prefix(d, "clip_a", 1.5, true)
 	var paused: bool = wet.stream_paused
-	root.queue_free()
 	if not paused:
 		push_error("restart_wet_layers_for_prefix should sync stream_paused from dry")
 		return 1
