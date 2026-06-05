@@ -45,6 +45,8 @@ static func run() -> int:
 	failed += _test_refresh_preserves_wet_send_offset()
 	failed += _test_wet_volume_silence_when_send_disabled()
 	failed += _test_restart_wet_layers_for_prefix()
+	failed += _test_teardown_graph_wet_layers_for_dry()
+	failed += _test_stop_graph_wet_layers_clears_by_dry_map()
 	return failed
 
 
@@ -264,5 +266,42 @@ static func _test_restart_wet_layers_for_prefix() -> int:
 	var paused: bool = wet.stream_paused
 	if not paused:
 		push_error("restart_wet_layers_for_prefix should sync stream_paused from dry")
+		return 1
+	return 0
+
+
+static func _test_teardown_graph_wet_layers_for_dry() -> int:
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	var dry_a: AudioStreamPlayer = AudioStreamPlayer.new()
+	var dry_b: AudioStreamPlayer = AudioStreamPlayer.new()
+	var wet_a: AudioStreamPlayer = AudioStreamPlayer.new()
+	var wet_b: AudioStreamPlayer = AudioStreamPlayer.new()
+	handle.params["_coda_graph_wet_by_dry"] = {
+		str(dry_a.get_instance_id()): [wet_a],
+		str(dry_b.get_instance_id()): [wet_b],
+	}
+	handle.params["_coda_wet_players"] = [wet_a, wet_b]
+	CodaVoiceWetLayersScript.teardown_graph_wet_layers_for_dry(handle, dry_a)
+	var by_dry: Dictionary = handle.params.get("_coda_graph_wet_by_dry", {})
+	if by_dry.has(str(dry_a.get_instance_id())):
+		push_error("teardown_graph_wet_layers_for_dry should remove the dry voice mapping")
+		return 1
+	if not by_dry.has(str(dry_b.get_instance_id())):
+		push_error("teardown_graph_wet_layers_for_dry should keep other dry wet layers")
+		return 1
+	var remaining: Array = handle.params.get("_coda_wet_players", [])
+	if remaining.size() != 1 or remaining[0] != wet_b:
+		push_error("teardown_graph_wet_layers_for_dry should rebuild _coda_wet_players")
+		return 1
+	return 0
+
+
+static func _test_stop_graph_wet_layers_clears_by_dry_map() -> int:
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.params["_coda_graph_wet_by_dry"] = {"1": [AudioStreamPlayer.new()]}
+	handle.params["_coda_wet_players"] = handle.params["_coda_graph_wet_by_dry"]["1"]
+	CodaVoiceWetLayersScript.stop_graph_wet_layers(handle)
+	if handle.params.has("_coda_graph_wet_by_dry"):
+		push_error("stop_graph_wet_layers should clear _coda_graph_wet_by_dry")
 		return 1
 	return 0

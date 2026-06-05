@@ -105,6 +105,11 @@ func on_voice_finished_for_graph(
 		return true
 	if int(h.params.get("_coda_playback_gen", -1)) != int(player.get_meta(&"_coda_playback_gen", -1)):
 		return true
+	var wet_owner: CodaEventHandle = h
+	if bool(h.params.get("_coda_is_sibling", false)):
+		wet_owner = h.params.get("_coda_graph_parent", null) as CodaEventHandle
+	if wet_owner != null:
+		CodaVoiceWetLayersScript.teardown_graph_wet_layers_for_dry(wet_owner, player)
 	if bool(h.params.get("_coda_is_sibling", false)):
 		if not h._alive:
 			return true
@@ -126,6 +131,8 @@ func stop_parallel_siblings(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	for sib in handle.graph_parallel_siblings:
 		if sib == null:
 			continue
+		if sib._player != null and is_instance_valid(sib._player):
+			CodaVoiceWetLayersScript.teardown_graph_wet_layers_for_dry(handle, sib._player)
 		if fade_ms > 0 and sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
 			_voice_fader.fade_volume_db(
 				sib._player, -80.0, fade_ms, Callable(sib, "_stop_local").bind(0)
