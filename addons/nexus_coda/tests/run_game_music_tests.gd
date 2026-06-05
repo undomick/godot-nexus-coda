@@ -31,6 +31,9 @@ const TestBusSendsScript := preload("res://addons/nexus_coda/tests/test_bus_send
 const TestBusSyncMatrixScript := preload("res://addons/nexus_coda/tests/test_bus_sync_matrix.gd")
 const TestEventMetadataScript := preload("res://addons/nexus_coda/tests/test_event_metadata.gd")
 const TestWetLayerLifecycleScript := preload("res://addons/nexus_coda/tests/test_wet_layer_lifecycle.gd")
+const TestTimelineSchedulerScript := preload(
+	"res://addons/nexus_coda/tests/test_timeline_scheduler.gd"
+)
 
 
 func _initialize() -> void:
@@ -53,6 +56,7 @@ func _initialize() -> void:
 	failed += TestBusSyncMatrixScript.run()
 	failed += TestEventMetadataScript.run()
 	failed += TestWetLayerLifecycleScript.run()
+	failed += TestTimelineSchedulerScript.run()
 	if failed == 0:
 		print("Coda game music tests: OK")
 		quit(0)

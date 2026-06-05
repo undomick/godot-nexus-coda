@@ -10,6 +10,9 @@ const CodaTimelineClipScript := preload(
 const CodaEventTimelineScript := preload(
 	"res://addons/nexus_coda/domain/timeline/coda_event_timeline.gd"
 )
+const CodaTimelineClipOverlapResolverScript := preload(
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip_overlap_resolver.gd"
+)
 
 
 static func run() -> int:
@@ -18,6 +21,7 @@ static func run() -> int:
 	failed += _test_set_clip_fades()
 	failed += _test_fade_curve_serialization()
 	failed += _test_move_clip_to_new_track()
+	failed += _test_paste_resolves_overlap()
 	return failed
 
 
@@ -93,5 +97,39 @@ static func _test_move_clip_to_new_track() -> int:
 		return 1
 	if abs(clip.start_seconds - 2.0) > 0.001:
 		push_error("clip start should be preserved on new track")
+		return 1
+	return 0
+
+
+static func _test_paste_resolves_overlap() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var track = timeline.tracks[0]
+	var victim = CodaTimelineClipScript.new()
+	victim.start_seconds = 0.0
+	victim.duration_seconds = 4.0
+	track.clips.append(victim)
+	var clipboard: Dictionary = victim.to_dictionary()
+	clipboard.erase("id")
+	var result: Dictionary = CodaTimelineCommandsScript.paste_clip_at_playhead(
+		timeline, 0, 1.0, clipboard
+	)
+	if not String(result.get("error", "")).is_empty():
+		push_error("paste should succeed: %s" % result.get("error", ""))
+		return 1
+	var pasted_id: String = String(result.get("clip_id", ""))
+	if pasted_id.is_empty():
+		push_error("paste should return new clip id")
+		return 1
+	var pasted: CodaTimelineClip = timeline.find_clip(pasted_id).get("clip") as CodaTimelineClip
+	if pasted == null:
+		push_error("pasted clip should exist")
+		return 1
+	if CodaTimelineClipOverlapResolverScript.intervals_overlap(
+		pasted.start_seconds,
+		pasted.end_seconds(),
+		victim.start_seconds,
+		victim.end_seconds()
+	):
+		push_error("paste should resolve overlap with existing clip")
 		return 1
 	return 0

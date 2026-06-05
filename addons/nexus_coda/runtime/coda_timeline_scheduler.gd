@@ -32,7 +32,7 @@ static func plan(
 		if not CodaRuntimeTimelineLayoutScript.track_is_audible(track, has_solo):
 			continue
 		for clip in track.clips:
-			var entry: Dictionary = _entry_for_clip(track, clip, t_from, window_end)
+			var entry: Dictionary = _entry_for_clip(track, clip, t_from, window_end, timeline)
 			if not entry.is_empty():
 				out.append(entry)
 
@@ -45,11 +45,14 @@ static func _entry_for_clip(
 	clip: CodaTimelineClip,
 	t_from: float,
 	t_to: float,
+	timeline: CodaEventTimeline = null,
 ) -> Dictionary:
 	if clip.audio_path.is_empty() or clip.duration_seconds <= 0.0:
 		return {}
 	var clip_start: float = clip.start_seconds
 	var clip_end: float = clip.end_seconds()
+	if timeline != null:
+		clip_end = minf(clip_end, timeline.length_seconds)
 	if clip_end <= t_from or clip_start >= t_to:
 		return {}
 	var window_start: float = maxf(clip_start, t_from)
@@ -73,6 +76,11 @@ static func _entry_for_clip(
 		"clip_id": clip.id,
 		"fade_in_seconds": clip.fade_in_seconds,
 		"fade_out_seconds": clip.fade_out_seconds,
+		"clip_effects": clip.effects,
+		"track_effects": track.effects,
+		"track_output_bus_id": track.output_bus_id,
+		"track_wet_sends": track.wet_sends,
+		"timeline_clip_end_seconds": clip_end,
 	}
 
 
