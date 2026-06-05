@@ -629,7 +629,7 @@ func _start_event(
 	var play_opts: CodaPlayOptions = CodaPlayOptionsScript.from_params_dict(params)
 	if play_opts.exclusive_preview:
 		stop_all()
-	params = play_opts.to_params_dict()
+	params = CodaPlayOptionsScript.route_event_params(params)
 	if event.event_authoring_mode == CodaBrowserNode.AuthoringMode.TIMELINE:
 		return _timeline_dispatcher.start_timeline_event(event, path, params, source_bank_id)
 	# Build the parameter snapshot used to plan the graph (Switch/Blend look this up).
