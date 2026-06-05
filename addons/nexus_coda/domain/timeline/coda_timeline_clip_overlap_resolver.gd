@@ -151,9 +151,9 @@ static func _punch_hole_middle(
 	var left_id: String = victim.id
 	var err: String = timeline.split_clip_at_time(left_id, hole_start)
 	if not err.is_empty():
-		_trim_victim_start(victim, hole_end, vs)
-		if victim.duration_seconds < min_clip_duration:
-			_remove_clip_from_track(track, victim)
+		# Split rolled back; keep the non-overlapping prefix [vs, hole_start).
+		victim.duration_seconds = hole_start - vs
+		_finalize_trimmed_clip(victim, min_clip_duration, track)
 		return
 
 	var right_clip: CodaTimelineClip = _find_clip_starting_near(track, hole_start, left_id)

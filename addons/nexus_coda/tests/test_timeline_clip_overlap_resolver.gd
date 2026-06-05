@@ -28,6 +28,7 @@ static func run() -> int:
 	failed += _test_segments_track_skipped()
 	failed += _test_near_start_hole_fallback()
 	failed += _test_near_end_hole_fallback()
+	failed += _test_middle_split_failure_keeps_left()
 	return failed
 
 
@@ -148,8 +149,12 @@ static func _test_near_start_hole_fallback() -> int:
 	var d: Dictionary = _make_timeline_with_clips(0.005, 5.0, 0.0, 10.0)
 	ResolverScript.resolve_for_aggressor(d.timeline, d.aggressor.id, MIN_CLIP)
 	var victim: CodaTimelineClip = d.victim
-	if absf(victim.start_seconds - 5.0) > 0.001 or absf(victim.duration_seconds - 5.0) > 0.001:
-		push_error("near start hole: victim should be trimmed to [5, 10)")
+	var expected_start: float = d.aggressor.end_seconds()
+	if absf(victim.start_seconds - expected_start) > 0.001:
+		push_error("near start hole: victim should be trimmed to [%s, 10)" % expected_start)
+		return 1
+	if absf(victim.duration_seconds - (10.0 - expected_start)) > 0.001:
+		push_error("near start hole: victim duration should match trimmed tail")
 		return 1
 	if ResolverScript.intervals_overlap(
 		d.aggressor.start_seconds,
@@ -176,6 +181,47 @@ static func _test_near_end_hole_fallback() -> int:
 		victim.end_seconds()
 	):
 		push_error("near end hole: overlap should be resolved")
+		return 1
+	return 0
+
+
+class _TimelineSplitAlwaysFails extends CodaEventTimeline:
+	static func make_test() -> _TimelineSplitAlwaysFails:
+		var t := _TimelineSplitAlwaysFails.new()
+		t.tracks.append(CodaTimelineTrackScript.new())
+		return t
+
+	func split_clip_at_time(clip_id: String, split_seconds: float) -> String:
+		return "forced split failure for test"
+
+
+static func _test_middle_split_failure_keeps_left() -> int:
+	var timeline: CodaEventTimeline = _TimelineSplitAlwaysFails.make_test()
+	timeline.tracks[0].clips.clear()
+	var track = timeline.tracks[0]
+	var aggressor = CodaTimelineClipScript.new()
+	aggressor.start_seconds = 3.0
+	aggressor.duration_seconds = 2.0
+	var victim = CodaTimelineClipScript.new()
+	victim.start_seconds = 0.0
+	victim.duration_seconds = 10.0
+	track.clips.append(victim)
+	track.clips.append(aggressor)
+	timeline.invalidate_clip_index()
+	ResolverScript.resolve_for_aggressor(timeline, aggressor.id, MIN_CLIP)
+	if track.clips.size() != 2:
+		push_error("split failure fallback: expected left segment and aggressor")
+		return 1
+	if absf(victim.duration_seconds - 3.0) > 0.001:
+		push_error("split failure fallback: left segment should be [0, 3)")
+		return 1
+	if ResolverScript.intervals_overlap(
+		aggressor.start_seconds,
+		aggressor.end_seconds(),
+		victim.start_seconds,
+		victim.end_seconds()
+	):
+		push_error("split failure fallback: overlap should be resolved")
 		return 1
 	return 0
 

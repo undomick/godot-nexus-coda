@@ -197,6 +197,7 @@ static func drop_browser_asset(
 	clip.duration_seconds = clip.max_source_playable_seconds()
 	timeline.tracks[track_index].clips.append(clip)
 	timeline.invalidate_clip_index()
+	resolve_clip_overlaps(timeline, clip.id)
 	return snap
 
 
@@ -410,8 +411,12 @@ static func split_clip_at_time(
 
 static func duplicate_clip(timeline: CodaEventTimeline, clip_id: String) -> Dictionary:
 	var snap := snapshot(timeline)
-	var err: String = timeline.duplicate_clip(clip_id)
-	return {"snapshot": snap, "error": err}
+	var result: Dictionary = timeline.duplicate_clip(clip_id)
+	if not String(result.get("error", "")).is_empty():
+		return {"snapshot": snap, "error": result.get("error", ""), "clip_id": ""}
+	var new_id: String = String(result.get("clip_id", ""))
+	resolve_clip_overlaps(timeline, new_id)
+	return {"snapshot": snap, "error": "", "clip_id": new_id}
 
 
 static func clip_copy_data(timeline: CodaEventTimeline, clip_id: String) -> Dictionary:
@@ -436,10 +441,12 @@ static func paste_clip_at_playhead(
 	var result: Dictionary = timeline.paste_clip_at(track_index, start_seconds, data)
 	if not String(result.get("error", "")).is_empty():
 		return {"snapshot": snap, "error": result.get("error", ""), "clip_id": ""}
+	var new_id: String = String(result.get("clip_id", ""))
+	resolve_clip_overlaps(timeline, new_id)
 	return {
 		"snapshot": snap,
 		"error": "",
-		"clip_id": String(result.get("clip_id", "")),
+		"clip_id": new_id,
 	}
 
 
