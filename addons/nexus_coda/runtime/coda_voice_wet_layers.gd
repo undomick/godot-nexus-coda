@@ -115,7 +115,9 @@ static func spawn_graph_wet_layers(
 	)
 	if layers.is_empty():
 		return
-	var wet_players: Array = handle.params.get("_coda_wet_players", [])
+	var by_dry: Dictionary = handle.params.get("_coda_graph_wet_by_dry", {})
+	var dry_key: String = str(dry_player.get_instance_id())
+	var dry_wets: Array = by_dry.get(dry_key, [])
 	for i in range(layers.size()):
 		var layer: Dictionary = layers[i]
 		var wet: AudioStreamPlayer = runtime.runtime_pool().acquire()
@@ -130,8 +132,10 @@ static func spawn_graph_wet_layers(
 		if not fx_nm.is_empty():
 			wet.set_meta(&"_coda_fx_bus", fx_nm)
 		wet.play(0.0)
-		wet_players.append(wet)
-	handle.params["_coda_wet_players"] = wet_players
+		dry_wets.append(wet)
+	by_dry[dry_key] = dry_wets
+	handle.params["_coda_graph_wet_by_dry"] = by_dry
+	_rebuild_graph_wet_players_list(handle)
 
 
 static func stop_graph_wet_layers(handle: CodaEventHandle) -> void:
@@ -139,14 +143,44 @@ static func stop_graph_wet_layers(handle: CodaEventHandle) -> void:
 		return
 	var wet_players: Array = handle.params.get("_coda_wet_players", [])
 	for p in wet_players:
-		var wet: AudioStreamPlayer = p as AudioStreamPlayer
-		if wet == null or not is_instance_valid(wet):
-			continue
-		if wet.has_meta(&"_coda_fx_bus"):
-			CodaFxBusHelperScript.destroy_if_ours(String(wet.get_meta(&"_coda_fx_bus")))
-		if wet.playing:
-			wet.stop()
+		_stop_graph_wet_player(p)
 	handle.params["_coda_wet_players"] = []
+	handle.params.erase("_coda_graph_wet_by_dry")
+
+
+static func teardown_graph_wet_layers_for_dry(
+	handle: CodaEventHandle, dry_player: AudioStreamPlayer
+) -> void:
+	if handle == null or dry_player == null or not is_instance_valid(dry_player):
+		return
+	var by_dry: Dictionary = handle.params.get("_coda_graph_wet_by_dry", {})
+	var dry_key: String = str(dry_player.get_instance_id())
+	var dry_wets: Array = by_dry.get(dry_key, [])
+	if dry_wets.is_empty():
+		return
+	for p in dry_wets:
+		_stop_graph_wet_player(p)
+	by_dry.erase(dry_key)
+	handle.params["_coda_graph_wet_by_dry"] = by_dry
+	_rebuild_graph_wet_players_list(handle)
+
+
+static func _rebuild_graph_wet_players_list(handle: CodaEventHandle) -> void:
+	var flat: Array = []
+	for wets in handle.params.get("_coda_graph_wet_by_dry", {}).values():
+		for p in wets:
+			flat.append(p)
+	handle.params["_coda_wet_players"] = flat
+
+
+static func _stop_graph_wet_player(p: Variant) -> void:
+	var wet: AudioStreamPlayer = p as AudioStreamPlayer
+	if wet == null or not is_instance_valid(wet):
+		return
+	if wet.has_meta(&"_coda_fx_bus"):
+		CodaFxBusHelperScript.destroy_if_ours(String(wet.get_meta(&"_coda_fx_bus")))
+	if wet.playing:
+		wet.stop()
 
 
 static func pause_graph_wet_layers(handle: CodaEventHandle) -> void:
