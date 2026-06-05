@@ -8,6 +8,9 @@ extends RefCounted
 const CodaTimelineMarkerUiScript := preload(
 	"res://addons/nexus_coda/editor/panels/timeline/coda_timeline_marker_ui.gd"
 )
+const CodaTimelineClipOverlapResolverScript := preload(
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip_overlap_resolver.gd"
+)
 
 
 static func snapshot(timeline: CodaEventTimeline) -> CodaEventTimeline:
@@ -348,6 +351,14 @@ static func move_clip_to_track(
 		track_index = timeline.tracks.size() - 1
 	move_clip(timeline, clip_id, new_start, track_index)
 	return snap
+
+
+static func resolve_clip_overlaps(timeline: CodaEventTimeline, aggressor_clip_id: String) -> void:
+	if timeline == null or aggressor_clip_id.is_empty():
+		return
+	CodaTimelineClipOverlapResolverScript.resolve_for_aggressor(
+		timeline, aggressor_clip_id, MIN_CLIP_DURATION_SECONDS
+	)
 
 
 static func resize_clip(

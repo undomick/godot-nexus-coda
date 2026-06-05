@@ -22,6 +22,9 @@ const TestTimelineCommandsScript := preload(
 const TestTimelineClipChromeScript := preload(
 	"res://addons/nexus_coda/tests/test_timeline_clip_chrome.gd"
 )
+const TestTimelineClipOverlapResolverScript := preload(
+	"res://addons/nexus_coda/tests/test_timeline_clip_overlap_resolver.gd"
+)
 const TestRuntimeNodesScript := preload("res://addons/nexus_coda/tests/test_runtime_nodes.gd")
 const TestFxTailLifecycleScript := preload("res://addons/nexus_coda/tests/test_fx_tail_lifecycle.gd")
 const TestBusSendsScript := preload("res://addons/nexus_coda/tests/test_bus_sends.gd")
@@ -43,6 +46,7 @@ func _initialize() -> void:
 	failed += TestRuntimeMusicScript.run()
 	failed += TestTimelineCommandsScript.run()
 	failed += TestTimelineClipChromeScript.run()
+	failed += TestTimelineClipOverlapResolverScript.run()
 	failed += TestRuntimeNodesScript.run()
 	failed += TestFxTailLifecycleScript.run()
 	failed += TestBusSendsScript.run()

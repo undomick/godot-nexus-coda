@@ -230,7 +230,16 @@ func _on_timeline_interaction_started() -> void:
 	)
 
 
-func _on_timeline_interaction_committed() -> void:
+func _on_timeline_interaction_committed(kind: int, clip_id: String) -> void:
+	var ev: CodaBrowserNode = _panel.call(&"get_authoring_event") as CodaBrowserNode
+	if ev != null and ev.event_timeline != null and not clip_id.is_empty():
+		if kind in [
+			CodaTimelineInputController.DragKind.CLIP_MOVE,
+			CodaTimelineInputController.DragKind.CLIP_RESIZE_LEFT,
+			CodaTimelineInputController.DragKind.CLIP_RESIZE_RIGHT,
+		]:
+			CodaTimelineCommands.resolve_clip_overlaps(ev.event_timeline, clip_id)
+			_panel.call(&"_notify_timeline_changed")
 	_panel.call(&"commit_timeline_edit_interaction")
 
 

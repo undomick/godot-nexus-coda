@@ -69,7 +69,7 @@ signal loop_region_changed(start_seconds: float, end_seconds: float)
 signal playhead_seek_requested(time_seconds: float)
 signal selection_cleared
 signal timeline_interaction_started
-signal timeline_interaction_committed
+signal timeline_interaction_committed(kind: int, clip_id: String)
 signal audition_requested
 
 var _drag_kind: DragKind = DragKind.NONE
@@ -633,6 +633,7 @@ func _begin_drag(view: CodaTimelineView, hit: Dictionary, mb: InputEventMouseBut
 
 func _end_drag() -> void:
 	var released_kind: DragKind = _drag_kind
+	var released_clip_id: String = _drag_clip_id
 	_drag_kind = DragKind.NONE
 	_drag_clip_id = ""
 	_drag_marker_id = ""
@@ -641,7 +642,7 @@ func _end_drag() -> void:
 	_ghost_new_track = false
 	_hover_clip_edge = "none"
 	if _drag_commits_preview_on_release(released_kind):
-		timeline_interaction_committed.emit()
+		timeline_interaction_committed.emit(int(released_kind), released_clip_id)
 
 
 static func _drag_commits_preview_on_release(kind: DragKind) -> bool:
