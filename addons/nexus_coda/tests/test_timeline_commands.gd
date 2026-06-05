@@ -10,6 +10,9 @@ const CodaTimelineClipScript := preload(
 const CodaEventTimelineScript := preload(
 	"res://addons/nexus_coda/domain/timeline/coda_event_timeline.gd"
 )
+const CodaTimelineClipOverlapResolverScript := preload(
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip_overlap_resolver.gd"
+)
 
 
 static func run() -> int:
@@ -18,6 +21,9 @@ static func run() -> int:
 	failed += _test_set_clip_fades()
 	failed += _test_fade_curve_serialization()
 	failed += _test_move_clip_to_new_track()
+	failed += _test_paste_resolves_overlap()
+	failed += _test_drop_resolves_overlap()
+	failed += _test_duplicate_resolves_overlap()
 	return failed
 
 
@@ -72,6 +78,76 @@ static func _test_fade_curve_serialization() -> int:
 	if clip.fade_in_curve > 1.0 or clip.fade_out_curve < 0.0:
 		push_error("clamp_clip_fades should clamp curve values to 0..1")
 		return 1
+	return 0
+
+
+static func _test_paste_resolves_overlap() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var existing = CodaTimelineClipScript.new()
+	existing.start_seconds = 0.0
+	existing.duration_seconds = 5.0
+	timeline.tracks[0].clips.append(existing)
+	var pasted = CodaTimelineClipScript.new()
+	pasted.duration_seconds = 5.0
+	var data: Dictionary = pasted.to_dictionary()
+	var result: Dictionary = CodaTimelineCommandsScript.paste_clip_at_playhead(
+		timeline, 0, 2.0, data
+	)
+	if not String(result.get("error", "")).is_empty():
+		push_error("paste overlap: paste should succeed")
+		return 1
+	if CodaTimelineClipOverlapResolverScript.intervals_overlap(
+		2.0, 7.0, existing.start_seconds, existing.end_seconds()
+	):
+		push_error("paste overlap: existing clip should be trimmed under pasted clip")
+		return 1
+	return 0
+
+
+static func _test_drop_resolves_overlap() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var existing = CodaTimelineClipScript.new()
+	existing.start_seconds = 0.0
+	existing.duration_seconds = 5.0
+	timeline.tracks[0].clips.append(existing)
+	CodaTimelineCommandsScript.drop_browser_asset(timeline, 0, 2.0, "res://missing.wav")
+	if existing.end_seconds() > 2.0 + 0.001:
+		push_error("drop overlap: existing clip should be trimmed to end at 2s")
+		return 1
+	return 0
+
+
+static func _test_duplicate_resolves_overlap() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var first = CodaTimelineClipScript.new()
+	first.start_seconds = 0.0
+	first.duration_seconds = 4.0
+	var second = CodaTimelineClipScript.new()
+	second.start_seconds = 4.05
+	second.duration_seconds = 4.0
+	timeline.tracks[0].clips.append(first)
+	timeline.tracks[0].clips.append(second)
+	var result: Dictionary = CodaTimelineCommandsScript.duplicate_clip(timeline, first.id)
+	if not String(result.get("error", "")).is_empty():
+		push_error("duplicate overlap: duplicate should succeed")
+		return 1
+	var dup_id: String = String(result.get("clip_id", ""))
+	if dup_id.is_empty():
+		push_error("duplicate overlap: should return new clip id")
+		return 1
+	var dup_info: Dictionary = timeline.find_clip(dup_id)
+	var dup: CodaTimelineClip = dup_info.get("clip") as CodaTimelineClip
+	if dup == null:
+		push_error("duplicate overlap: duplicated clip not found")
+		return 1
+	for clip in timeline.tracks[0].clips:
+		if clip.id == dup_id:
+			continue
+		if CodaTimelineClipOverlapResolverScript.intervals_overlap(
+			dup.start_seconds, dup.end_seconds(), clip.start_seconds, clip.end_seconds()
+		):
+			push_error("duplicate overlap: no clip on track should overlap duplicate")
+			return 1
 	return 0
 
 

@@ -276,15 +276,15 @@ func split_clip_at_time(clip_id: String, split_seconds: float) -> String:
 	return ""
 
 
-## Place a copy after this clip (same lane). Returns "" on success.
-func duplicate_clip(clip_id: String, gap_seconds: float = 0.05) -> String:
+## Place a copy after this clip (same lane). Returns {error, clip_id} like paste_clip_at.
+func duplicate_clip(clip_id: String, gap_seconds: float = 0.05) -> Dictionary:
 	var info: Dictionary = find_clip(clip_id)
 	if info.is_empty():
-		return "Clip not found."
+		return {"error": "Clip not found.", "clip_id": ""}
 	var c: CodaTimelineClip = info.get("clip") as CodaTimelineClip
 	var tr: CodaTimelineTrack = info.get("track") as CodaTimelineTrack
 	if c == null or tr == null:
-		return "Clip not found."
+		return {"error": "Clip not found.", "clip_id": ""}
 	var d: Dictionary = c.to_dictionary()
 	d.erase("id")
 	var dup: CodaTimelineClip = CodaTimelineClipScript.from_dictionary(d)
@@ -304,8 +304,9 @@ func duplicate_clip(clip_id: String, gap_seconds: float = 0.05) -> String:
 	if not err2.is_empty():
 		tr.clips.erase(dup)
 		_sort_track_clips(tr)
-		return err2
-	return ""
+		invalidate_clip_index()
+		return {"error": err2, "clip_id": ""}
+	return {"error": "", "clip_id": dup.id}
 
 
 ## Insert a clip copied from [data] at [start_seconds] on [track_index]. Returns result dict.
