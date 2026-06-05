@@ -47,6 +47,7 @@ static func run() -> int:
 	failed += _test_restart_wet_layers_for_prefix()
 	failed += _test_teardown_graph_wet_layers_for_dry()
 	failed += _test_stop_graph_wet_layers_clears_by_dry_map()
+	failed += _test_refresh_graph_wet_layers_for_dry_rtpc()
 	return failed
 
 
@@ -304,4 +305,48 @@ static func _test_stop_graph_wet_layers_clears_by_dry_map() -> int:
 	if handle.params.has("_coda_graph_wet_by_dry"):
 		push_error("stop_graph_wet_layers should clear _coda_graph_wet_by_dry")
 		return 1
+	return 0
+
+
+static func _test_refresh_graph_wet_layers_for_dry_rtpc() -> int:
+	var bus_root: CodaBus = _make_return_bus_tree()
+	var ret: CodaBus = bus_root.children[bus_root.children.size() - 1]
+	var send: CodaBusSend = CodaBusSendScript.new()
+	send.target_bus_id = ret.id
+	send.level = 1.0
+	send.parameter_id = "wet_amount"
+	var ev: CodaBrowserNode = CodaBrowserNodeScript.new()
+	ev.event_wet_sends.append(send)
+	var project: CodaProject = CodaProjectScript.new()
+	project.bus_root = bus_root
+	var runtime: CodaRuntime = CodaRuntimeScript.new()
+	runtime._project = project
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.event_node = ev
+	handle.param_values_smoothed = {"wet_amount": 0.5}
+	var dry: AudioStreamPlayer = AudioStreamPlayer.new()
+	dry.volume_db = 0.0
+	var wet: AudioStreamPlayer = AudioStreamPlayer.new()
+	handle.params["_coda_graph_wet_by_dry"] = {str(dry.get_instance_id()): [wet]}
+	handle.params["_coda_wet_players"] = [wet]
+	CodaVoiceWetLayersScript.refresh_graph_wet_layers_for_dry(
+		runtime, handle, dry, handle.param_values_smoothed
+	)
+	var expected_half_db: float = CodaBusSendRuntimeScript.linear_to_db(0.5)
+	if abs(wet.volume_db - expected_half_db) > 0.05:
+		push_error(
+			"graph wet refresh should apply RTPC send level, expected %s got %s"
+			% [expected_half_db, wet.volume_db]
+		)
+		runtime.free()
+		return 1
+	handle.param_values_smoothed["wet_amount"] = 0.0
+	CodaVoiceWetLayersScript.refresh_graph_wet_layers_for_dry(
+		runtime, handle, dry, handle.param_values_smoothed
+	)
+	if wet.volume_db > -79.0:
+		push_error("graph wet refresh should silence wet layer when RTPC disables send")
+		runtime.free()
+		return 1
+	runtime.free()
 	return 0
