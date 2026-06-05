@@ -4,6 +4,7 @@ class_name TestRuntimeMusic
 const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime.gd")
 const CodaTestRuntimeScript := preload("res://addons/nexus_coda/tests/helpers/coda_test_runtime.gd")
 const CodaEventHandleScript := preload("res://addons/nexus_coda/runtime/coda_event_handle.gd")
+const CodaPlayOptionsScript := preload("res://addons/nexus_coda/domain/coda_play_options.gd")
 
 
 class SegmentSpawnTestRuntime extends CodaRuntime:
@@ -25,6 +26,7 @@ class SegmentSpawnTestRuntime extends CodaRuntime:
 
 static func run() -> int:
 	var failed: int = 0
+	failed += _test_route_event_params_preserves_rtpc()
 	failed += _test_set_parameter_segment_notify()
 	failed += _test_global_parameter_music_state_segment()
 	failed += _test_notify_music_state_changed()
@@ -38,6 +40,36 @@ static func run() -> int:
 	failed += _test_graph_pause_reserves_pooled_player()
 	failed += _test_graph_stop_after_pause_releases_pool_slot()
 	return failed
+
+
+static func _test_route_event_params_preserves_rtpc() -> int:
+	var routed: Dictionary = CodaPlayOptionsScript.route_event_params({
+		"loop": true,
+		"timeline_cursor_start": 2.0,
+		"music_state": 1,
+		"intensity": 0.8,
+		"_coda_exclusive_preview": true,
+		"_coda_voice_bus": "Music",
+	})
+	if not bool(routed.get("loop", false)):
+		push_error("route_event_params should keep loop play option")
+		return 1
+	if absf(float(routed.get("timeline_cursor_start", -1.0)) - 2.0) > 0.001:
+		push_error("route_event_params should keep timeline_cursor_start")
+		return 1
+	if int(routed.get("music_state", -1)) != 1:
+		push_error("route_event_params should preserve music_state RTPC")
+		return 1
+	if absf(float(routed.get("intensity", -1.0)) - 0.8) > 0.001:
+		push_error("route_event_params should preserve intensity RTPC")
+		return 1
+	if not bool(routed.get("_coda_exclusive_preview", false)):
+		push_error("route_event_params should keep routed _coda_ play options")
+		return 1
+	if String(routed.get("_coda_voice_bus", "")) != "Music":
+		push_error("route_event_params should keep voice bus play option")
+		return 1
+	return 0
 
 
 static func _make_runtime() -> SegmentSpawnTestRuntime:

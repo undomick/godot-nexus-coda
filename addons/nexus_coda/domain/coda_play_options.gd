@@ -49,3 +49,15 @@ static func from_params_dict(params: Dictionary) -> CodaPlayOptions:
 	elif emitter is Node and is_instance_valid(emitter):
 		opts.spatial_emitter = (emitter as Node).get_path()
 	return opts
+
+
+## Keep RTPC / gameplay parameters when stripping typed play options for runtime dispatch.
+static func route_event_params(params: Dictionary) -> Dictionary:
+	var opts: CodaPlayOptions = from_params_dict(params)
+	var routed: Dictionary = opts.to_params_dict()
+	for key in params.keys():
+		var k: String = String(key)
+		if routed.has(k) or k.begins_with("_coda_"):
+			continue
+		routed[k] = params[key]
+	return routed
