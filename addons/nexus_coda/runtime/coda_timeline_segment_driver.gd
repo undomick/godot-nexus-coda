@@ -7,6 +7,9 @@ extends RefCounted
 const CodaTimelineSchedulerScript := preload(
 	"res://addons/nexus_coda/runtime/coda_timeline_scheduler.gd"
 )
+const CodaTimelineClipDispatchScript := preload(
+	"res://addons/nexus_coda/runtime/coda_timeline_clip_dispatch.gd"
+)
 
 const SEGMENTS_TRACK_NAME := "Segments"
 const DEFAULT_PARAM_NAMES: PackedStringArray = ["music_state", "segment", "music_intensity"]
@@ -157,6 +160,31 @@ static func _fallback_segment_entry(tr: CodaTimelineTrack, clip: CodaTimelineCli
 	}
 
 
+## Scheduler entries only carry timing/audio fields; merge routing, FX, and wet sends.
+static func _enrich_segment_spawn_entry(
+	timeline: CodaEventTimeline,
+	tr: CodaTimelineTrack,
+	clip: CodaTimelineClip,
+	planned: Dictionary,
+) -> Dictionary:
+	var clip_end: float = CodaTimelineClipDispatchScript.audible_clip_end(clip, timeline)
+	var stream_offset: float = float(planned.get("stream_offset_seconds", clip.offset_seconds))
+	var into_clip: float = maxf(0.0, stream_offset - clip.offset_seconds)
+	var meta: Dictionary = CodaTimelineClipDispatchScript.clip_lane_entry(
+		tr, clip, into_clip, clip_end
+	)
+	var out: Dictionary = planned.duplicate()
+	for key in [
+		"track_output_bus_id",
+		"track_wet_sends",
+		"clip_effects",
+		"track_effects",
+		"timeline_clip_end_seconds",
+	]:
+		out[key] = meta[key]
+	return out
+
+
 func _spawn_segment_voice(
 	runtime: CodaRuntime,
 	handle: CodaEventHandle,
@@ -171,9 +199,14 @@ func _spawn_segment_voice(
 	)
 	for e in planned:
 		if String(e.get("clip_id", "")) == clip.id:
-			return runtime.spawn_timeline_segment_voice(handle, d, e, crossfade_ms)
+			var enriched: Dictionary = _enrich_segment_spawn_entry(timeline, tr, clip, e)
+			return runtime.spawn_timeline_segment_voice(handle, d, enriched, crossfade_ms)
+	var fallback: Dictionary = _fallback_segment_entry(tr, clip)
 	return runtime.spawn_timeline_segment_voice(
-		handle, d, _fallback_segment_entry(tr, clip), crossfade_ms
+		handle,
+		d,
+		_enrich_segment_spawn_entry(timeline, tr, clip, fallback),
+		crossfade_ms,
 	)
 
 
