@@ -28,6 +28,7 @@ const CodaEventParameterScript := preload(
 const CodaRuntimeParameterPipelineScript := preload(
 	"res://addons/nexus_coda/runtime/coda_runtime_parameter_pipeline.gd"
 )
+const CodaBusSendScript := preload("res://addons/nexus_coda/domain/coda_bus_send.gd")
 
 
 class SegmentReprimeTestRuntime extends CodaRuntimeScript:
@@ -47,6 +48,16 @@ class SegmentReprimeTestRuntime extends CodaRuntimeScript:
 		return true
 
 
+class SegmentEntryCaptureRuntime extends CodaRuntimeScript:
+	var last_entry: Dictionary = {}
+
+	func spawn_timeline_segment_voice(
+		_h: CodaEventHandle, _d: Dictionary, entry: Dictionary, _crossfade_ms: int = -1
+	) -> bool:
+		last_entry = entry.duplicate()
+		return true
+
+
 static func run() -> int:
 	var failed: int = 0
 	failed += _test_segment_resolution()
@@ -56,6 +67,7 @@ static func run() -> int:
 	failed += _test_segment_dispatch_state_sync()
 	failed += _test_same_segment_reprime_uses_zero_crossfade()
 	failed += _test_timeline_refresh_applies_per_voice_modulation()
+	failed += _test_segment_spawn_includes_wet_sends_from_scheduler()
 	return failed
 
 
@@ -166,6 +178,50 @@ static func _test_intensity_not_segment() -> int:
 	if CodaTimelineSegmentDriverScript.should_drive_param("intensity", ev):
 		push_error("intensity should not drive segments when music_state is configured")
 		return 1
+	return 0
+
+
+static func _test_segment_spawn_includes_wet_sends_from_scheduler() -> int:
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var timeline = ev.event_timeline
+	var seg_tr: CodaTimelineTrack = CodaTimelineSegmentDriverScript.segments_track(timeline)
+	if seg_tr == null or seg_tr.clips.is_empty():
+		push_error("segment wet-send test needs Segments track")
+		return 1
+	var send := CodaBusSendScript.new()
+	send.target_bus_id = "return_reverb"
+	send.level = 0.5
+	seg_tr.wet_sends = [send]
+	var calm = seg_tr.clips[0]
+	var runtime := SegmentEntryCaptureRuntime.new()
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle.event_node = ev
+	handle.param_values = {"music_state": 0}
+	handle.timeline_cursor_seconds = 0.0
+	var d: Dictionary = {
+		"timeline": timeline,
+		"active_segment_id": "",
+		"voices": {},
+		"fired_clip_ids": {},
+		"spent_clip_ids": {},
+	}
+	CodaTimelineSegmentDriverScript.new().apply_segment_change(
+		runtime, handle, d, calm.segment_id, 0
+	)
+	var entry: Dictionary = runtime.last_entry
+	var wet: Array = entry.get("track_wet_sends", []) as Array
+	if wet.is_empty() or wet[0] == null:
+		push_error("segment spawn via scheduler should include track_wet_sends")
+		return 1
+	if String((wet[0] as CodaBusSend).target_bus_id) != "return_reverb":
+		push_error("segment spawn should preserve wet send target bus")
+		return 1
+	if not entry.has("track_output_bus_id"):
+		push_error("segment spawn should include track_output_bus_id")
+		return 1
+	runtime.free()
 	return 0
 
 
