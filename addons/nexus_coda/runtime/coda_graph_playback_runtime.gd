@@ -108,6 +108,7 @@ func on_voice_finished_for_graph(
 	if bool(h.params.get("_coda_is_sibling", false)):
 		if not h._alive:
 			return true
+		CodaVoiceWetLayersScript.stop_graph_wet_layers(h)
 		h._alive = false
 		var parent: CodaEventHandle = h.params.get("_coda_graph_parent", null) as CodaEventHandle
 		if parent != null:
@@ -117,6 +118,7 @@ func on_voice_finished_for_graph(
 			if not parent._paused:
 				_try_finish_graph_handle(parent)
 		return true
+	CodaVoiceWetLayersScript.stop_graph_wet_layers(h)
 	_try_finish_graph_handle(h)
 	return true
 
@@ -126,6 +128,7 @@ func stop_parallel_siblings(handle: CodaEventHandle, fade_ms: int = 0) -> void:
 	for sib in handle.graph_parallel_siblings:
 		if sib == null:
 			continue
+		CodaVoiceWetLayersScript.stop_graph_wet_layers(sib)
 		if fade_ms > 0 and sib._player != null and is_instance_valid(sib._player) and sib._player.playing:
 			_voice_fader.fade_volume_db(
 				sib._player, -80.0, fade_ms, Callable(sib, "_stop_local").bind(0)
@@ -191,6 +194,9 @@ func pause_graph_preview(handle: CodaEventHandle) -> void:
 		_snapshot_pause_player(sib, snapshot)
 	handle.params["_coda_graph_pause_snapshot"] = snapshot
 	CodaVoiceWetLayersScript.pause_graph_wet_layers(handle)
+	for sib in handle.graph_parallel_siblings:
+		if sib != null:
+			CodaVoiceWetLayersScript.pause_graph_wet_layers(sib)
 	if not _paused_graph_handles.has(handle):
 		_paused_graph_handles.append(handle)
 
@@ -218,6 +224,9 @@ func resume_graph_preview(handle: CodaEventHandle) -> void:
 		_runtime.stop(handle)
 		return
 	CodaVoiceWetLayersScript.resume_graph_wet_layers(handle)
+	for sib in handle.graph_parallel_siblings:
+		if sib != null:
+			CodaVoiceWetLayersScript.resume_graph_wet_layers(sib)
 
 
 func _finalize_paused_preview(handle: CodaEventHandle) -> void:
@@ -318,17 +327,19 @@ func _start_parallel_step(
 		var tail: Array = parallel_entries.slice(i + 1)
 		tail.append_array(plan_tail)
 		var player: AudioStreamPlayer = _start_player_for_entry(
-			entry, params, tail, event_loops, owner
+			entry, params, tail, event_loops
 		)
 		if player == null:
 			continue
 		started_indices[i] = true
 		if primary_player == null:
 			_bind_primary_player(owner, entry, player, params)
+			_spawn_graph_wet_layers_for_entry(owner, player)
 			active_handles[player.get_instance_id()] = owner
 			primary_player = player
 		else:
 			var sib_h: CodaEventHandle = _make_sibling_handle(owner, entry, player)
+			_spawn_graph_wet_layers_for_entry(sib_h, player)
 			owner.graph_parallel_siblings.append(sib_h)
 			active_handles[player.get_instance_id()] = sib_h
 	return {"primary_player": primary_player, "started_indices": started_indices}
@@ -452,7 +463,6 @@ func _start_player_for_entry(
 	params: Dictionary,
 	plan_remaining: Array = [],
 	event_loops: bool = false,
-	handle: CodaEventHandle = null
 ) -> AudioStreamPlayer:
 	var stream_path: String = String(entry.get("audio_path", "")).strip_edges()
 	if stream_path.is_empty():
@@ -495,14 +505,24 @@ func _start_player_for_entry(
 	CodaSpatialVoiceRuntimeScript.apply_from_meta(player, player.volume_db)
 	_runtime.runtime_begin_player_voice(player)
 	player.play()
-	if handle != null and handle.event_node is CodaBrowserNode:
-		var ev: CodaBrowserNode = handle.event_node as CodaBrowserNode
-		if not ev.event_wet_sends.is_empty():
-			var pvals: Dictionary = handle.param_values_smoothed if handle != null else {}
-			CodaVoiceWetLayersScript.spawn_graph_wet_layers(
-				_runtime, handle, player, ev.event_wet_sends, pvals
-			)
 	return player
+
+
+func _spawn_graph_wet_layers_for_entry(
+	wet_handle: CodaEventHandle, player: AudioStreamPlayer
+) -> void:
+	if wet_handle == null or player == null:
+		return
+	if wet_handle.event_node is CodaBrowserNode:
+		var ev: CodaBrowserNode = wet_handle.event_node as CodaBrowserNode
+		if not ev.event_wet_sends.is_empty():
+			CodaVoiceWetLayersScript.spawn_graph_wet_layers(
+				_runtime,
+				wet_handle,
+				player,
+				ev.event_wet_sends,
+				wet_handle.param_values_smoothed
+			)
 
 
 func _try_finish_graph_handle(h: CodaEventHandle) -> void:

@@ -385,6 +385,7 @@ func stop_all() -> void:
 	for gh2 in graph_handles:
 		# BLEND siblings never get voice_started; skip voice_finished to avoid double teardown.
 		if bool(gh2.params.get("_coda_is_sibling", false)):
+			CodaVoiceWetLayersScript.stop_graph_wet_layers(gh2)
 			gh2._alive = false
 			continue
 		CodaVoiceWetLayersScript.stop_graph_wet_layers(gh2)

@@ -33,6 +33,9 @@ const CodaBusSendRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_
 const CodaPooledVoiceLifecycleScript := preload(
 	"res://addons/nexus_coda/runtime/coda_pooled_voice_lifecycle.gd"
 )
+const CodaGraphPlaybackRuntimeScript := preload(
+	"res://addons/nexus_coda/runtime/coda_graph_playback_runtime.gd"
+)
 
 
 static func run() -> int:
@@ -40,6 +43,7 @@ static func run() -> int:
 	failed += _test_detach_dry_player_teardowns_wet_layers()
 	failed += _test_teardown_wet_layers_for_prefix()
 	failed += _test_stop_graph_wet_layers_clears_handle()
+	failed += _test_graph_blend_sibling_wet_teardown_on_finish()
 	failed += _test_clip_id_from_wet_voice_key()
 	failed += _test_refresh_voice_output_levels_syncs_wet_layers()
 	failed += _test_refresh_preserves_wet_send_offset()
@@ -87,6 +91,45 @@ static func _test_stop_graph_wet_layers_clears_handle() -> int:
 	if not wet_players.is_empty():
 		push_error("stop_graph_wet_layers should clear _coda_wet_players")
 		return 1
+	return 0
+
+
+static func _test_graph_blend_sibling_wet_teardown_on_finish() -> int:
+	var runtime: CodaRuntime = CodaRuntimeScript.new()
+	var graph_playback: CodaGraphPlaybackRuntime = CodaGraphPlaybackRuntimeScript.new()
+	graph_playback.setup(runtime, null)
+	var owner: CodaEventHandle = CodaEventHandleScript.new()
+	owner._alive = true
+	var sib: CodaEventHandle = CodaEventHandleScript.new()
+	sib._alive = true
+	sib.params = {"_coda_is_sibling": true, "_coda_graph_parent": owner}
+	var wet: AudioStreamPlayer = AudioStreamPlayer.new()
+	sib.params["_coda_wet_players"] = [wet]
+	var owner_wet: AudioStreamPlayer = AudioStreamPlayer.new()
+	owner.params["_coda_wet_players"] = [owner_wet]
+	var player: AudioStreamPlayer = AudioStreamPlayer.new()
+	sib._bind_player(player)
+	player.set_meta(&"_coda_playback_gen", 1)
+	sib.params["_coda_playback_gen"] = 1
+	owner.graph_parallel_siblings.append(sib)
+	owner._paused = true
+	runtime._active_handles[player.get_instance_id()] = sib
+	graph_playback.on_voice_finished_for_graph(player, player.get_instance_id(), false)
+	var sib_wet: Array = sib.params.get("_coda_wet_players", ["missing"])
+	var owner_wet_players: Array = owner.params.get("_coda_wet_players", [])
+	if not sib_wet.is_empty():
+		push_error("BLEND sibling finish should tear down sibling wet layers")
+		runtime.free()
+		return 1
+	if owner_wet_players.is_empty():
+		push_error("BLEND sibling finish should not clear owner wet layers while primary still active")
+		runtime.free()
+		return 1
+	if owner.graph_parallel_siblings.has(sib):
+		push_error("BLEND sibling finish should remove sibling from parent list")
+		runtime.free()
+		return 1
+	runtime.free()
 	return 0
 
 
