@@ -156,8 +156,11 @@ static func _punch_hole_middle(
 		_finalize_trimmed_clip(victim, min_clip_duration, track)
 		return
 
-	var right_clip: CodaTimelineClip = _find_clip_starting_near(track, hole_start, left_id)
+	var right_clip: CodaTimelineClip = _find_split_right_clip(track, hole_start, left_id, ve)
 	if right_clip == null:
+		# Split succeeded but the tail clip is missing; keep the non-overlapping prefix.
+		victim.duration_seconds = hole_start - vs
+		_finalize_trimmed_clip(victim, min_clip_duration, track)
 		return
 
 	var trim_amount: float = hole_end - hole_start
@@ -186,6 +189,30 @@ static func _find_clip_starting_near(
 		if absf(clip.start_seconds - start_seconds) <= OVERLAP_EPSILON:
 			return clip
 	return null
+
+
+## After a successful split, multiple clips may share [hole_start] when earlier victims
+## were also punched on this lane. Prefer the tail whose end matches the pre-split victim.
+static func _find_split_right_clip(
+	track: CodaTimelineTrack,
+	hole_start: float,
+	left_id: String,
+	original_victim_end: float,
+) -> CodaTimelineClip:
+	var candidates: Array[CodaTimelineClip] = []
+	for clip in track.clips:
+		if clip.id == left_id:
+			continue
+		if absf(clip.start_seconds - hole_start) <= OVERLAP_EPSILON:
+			candidates.append(clip)
+	if candidates.is_empty():
+		return null
+	if candidates.size() == 1:
+		return candidates[0]
+	for clip in candidates:
+		if absf(clip.end_seconds() - original_victim_end) <= OVERLAP_EPSILON:
+			return clip
+	return candidates[0]
 
 
 static func _remove_clip_from_track(track: CodaTimelineTrack, clip: CodaTimelineClip) -> void:

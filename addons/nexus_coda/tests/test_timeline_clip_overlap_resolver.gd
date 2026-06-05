@@ -29,6 +29,7 @@ static func run() -> int:
 	failed += _test_near_start_hole_fallback()
 	failed += _test_near_end_hole_fallback()
 	failed += _test_middle_split_failure_keeps_left()
+	failed += _test_middle_split_two_victims_same_tail_start()
 	return failed
 
 
@@ -222,6 +223,49 @@ static func _test_middle_split_failure_keeps_left() -> int:
 		victim.end_seconds()
 	):
 		push_error("split failure fallback: overlap should be resolved")
+		return 1
+	return 0
+
+
+static func _test_middle_split_two_victims_same_tail_start() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var track = timeline.tracks[0]
+	var long_victim = CodaTimelineClipScript.new()
+	long_victim.start_seconds = 0.0
+	long_victim.duration_seconds = 10.0
+	var short_victim = CodaTimelineClipScript.new()
+	short_victim.start_seconds = 3.0
+	short_victim.duration_seconds = 5.0
+	var aggressor = CodaTimelineClipScript.new()
+	aggressor.start_seconds = 4.0
+	aggressor.duration_seconds = 2.0
+	track.clips.append(long_victim)
+	track.clips.append(short_victim)
+	track.clips.append(aggressor)
+	timeline.invalidate_clip_index()
+	ResolverScript.resolve_for_aggressor(timeline, aggressor.id, MIN_CLIP)
+	for clip in track.clips:
+		if clip.id == aggressor.id:
+			continue
+		if ResolverScript.intervals_overlap(
+			aggressor.start_seconds,
+			aggressor.end_seconds(),
+			clip.start_seconds,
+			clip.end_seconds()
+		):
+			push_error(
+				"multi-victim middle split: clip %s still overlaps aggressor" % clip.id
+			)
+			return 1
+	var long_tail: CodaTimelineClip = null
+	for clip in track.clips:
+		if clip.id == long_victim.id:
+			continue
+		if absf(clip.start_seconds - 6.0) <= 0.001 and absf(clip.duration_seconds - 4.0) <= 0.001:
+			long_tail = clip
+			break
+	if long_tail == null:
+		push_error("multi-victim middle split: long victim tail should be [6, 10)")
 		return 1
 	return 0
 
