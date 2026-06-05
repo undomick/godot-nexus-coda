@@ -5,6 +5,8 @@ extends RefCounted
 
 const SEGMENTS_TRACK_NAME := "Segments"
 const OVERLAP_EPSILON := 0.001
+## Must match [CodaEventTimeline.MIN_SPLIT_SEGMENT_SECONDS].
+const MIN_SPLIT_SEGMENT_SECONDS := 0.02
 
 
 static func resolve_for_aggressor(
@@ -136,9 +138,22 @@ static func _punch_hole_middle(
 ) -> void:
 	var ve: float = victim.end_seconds()
 	var vs: float = victim.start_seconds
+	# Domain split rejects cuts within MIN_SPLIT of either edge; fall back to trim.
+	if hole_start - vs < MIN_SPLIT_SEGMENT_SECONDS - OVERLAP_EPSILON:
+		_trim_victim_start(victim, hole_end, vs)
+		if victim.duration_seconds < min_clip_duration:
+			_remove_clip_from_track(track, victim)
+		return
+	if ve - hole_end < MIN_SPLIT_SEGMENT_SECONDS - OVERLAP_EPSILON:
+		victim.duration_seconds = hole_start - vs
+		_finalize_trimmed_clip(victim, min_clip_duration, track)
+		return
 	var left_id: String = victim.id
 	var err: String = timeline.split_clip_at_time(left_id, hole_start)
 	if not err.is_empty():
+		_trim_victim_start(victim, hole_end, vs)
+		if victim.duration_seconds < min_clip_duration:
+			_remove_clip_from_track(track, victim)
 		return
 
 	var right_clip: CodaTimelineClip = _find_clip_starting_near(track, hole_start, left_id)

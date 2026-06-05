@@ -26,6 +26,8 @@ static func run() -> int:
 	failed += _test_two_victims()
 	failed += _test_sliver_removed()
 	failed += _test_segments_track_skipped()
+	failed += _test_near_start_hole_fallback()
+	failed += _test_near_end_hole_fallback()
 	return failed
 
 
@@ -138,6 +140,42 @@ static func _test_sliver_removed() -> int:
 	var track: CodaTimelineTrack = d.track
 	if track.clips.size() != 1:
 		push_error("sliver: victim shorter than min should be removed")
+		return 1
+	return 0
+
+
+static func _test_near_start_hole_fallback() -> int:
+	var d: Dictionary = _make_timeline_with_clips(0.005, 5.0, 0.0, 10.0)
+	ResolverScript.resolve_for_aggressor(d.timeline, d.aggressor.id, MIN_CLIP)
+	var victim: CodaTimelineClip = d.victim
+	if absf(victim.start_seconds - 5.0) > 0.001 or absf(victim.duration_seconds - 5.0) > 0.001:
+		push_error("near start hole: victim should be trimmed to [5, 10)")
+		return 1
+	if ResolverScript.intervals_overlap(
+		d.aggressor.start_seconds,
+		d.aggressor.end_seconds(),
+		victim.start_seconds,
+		victim.end_seconds()
+	):
+		push_error("near start hole: overlap should be resolved")
+		return 1
+	return 0
+
+
+static func _test_near_end_hole_fallback() -> int:
+	var d: Dictionary = _make_timeline_with_clips(9.985, 0.01, 0.0, 10.0)
+	ResolverScript.resolve_for_aggressor(d.timeline, d.aggressor.id, MIN_CLIP)
+	var victim: CodaTimelineClip = d.victim
+	if absf(victim.duration_seconds - 9.985) > 0.001:
+		push_error("near end hole: victim should be trimmed to [0, 9.985)")
+		return 1
+	if ResolverScript.intervals_overlap(
+		d.aggressor.start_seconds,
+		d.aggressor.end_seconds(),
+		victim.start_seconds,
+		victim.end_seconds()
+	):
+		push_error("near end hole: overlap should be resolved")
 		return 1
 	return 0
 
