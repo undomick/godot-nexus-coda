@@ -6,6 +6,7 @@ extends RefCounted
 
 const CodaBusSendRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_bus_send_runtime.gd")
 const CodaModulationScript := preload("res://addons/nexus_coda/domain/coda_modulation.gd")
+const CodaVoiceWetLayersScript := preload("res://addons/nexus_coda/runtime/coda_voice_wet_layers.gd")
 
 var _runtime: CodaRuntime = null
 var _global_params: Dictionary = {}
@@ -190,6 +191,14 @@ func apply_modulations(handle: CodaEventHandle) -> void:
 		vol_db += float(handle._player.get_meta(&"_coda_resonance_atten_db"))
 	handle._player.volume_db = vol_db
 	handle._player.pitch_scale = float(levels.get("pitch_scale", handle.base_pitch_scale))
+	if not handle.is_timeline and _runtime != null:
+		var wet_owner: CodaEventHandle = handle
+		if bool(handle.params.get("_coda_is_sibling", false)):
+			wet_owner = handle.params.get("_coda_graph_parent", null) as CodaEventHandle
+		if wet_owner != null:
+			CodaVoiceWetLayersScript.refresh_graph_wet_layers_for_dry(
+				_runtime, wet_owner, handle._player, handle.param_values_smoothed
+			)
 
 
 static func volume_db_with_blend(base_db: float, blend_weight: float) -> float:

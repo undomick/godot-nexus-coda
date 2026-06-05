@@ -156,6 +156,7 @@ static func add_clip(
 	clip.duration_seconds = 1.0
 	timeline.tracks[tr_i].clips.append(clip)
 	timeline.invalidate_clip_index()
+	resolve_clip_overlaps(timeline, clip.id)
 	return snap
 
 

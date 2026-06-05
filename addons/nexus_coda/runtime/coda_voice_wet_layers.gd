@@ -94,6 +94,37 @@ static func spawn_wet_layers(
 	d["voices"] = voices
 
 
+static func refresh_graph_wet_layers_for_dry(
+	runtime: CodaRuntime,
+	owner: CodaEventHandle,
+	dry_player: AudioStreamPlayer,
+	param_values: Dictionary
+) -> void:
+	if runtime == null or owner == null or dry_player == null or not is_instance_valid(dry_player):
+		return
+	var by_dry: Dictionary = owner.params.get("_coda_graph_wet_by_dry", {})
+	var dry_key: String = str(dry_player.get_instance_id())
+	var dry_wets: Array = by_dry.get(dry_key, [])
+	if dry_wets.is_empty():
+		return
+	var event_sends: Array[CodaBusSend] = []
+	if owner.event_node is CodaBrowserNode:
+		event_sends = (owner.event_node as CodaBrowserNode).event_wet_sends
+	if event_sends.is_empty():
+		return
+	var bus_root: CodaBus = runtime.get_playback_bus_root()
+	if bus_root == null:
+		return
+	var dry_db: float = dry_player.volume_db
+	var dry_pitch: float = dry_player.pitch_scale
+	for i in range(dry_wets.size()):
+		var wet: AudioStreamPlayer = dry_wets[i] as AudioStreamPlayer
+		if wet == null or not is_instance_valid(wet):
+			continue
+		wet.volume_db = wet_volume_db_for_layer(dry_db, i, event_sends, bus_root, param_values)
+		wet.pitch_scale = dry_pitch
+
+
 static func spawn_graph_wet_layers(
 	runtime: CodaRuntime,
 	handle: CodaEventHandle,
