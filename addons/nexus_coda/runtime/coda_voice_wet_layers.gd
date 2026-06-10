@@ -16,13 +16,13 @@ static func wet_volume_db_for_layer(
 ) -> float:
 	if wet_index < 0 or bus_root == null:
 		return dry_volume_db
-	var active: Array[CodaBusSend] = CodaBusSendRuntimeScript.filter_active_sends(
-		merged_sends, bus_root, param_values
-	)
-	if wet_index >= active.size():
-		# Send disabled via RTPC or filtered out; silence instead of full dry into return bus.
+	var routable: Array[CodaBusSend] = collect_routable_wet_sends(merged_sends, bus_root)
+	if wet_index >= routable.size():
 		return -80.0
-	var amt: float = CodaBusSendRuntimeScript.effective_level(active[wet_index], param_values)
+	var send: CodaBusSend = routable[wet_index]
+	var amt: float = CodaBusSendRuntimeScript.effective_level(send, param_values)
+	if amt <= 0.001:
+		return -80.0
 	return dry_volume_db + CodaBusSendRuntimeScript.linear_to_db(amt)
 
 
@@ -102,10 +102,12 @@ static func _runtime_bus_id_map(runtime: CodaRuntime) -> Dictionary:
 	return bus_sync.get_bus_id_map()
 
 
-static func routable_wet_send_count(sends: Array[CodaBusSend], bus_root: CodaBus) -> int:
+static func collect_routable_wet_sends(
+	sends: Array[CodaBusSend], bus_root: CodaBus
+) -> Array[CodaBusSend]:
+	var out: Array[CodaBusSend] = []
 	if bus_root == null:
-		return 0
-	var count: int = 0
+		return out
 	for send in sends:
 		if send == null:
 			continue
@@ -114,9 +116,13 @@ static func routable_wet_send_count(sends: Array[CodaBusSend], bus_root: CodaBus
 			continue
 		for eff in target.effects:
 			if eff is CodaTrackEffect:
-				count += 1
+				out.append(send)
 				break
-	return count
+	return out
+
+
+static func routable_wet_send_count(sends: Array[CodaBusSend], bus_root: CodaBus) -> int:
+	return collect_routable_wet_sends(sends, bus_root).size()
 
 
 static func count_timeline_wet_layers(voices: Dictionary, voice_key_prefix: String) -> int:
