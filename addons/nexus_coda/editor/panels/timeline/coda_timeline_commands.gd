@@ -223,8 +223,8 @@ static func move_clip(
 	if from_track != to_track:
 		from_track.clips.erase(clip)
 		to_track.clips.append(clip)
-		timeline.invalidate_clip_index()
 	clip.start_seconds = clamped_start
+	timeline.invalidate_clip_index()
 
 
 const MIN_CLIP_DURATION_SECONDS := 0.05
@@ -387,6 +387,7 @@ static func resize_clip(
 	var max_d: float = clip.max_source_playable_seconds()
 	clip.duration_seconds = clampf(new_duration, MIN_CLIP_DURATION_SECONDS, max_d)
 	clamp_clip_fades(clip)
+	timeline.invalidate_clip_index()
 
 
 static func delete_clip(timeline: CodaEventTimeline, clip_id: String) -> CodaEventTimeline:
