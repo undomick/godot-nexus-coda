@@ -12,14 +12,17 @@ static func wet_volume_db_for_layer(
 	wet_index: int,
 	merged_sends: Array[CodaBusSend],
 	bus_root: CodaBus,
-	param_values: Dictionary
+	param_values: Dictionary,
+	id_to_godot_name: Dictionary = {}
 ) -> float:
 	if wet_index < 0 or bus_root == null:
 		return dry_volume_db
-	var routable: Array[CodaBusSend] = collect_routable_wet_sends(merged_sends, bus_root)
-	if wet_index >= routable.size():
+	var spawnable: Array[CodaBusSend] = CodaBusSendRuntimeScript.collect_spawnable_wet_sends(
+		merged_sends, bus_root, id_to_godot_name
+	)
+	if wet_index >= spawnable.size():
 		return -80.0
-	var send: CodaBusSend = routable[wet_index]
+	var send: CodaBusSend = spawnable[wet_index]
 	var amt: float = CodaBusSendRuntimeScript.effective_level(send, param_values)
 	if amt <= 0.001:
 		return -80.0
@@ -102,27 +105,14 @@ static func _runtime_bus_id_map(runtime: CodaRuntime) -> Dictionary:
 	return bus_sync.get_bus_id_map()
 
 
-static func collect_routable_wet_sends(
-	sends: Array[CodaBusSend], bus_root: CodaBus
-) -> Array[CodaBusSend]:
-	var out: Array[CodaBusSend] = []
-	if bus_root == null:
-		return out
-	for send in sends:
-		if send == null:
-			continue
-		var target: CodaBus = bus_root.find_by_id(send.target_bus_id)
-		if target == null or target.bus_kind != CodaBus.BusKind.RETURN:
-			continue
-		for eff in target.effects:
-			if eff is CodaTrackEffect:
-				out.append(send)
-				break
-	return out
-
-
-static func routable_wet_send_count(sends: Array[CodaBusSend], bus_root: CodaBus) -> int:
-	return collect_routable_wet_sends(sends, bus_root).size()
+static func _spawnable_wet_send_count(
+	runtime: CodaRuntime,
+	sends: Array[CodaBusSend],
+	bus_root: CodaBus
+) -> int:
+	return CodaBusSendRuntimeScript.collect_spawnable_wet_sends(
+		sends, bus_root, _runtime_bus_id_map(runtime)
+	).size()
 
 
 static func count_timeline_wet_layers(voices: Dictionary, voice_key_prefix: String) -> int:
@@ -148,7 +138,7 @@ static func ensure_timeline_wet_layers(
 	var bus_root: CodaBus = runtime.get_playback_bus_root()
 	if bus_root == null:
 		return
-	var expected_count: int = routable_wet_send_count(sends, bus_root)
+	var expected_count: int = _spawnable_wet_send_count(runtime, sends, bus_root)
 	var voices: Dictionary = d.get("voices", {})
 	var existing_count: int = count_timeline_wet_layers(voices, voice_key_prefix)
 	if existing_count == expected_count:
@@ -175,7 +165,7 @@ static func ensure_graph_wet_layers(
 	var bus_root: CodaBus = runtime.get_playback_bus_root()
 	if bus_root == null:
 		return
-	var expected_count: int = routable_wet_send_count(sends, bus_root)
+	var expected_count: int = _spawnable_wet_send_count(runtime, sends, bus_root)
 	var by_dry: Dictionary = owner.params.get("_coda_graph_wet_by_dry", {})
 	var dry_key: String = str(dry_player.get_instance_id())
 	var dry_wets: Array = by_dry.get(dry_key, [])
@@ -213,7 +203,9 @@ static func refresh_graph_wet_layers_for_dry(
 		var wet: AudioStreamPlayer = dry_wets[i] as AudioStreamPlayer
 		if wet == null or not is_instance_valid(wet):
 			continue
-		wet.volume_db = wet_volume_db_for_layer(dry_db, i, event_sends, bus_root, param_values)
+		wet.volume_db = wet_volume_db_for_layer(
+			dry_db, i, event_sends, bus_root, param_values, _runtime_bus_id_map(runtime)
+		)
 		wet.pitch_scale = dry_pitch
 
 
