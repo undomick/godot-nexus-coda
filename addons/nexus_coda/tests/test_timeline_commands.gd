@@ -25,6 +25,7 @@ static func run() -> int:
 	failed += _test_drop_resolves_overlap()
 	failed += _test_duplicate_resolves_overlap()
 	failed += _test_add_clip_resolves_overlap()
+	failed += _test_assign_clip_audio_resolves_overlap()
 	return failed
 
 
@@ -162,6 +163,35 @@ static func _test_add_clip_resolves_overlap() -> int:
 	if existing.end_seconds() > 2.0 + 0.001:
 		push_error("add clip overlap: existing clip should be trimmed to end at 2s")
 		return 1
+	return 0
+
+
+static func _test_assign_clip_audio_resolves_overlap() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var assigned = CodaTimelineClipScript.new()
+	assigned.start_seconds = 0.0
+	assigned.duration_seconds = 2.0
+	var neighbor = CodaTimelineClipScript.new()
+	neighbor.start_seconds = 5.0
+	neighbor.duration_seconds = 5.0
+	timeline.tracks[0].clips.append(assigned)
+	timeline.tracks[0].clips.append(neighbor)
+	timeline.invalidate_clip_index()
+	# Missing asset -> max_source_playable_seconds is huge; must not leave overlapping neighbor.
+	CodaTimelineCommandsScript.assign_clip_audio(
+		timeline, assigned.id, "res://addons/nexus_coda/tests/missing_test_audio.ogg"
+	)
+	for clip in timeline.tracks[0].clips:
+		if clip.id == assigned.id:
+			continue
+		if CodaTimelineClipOverlapResolverScript.intervals_overlap(
+			assigned.start_seconds,
+			assigned.end_seconds(),
+			clip.start_seconds,
+			clip.end_seconds()
+		):
+			push_error("assign clip audio overlap: neighbor should be trimmed or removed")
+			return 1
 	return 0
 
 

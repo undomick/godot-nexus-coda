@@ -182,6 +182,8 @@ static func assign_clip_audio(
 	clip.audio_path = res_path
 	clip.offset_seconds = 0.0
 	clip.duration_seconds = clip.max_source_playable_seconds()
+	timeline.invalidate_clip_index()
+	resolve_clip_overlaps(timeline, clip_id)
 	return snap
 
 
