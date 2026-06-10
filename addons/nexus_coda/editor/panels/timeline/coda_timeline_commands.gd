@@ -51,6 +51,7 @@ static func extend_timeline_if_content_exceeds(timeline: CodaEventTimeline, marg
 	var need: float = timeline_content_end_seconds(timeline)
 	if need > timeline.length_seconds + 0.0001:
 		timeline.length_seconds = need + margin
+		timeline.invalidate_clip_index()
 
 
 static func set_bpm(timeline: CodaEventTimeline, bpm: float) -> void:
@@ -67,6 +68,7 @@ static func set_timeline_length(timeline: CodaEventTimeline, value: float) -> Co
 	var snap := snapshot(timeline)
 	timeline.length_seconds = maxf(0.5, value)
 	timeline.clamp_work_points_to_length()
+	timeline.invalidate_clip_index()
 	return snap
 
 
@@ -75,6 +77,7 @@ static func fit_timeline_length(timeline: CodaEventTimeline, margin: float = 0.2
 	var need: float = timeline_content_end_seconds(timeline)
 	timeline.length_seconds = maxf(0.5, need + margin)
 	timeline.clamp_work_points_to_length()
+	timeline.invalidate_clip_index()
 	return snap
 
 

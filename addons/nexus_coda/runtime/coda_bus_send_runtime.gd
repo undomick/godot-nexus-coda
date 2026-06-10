@@ -127,17 +127,16 @@ static func build_wet_voice_layers(
 	var layers: Array = []
 	if bus_root == null:
 		return layers
-	var active: Array[CodaBusSend] = filter_active_sends(sends, bus_root, param_values)
-	for send in active:
+	for send in sends:
+		if send == null:
+			continue
 		var target: CodaBus = bus_root.find_by_id(send.target_bus_id)
-		if target == null:
+		if target == null or target.bus_kind != CodaBus.BusKind.RETURN:
 			continue
 		var return_nm: String = String(id_to_godot_name.get(target.id, target.bus_name)).strip_edges()
 		if return_nm.is_empty() or AudioServer.get_bus_index(return_nm) < 0:
 			continue
 		var amt: float = effective_level(send, param_values)
-		if amt <= 0.001:
-			continue
 		var wet_chain: Array = []
 		for eff in target.effects:
 			if eff is CodaTrackEffect:

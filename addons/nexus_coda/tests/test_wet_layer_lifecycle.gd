@@ -48,6 +48,8 @@ static func run() -> int:
 	failed += _test_teardown_graph_wet_layers_for_dry()
 	failed += _test_stop_graph_wet_layers_clears_by_dry_map()
 	failed += _test_refresh_graph_wet_layers_for_dry_rtpc()
+	failed += _test_build_wet_voice_layers_reserves_muted_send_layers()
+	failed += _test_count_timeline_wet_layers()
 	return failed
 
 
@@ -349,4 +351,47 @@ static func _test_refresh_graph_wet_layers_for_dry_rtpc() -> int:
 		runtime.free()
 		return 1
 	runtime.free()
+	return 0
+
+
+static func _ensure_audio_bus(bus_name: String) -> void:
+	if AudioServer.get_bus_index(bus_name) >= 0:
+		return
+	AudioServer.add_bus()
+	AudioServer.set_bus_name(AudioServer.bus_count - 1, bus_name)
+
+
+static func _test_build_wet_voice_layers_reserves_muted_send_layers() -> int:
+	var bus_root: CodaBus = _make_return_bus_tree()
+	var ret: CodaBus = bus_root.children[bus_root.children.size() - 1]
+	_ensure_audio_bus(ret.bus_name)
+	var send: CodaBusSend = CodaBusSendScript.new()
+	send.target_bus_id = ret.id
+	send.level = 1.0
+	send.parameter_id = "wet_amount"
+	var layers: Array = CodaBusSendRuntimeScript.build_wet_voice_layers(
+		[send],
+		bus_root,
+		{ret.id: ret.bus_name},
+		{"wet_amount": 0.0},
+		0.0
+	)
+	if layers.is_empty():
+		push_error("disabled RTPC send should still reserve a wet voice layer for later refresh")
+		return 1
+	var muted_db: float = float(layers[0].get("volume_db", 0.0))
+	if muted_db > -79.0:
+		push_error("muted RTPC send layer should spawn near silence, got %s" % muted_db)
+		return 1
+	return 0
+
+
+static func _test_count_timeline_wet_layers() -> int:
+	var voices: Dictionary = {"clip_a": null, "clip_a_wet_0": null, "clip_a_wet_1": null}
+	if CodaVoiceWetLayersScript.count_timeline_wet_layers(voices, "clip_a") != 2:
+		push_error("count_timeline_wet_layers should count contiguous wet suffix keys")
+		return 1
+	if CodaVoiceWetLayersScript.count_timeline_wet_layers(voices, "clip_b") != 0:
+		push_error("count_timeline_wet_layers should return 0 for missing prefix")
+		return 1
 	return 0
