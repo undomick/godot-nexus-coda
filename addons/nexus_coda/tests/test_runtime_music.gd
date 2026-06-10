@@ -17,6 +17,12 @@ const CodaTimelineTrackScript := preload(
 const CodaTimelineClipScript := preload(
 	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip.gd"
 )
+const CodaTimelineClipDispatchScript := preload(
+	"res://addons/nexus_coda/runtime/coda_timeline_clip_dispatch.gd"
+)
+const CodaEventTimelineScript := preload(
+	"res://addons/nexus_coda/domain/timeline/coda_event_timeline.gd"
+)
 
 
 class SegmentSpawnTestRuntime extends CodaRuntime:
@@ -66,6 +72,7 @@ static func run() -> int:
 	failed += _test_graph_pause_reserves_pooled_player()
 	failed += _test_graph_stop_after_pause_releases_pool_slot()
 	failed += _test_loop_backward_wrap_does_not_fire_future_clips()
+	failed += _test_on_voice_finished_finalizes_at_audible_clip_end()
 	return failed
 
 
@@ -572,6 +579,59 @@ static func _test_loop_backward_wrap_does_not_fire_future_clips() -> int:
 			runtime.free()
 			return 1
 	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_on_voice_finished_finalizes_at_audible_clip_end() -> int:
+	var runtime: CodaRuntime = CodaRuntimeScript.new()
+	var timeline: CodaEventTimeline = CodaEventTimelineScript.new()
+	timeline.length_seconds = 10.0
+	var track: CodaTimelineTrack = CodaTimelineTrackScript.new()
+	var clip: CodaTimelineClip = CodaTimelineClipScript.new()
+	clip.id = "clip_a"
+	clip.start_seconds = 0.0
+	clip.duration_seconds = 20.0
+	clip.offset_seconds = 2.0
+	track.clips.append(clip)
+	timeline.tracks.append(track)
+	var ev: CodaBrowserNode = CodaBrowserNode.new()
+	ev.event_timeline = timeline
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle._alive = true
+	handle.event_node = ev
+	handle.timeline_cursor_seconds = 10.0
+	var dry: AudioStreamPlayer = AudioStreamPlayer.new()
+	dry.set_meta(&"_coda_timeline_restart_offset", 2.0)
+	dry.set_meta(
+		&"_coda_clip_timeline_end",
+		CodaTimelineClipDispatchScript.audible_clip_end(clip, timeline)
+	)
+	dry.set_meta(&"_coda_playback_gen", 0)
+	var wet: AudioStreamPlayer = AudioStreamPlayer.new()
+	var d: Dictionary = {"timeline": timeline, "voices": {"clip_a": dry, "clip_a_wet_0": wet}}
+	var dry_key: int = dry.get_instance_id()
+	runtime._timeline_voice_owner[dry_key] = handle
+	runtime._timeline_voice_playback_gen[dry_key] = 0
+	runtime._timeline_dispatchers[handle] = d
+	var dispatcher: CodaTimelineDispatcher = CodaTimelineDispatcherScript.new()
+	dispatcher.setup(runtime, null, null)
+	runtime._timeline_dispatcher = dispatcher
+	dispatcher.on_voice_finished(dry, dry_key)
+	var voices: Dictionary = d.get("voices", {})
+	if voices.has("clip_a_wet_0"):
+		push_error("audible clip end should finalize wet layers instead of restarting them")
+		runtime.free()
+		return 1
+	if voices.has("clip_a"):
+		push_error("audible clip end should remove dry voice from dispatch bookkeeping")
+		runtime.free()
+		return 1
+	if runtime._timeline_voice_owner.has(dry_key):
+		push_error("audible clip end should clear timeline voice ownership")
+		runtime.free()
+		return 1
 	runtime.free()
 	return 0
 

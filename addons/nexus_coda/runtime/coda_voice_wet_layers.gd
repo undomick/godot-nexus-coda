@@ -134,6 +134,7 @@ static func ensure_timeline_wet_layers(
 	if runtime == null or handle == null or dry_player == null or not is_instance_valid(dry_player):
 		return
 	if sends.is_empty():
+		teardown_wet_layers_for_prefix(d, voice_key_prefix)
 		return
 	var bus_root: CodaBus = runtime.get_playback_bus_root()
 	if bus_root == null:
@@ -161,6 +162,7 @@ static func ensure_graph_wet_layers(
 	if runtime == null or owner == null or dry_player == null or not is_instance_valid(dry_player):
 		return
 	if sends.is_empty():
+		teardown_graph_wet_layers_for_dry(owner, dry_player)
 		return
 	var bus_root: CodaBus = runtime.get_playback_bus_root()
 	if bus_root == null:
