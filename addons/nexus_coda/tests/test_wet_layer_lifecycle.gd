@@ -50,6 +50,7 @@ static func run() -> int:
 	failed += _test_refresh_graph_wet_layers_for_dry_rtpc()
 	failed += _test_build_wet_voice_layers_reserves_muted_send_layers()
 	failed += _test_count_timeline_wet_layers()
+	failed += _test_multi_send_rtpc_maps_wet_layers_by_spawn_index()
 	return failed
 
 
@@ -393,5 +394,55 @@ static func _test_count_timeline_wet_layers() -> int:
 		return 1
 	if CodaVoiceWetLayersScript.count_timeline_wet_layers(voices, "clip_b") != 0:
 		push_error("count_timeline_wet_layers should return 0 for missing prefix")
+		return 1
+	return 0
+
+
+static func _make_dual_return_bus_tree() -> Dictionary:
+	var master: CodaBus = CodaBusScript.make_default_master()
+	var reverb_ret: CodaBus = CodaBusScript.new("Reverb Return")
+	reverb_ret.bus_kind = CodaBus.BusKind.RETURN
+	var reverb: CodaTrackEffect = CodaTrackEffectScript.new()
+	reverb.type = CodaTrackEffect.Type.REVERB
+	reverb_ret.effects.append(reverb)
+	var delay_ret: CodaBus = CodaBusScript.new("Delay Return")
+	delay_ret.bus_kind = CodaBus.BusKind.RETURN
+	var delay: CodaTrackEffect = CodaTrackEffectScript.new()
+	delay.type = CodaTrackEffect.Type.DELAY
+	delay_ret.effects.append(delay)
+	master.children.append(reverb_ret)
+	master.children.append(delay_ret)
+	return {"bus_root": master, "reverb": reverb_ret, "delay": delay_ret}
+
+
+static func _test_multi_send_rtpc_maps_wet_layers_by_spawn_index() -> int:
+	var buses: Dictionary = _make_dual_return_bus_tree()
+	var bus_root: CodaBus = buses["bus_root"]
+	var reverb_ret: CodaBus = buses["reverb"]
+	var delay_ret: CodaBus = buses["delay"]
+	var muted_send: CodaBusSend = CodaBusSendScript.new()
+	muted_send.target_bus_id = reverb_ret.id
+	muted_send.level = 1.0
+	muted_send.parameter_id = "reverb_amount"
+	var active_send: CodaBusSend = CodaBusSendScript.new()
+	active_send.target_bus_id = delay_ret.id
+	active_send.level = 0.5
+	var merged: Array[CodaBusSend] = [muted_send, active_send]
+	var param_values: Dictionary = {"reverb_amount": 0.0}
+	var muted_db: float = CodaVoiceWetLayersScript.wet_volume_db_for_layer(
+		0.0, 0, merged, bus_root, param_values
+	)
+	var active_db: float = CodaVoiceWetLayersScript.wet_volume_db_for_layer(
+		0.0, 1, merged, bus_root, param_values
+	)
+	if muted_db > -79.0:
+		push_error("first wet layer should stay muted when its RTPC send is off, got %s" % muted_db)
+		return 1
+	var expected_active_db: float = CodaBusSendRuntimeScript.linear_to_db(0.5)
+	if abs(active_db - expected_active_db) > 0.05:
+		push_error(
+			"second wet layer should use the active send level, expected %s got %s"
+			% [expected_active_db, active_db]
+		)
 		return 1
 	return 0
