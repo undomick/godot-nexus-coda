@@ -235,6 +235,7 @@ static func spawn_graph_wet_layers(
 	var by_dry: Dictionary = handle.params.get("_coda_graph_wet_by_dry", {})
 	var dry_key: String = str(dry_player.get_instance_id())
 	var dry_wets: Array = by_dry.get(dry_key, [])
+	var stream_offset: float = dry_player.get_playback_position() if dry_player.playing else 0.0
 	for i in range(layers.size()):
 		var layer: Dictionary = layers[i]
 		var wet: AudioStreamPlayer = runtime.runtime_pool().acquire()
@@ -248,7 +249,7 @@ static func spawn_graph_wet_layers(
 		var fx_nm: String = String(layer.get("fx_bus", ""))
 		if not fx_nm.is_empty():
 			wet.set_meta(&"_coda_fx_bus", fx_nm)
-		wet.play(0.0)
+		wet.play(stream_offset)
 		dry_wets.append(wet)
 	by_dry[dry_key] = dry_wets
 	handle.params["_coda_graph_wet_by_dry"] = by_dry
@@ -263,6 +264,43 @@ static func stop_graph_wet_layers(handle: CodaEventHandle) -> void:
 		_stop_graph_wet_player(p)
 	handle.params["_coda_wet_players"] = []
 	handle.params.erase("_coda_graph_wet_by_dry")
+
+
+static func detach_player_from_graph_wet_maps(
+	player: AudioStreamPlayer, handles: Array
+) -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	var player_id: int = player.get_instance_id()
+	for h in handles:
+		var handle: CodaEventHandle = h as CodaEventHandle
+		if handle == null:
+			continue
+		var by_dry: Dictionary = handle.params.get("_coda_graph_wet_by_dry", {})
+		if by_dry.is_empty():
+			continue
+		var changed: bool = false
+		var empty_dry_keys: Array = []
+		for dry_key in by_dry.keys():
+			var wets: Array = by_dry.get(dry_key, [])
+			var kept: Array = []
+			for p in wets:
+				var wet: AudioStreamPlayer = p as AudioStreamPlayer
+				if wet != null and is_instance_valid(wet) and wet.get_instance_id() == player_id:
+					changed = true
+					continue
+				kept.append(p)
+			if kept.is_empty() and not wets.is_empty():
+				empty_dry_keys.append(dry_key)
+				changed = true
+			elif kept.size() != wets.size():
+				by_dry[dry_key] = kept
+				changed = true
+		for k in empty_dry_keys:
+			by_dry.erase(k)
+		if changed:
+			handle.params["_coda_graph_wet_by_dry"] = by_dry
+			_rebuild_graph_wet_players_list(handle)
 
 
 static func teardown_graph_wet_layers_for_dry(

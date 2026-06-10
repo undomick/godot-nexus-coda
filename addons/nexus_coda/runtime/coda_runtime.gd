@@ -780,7 +780,22 @@ func runtime_bump_playback_gen() -> int:
 	return gen
 
 
+func _scrub_player_from_graph_wet_maps(player: AudioStreamPlayer) -> void:
+	var handles: Array = []
+	var seen: Dictionary = {}
+	for h in _active_handles.values():
+		if h != null and not seen.has(h):
+			seen[h] = true
+			handles.append(h)
+	for h in _graph_plan_resume_handles:
+		if h != null and not seen.has(h):
+			seen[h] = true
+			handles.append(h)
+	CodaVoiceWetLayersScript.detach_player_from_graph_wet_maps(player, handles)
+
+
 func runtime_begin_player_voice(player: AudioStreamPlayer) -> int:
+	_scrub_player_from_graph_wet_maps(player)
 	return CodaPooledVoiceLifecycleScript.begin_player_voice(
 		player,
 		_timeline_dispatchers,

@@ -53,6 +53,8 @@ static func run() -> int:
 	failed += _test_multi_send_rtpc_maps_wet_layers_by_spawn_index()
 	failed += _test_ensure_timeline_wet_layers_no_thrash_when_send_not_spawnable()
 	failed += _test_ensure_timeline_wet_layers_teardown_when_sends_cleared()
+	failed += _test_detach_player_from_graph_wet_maps()
+	failed += _test_begin_player_voice_scrubs_graph_wet_map()
 	return failed
 
 
@@ -499,6 +501,50 @@ static func _test_ensure_timeline_wet_layers_no_thrash_when_send_not_spawnable()
 	var kept: AudioStreamPlayer = voices.get("clip_a_wet_0", null) as AudioStreamPlayer
 	if kept == null or kept.get_instance_id() != wet_id:
 		push_error("ensure_timeline_wet_layers should not respawn existing wet layers every refresh")
+		runtime.free()
+		return 1
+	runtime.free()
+	return 0
+
+
+static func _test_detach_player_from_graph_wet_maps() -> int:
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	var dry_a: AudioStreamPlayer = AudioStreamPlayer.new()
+	var dry_b: AudioStreamPlayer = AudioStreamPlayer.new()
+	var wet_a: AudioStreamPlayer = AudioStreamPlayer.new()
+	var wet_b: AudioStreamPlayer = AudioStreamPlayer.new()
+	handle.params["_coda_graph_wet_by_dry"] = {
+		str(dry_a.get_instance_id()): [wet_a],
+		str(dry_b.get_instance_id()): [wet_b],
+	}
+	handle.params["_coda_wet_players"] = [wet_a, wet_b]
+	CodaVoiceWetLayersScript.detach_player_from_graph_wet_maps(wet_a, [handle])
+	var by_dry: Dictionary = handle.params.get("_coda_graph_wet_by_dry", {})
+	if by_dry.has(str(dry_a.get_instance_id())):
+		push_error("detach_player_from_graph_wet_maps should remove stolen wet mapping")
+		return 1
+	if not by_dry.has(str(dry_b.get_instance_id())):
+		push_error("detach_player_from_graph_wet_maps should keep unrelated wet mappings")
+		return 1
+	var remaining: Array = handle.params.get("_coda_wet_players", [])
+	if remaining.size() != 1 or remaining[0] != wet_b:
+		push_error("detach_player_from_graph_wet_maps should rebuild _coda_wet_players")
+		return 1
+	return 0
+
+
+static func _test_begin_player_voice_scrubs_graph_wet_map() -> int:
+	var runtime: CodaRuntime = CodaRuntimeScript.new()
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	var dry: AudioStreamPlayer = AudioStreamPlayer.new()
+	var wet: AudioStreamPlayer = AudioStreamPlayer.new()
+	handle.params["_coda_graph_wet_by_dry"] = {str(dry.get_instance_id()): [wet]}
+	handle.params["_coda_wet_players"] = [wet]
+	runtime._active_handles[dry.get_instance_id()] = handle
+	runtime.runtime_begin_player_voice(wet)
+	var by_dry: Dictionary = handle.params.get("_coda_graph_wet_by_dry", {})
+	if by_dry.has(str(dry.get_instance_id())):
+		push_error("runtime_begin_player_voice should scrub graph wet map before pool reuse")
 		runtime.free()
 		return 1
 	runtime.free()
