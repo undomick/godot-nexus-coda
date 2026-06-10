@@ -119,6 +119,7 @@ static func duplicate_track(timeline: CodaEventTimeline, track_id: String) -> Di
 	var new_tr: CodaTimelineTrack = CodaTimelineTrack.from_dictionary(d)
 	new_tr.track_name = timeline.tracks[src_i].track_name + " copy"
 	timeline.tracks.insert(src_i + 1, new_tr)
+	timeline.invalidate_clip_index()
 	return {"snapshot": snap, "new_index": src_i + 1}
 
 
