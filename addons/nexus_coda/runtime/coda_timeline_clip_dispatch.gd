@@ -263,7 +263,12 @@ func refresh_voice_output_levels(
 		var dry_db: float = float(levels.get("volume_db", 0.0))
 		var merged: Array = levels.get("merged_sends", [])
 		var wet_idx: int = wet_index_from_wet_voice_key(key_str)
+		var id_map: Dictionary = {}
+		if _runtime != null:
+			var bus_sync: Variant = _runtime.get_bus_sync()
+			if bus_sync != null:
+				id_map = bus_sync.get_bus_id_map()
 		p.volume_db = CodaVoiceWetLayersScript.wet_volume_db_for_layer(
-			dry_db, wet_idx, merged, bus_root, param_values
+			dry_db, wet_idx, merged, bus_root, param_values, id_map
 		)
 		p.pitch_scale = float(levels.get("pitch_scale", 1.0))

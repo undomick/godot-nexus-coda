@@ -51,6 +51,7 @@ static func run() -> int:
 	failed += _test_build_wet_voice_layers_reserves_muted_send_layers()
 	failed += _test_count_timeline_wet_layers()
 	failed += _test_multi_send_rtpc_maps_wet_layers_by_spawn_index()
+	failed += _test_ensure_timeline_wet_layers_no_thrash_when_send_not_spawnable()
 	return failed
 
 
@@ -160,6 +161,7 @@ static func _make_return_bus_tree() -> CodaBus:
 static func _test_refresh_preserves_wet_send_offset() -> int:
 	var bus_root: CodaBus = _make_return_bus_tree()
 	var ret: CodaBus = bus_root.children[bus_root.children.size() - 1]
+	_ensure_audio_bus(ret.bus_name)
 	var timeline: CodaEventTimeline = CodaEventTimelineScript.new()
 	timeline.length_seconds = 10.0
 	var track: CodaTimelineTrack = CodaTimelineTrackScript.new()
@@ -213,13 +215,15 @@ static func _test_refresh_preserves_wet_send_offset() -> int:
 static func _test_wet_volume_silence_when_send_disabled() -> int:
 	var bus_root: CodaBus = _make_return_bus_tree()
 	var ret: CodaBus = bus_root.children[bus_root.children.size() - 1]
+	_ensure_audio_bus(ret.bus_name)
 	var send: CodaBusSend = CodaBusSendScript.new()
 	send.target_bus_id = ret.id
 	send.level = 0.5
 	send.parameter_id = "wet_amount"
 	var merged: Array[CodaBusSend] = [send]
+	var id_map: Dictionary = {ret.id: ret.bus_name}
 	var muted_db: float = CodaVoiceWetLayersScript.wet_volume_db_for_layer(
-		0.0, 0, merged, bus_root, {"wet_amount": 0.0}
+		0.0, 0, merged, bus_root, {"wet_amount": 0.0}, id_map
 	)
 	if muted_db > -79.0:
 		push_error("disabled RTPC send should silence wet layer, got %s" % muted_db)
@@ -314,6 +318,7 @@ static func _test_stop_graph_wet_layers_clears_by_dry_map() -> int:
 static func _test_refresh_graph_wet_layers_for_dry_rtpc() -> int:
 	var bus_root: CodaBus = _make_return_bus_tree()
 	var ret: CodaBus = bus_root.children[bus_root.children.size() - 1]
+	_ensure_audio_bus(ret.bus_name)
 	var send: CodaBusSend = CodaBusSendScript.new()
 	send.target_bus_id = ret.id
 	send.level = 1.0
@@ -420,6 +425,8 @@ static func _test_multi_send_rtpc_maps_wet_layers_by_spawn_index() -> int:
 	var bus_root: CodaBus = buses["bus_root"]
 	var reverb_ret: CodaBus = buses["reverb"]
 	var delay_ret: CodaBus = buses["delay"]
+	_ensure_audio_bus(reverb_ret.bus_name)
+	_ensure_audio_bus(delay_ret.bus_name)
 	var muted_send: CodaBusSend = CodaBusSendScript.new()
 	muted_send.target_bus_id = reverb_ret.id
 	muted_send.level = 1.0
@@ -429,11 +436,12 @@ static func _test_multi_send_rtpc_maps_wet_layers_by_spawn_index() -> int:
 	active_send.level = 0.5
 	var merged: Array[CodaBusSend] = [muted_send, active_send]
 	var param_values: Dictionary = {"reverb_amount": 0.0}
+	var id_map: Dictionary = {reverb_ret.id: reverb_ret.bus_name, delay_ret.id: delay_ret.bus_name}
 	var muted_db: float = CodaVoiceWetLayersScript.wet_volume_db_for_layer(
-		0.0, 0, merged, bus_root, param_values
+		0.0, 0, merged, bus_root, param_values, id_map
 	)
 	var active_db: float = CodaVoiceWetLayersScript.wet_volume_db_for_layer(
-		0.0, 1, merged, bus_root, param_values
+		0.0, 1, merged, bus_root, param_values, id_map
 	)
 	if muted_db > -79.0:
 		push_error("first wet layer should stay muted when its RTPC send is off, got %s" % muted_db)
@@ -445,4 +453,52 @@ static func _test_multi_send_rtpc_maps_wet_layers_by_spawn_index() -> int:
 			% [expected_active_db, active_db]
 		)
 		return 1
+	return 0
+
+
+static func _test_ensure_timeline_wet_layers_no_thrash_when_send_not_spawnable() -> int:
+	var master: CodaBus = CodaBusScript.make_default_master()
+	var missing_ret: CodaBus = CodaBusScript.new("Thrashing Missing Return")
+	missing_ret.bus_kind = CodaBus.BusKind.RETURN
+	var missing_fx: CodaTrackEffect = CodaTrackEffectScript.new()
+	missing_fx.type = CodaTrackEffect.Type.REVERB
+	missing_ret.effects.append(missing_fx)
+	var mirrored_ret: CodaBus = CodaBusScript.new("Thrashing Mirrored Return")
+	mirrored_ret.bus_kind = CodaBus.BusKind.RETURN
+	var mirrored_fx: CodaTrackEffect = CodaTrackEffectScript.new()
+	mirrored_fx.type = CodaTrackEffect.Type.DELAY
+	mirrored_ret.effects.append(mirrored_fx)
+	master.children.append(missing_ret)
+	master.children.append(mirrored_ret)
+	var bus_root: CodaBus = master
+	_ensure_audio_bus(mirrored_ret.bus_name)
+	var first_send: CodaBusSend = CodaBusSendScript.new()
+	first_send.target_bus_id = missing_ret.id
+	first_send.level = 1.0
+	var second_send: CodaBusSend = CodaBusSendScript.new()
+	second_send.target_bus_id = mirrored_ret.id
+	second_send.level = 0.5
+	var merged: Array[CodaBusSend] = [first_send, second_send]
+	var project: CodaProject = CodaProjectScript.new()
+	project.bus_root = bus_root
+	var runtime: CodaRuntime = CodaRuntimeScript.new()
+	runtime._project = project
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	var dry: AudioStreamPlayer = AudioStreamPlayer.new()
+	var wet: AudioStreamPlayer = AudioStreamPlayer.new()
+	var d: Dictionary = {"voices": {"clip_a": dry, "clip_a_wet_0": wet}}
+	var wet_id: int = wet.get_instance_id()
+	CodaVoiceWetLayersScript.ensure_timeline_wet_layers(
+		runtime, handle, d, dry, "clip_a", merged, {}
+	)
+	CodaVoiceWetLayersScript.ensure_timeline_wet_layers(
+		runtime, handle, d, dry, "clip_a", merged, {}
+	)
+	var voices: Dictionary = d.get("voices", {})
+	var kept: AudioStreamPlayer = voices.get("clip_a_wet_0", null) as AudioStreamPlayer
+	if kept == null or kept.get_instance_id() != wet_id:
+		push_error("ensure_timeline_wet_layers should not respawn existing wet layers every refresh")
+		runtime.free()
+		return 1
+	runtime.free()
 	return 0

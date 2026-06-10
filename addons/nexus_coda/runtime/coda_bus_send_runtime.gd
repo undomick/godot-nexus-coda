@@ -117,6 +117,28 @@ static func _clear_send_insert_effects(bus_idx: int, base_effect_count: int) -> 
 			AudioServer.remove_bus_effect(bus_idx, i)
 
 
+static func collect_spawnable_wet_sends(
+	sends: Array[CodaBusSend], bus_root: CodaBus, id_to_godot_name: Dictionary = {}
+) -> Array[CodaBusSend]:
+	var out: Array[CodaBusSend] = []
+	if bus_root == null:
+		return out
+	for send in sends:
+		if send == null:
+			continue
+		var target: CodaBus = bus_root.find_by_id(send.target_bus_id)
+		if target == null or target.bus_kind != CodaBus.BusKind.RETURN:
+			continue
+		var return_nm: String = String(id_to_godot_name.get(target.id, target.bus_name)).strip_edges()
+		if return_nm.is_empty() or AudioServer.get_bus_index(return_nm) < 0:
+			continue
+		for eff in target.effects:
+			if eff is CodaTrackEffect:
+				out.append(send)
+				break
+	return out
+
+
 static func build_wet_voice_layers(
 	sends: Array[CodaBusSend],
 	bus_root: CodaBus,
@@ -127,15 +149,11 @@ static func build_wet_voice_layers(
 	var layers: Array = []
 	if bus_root == null:
 		return layers
-	for send in sends:
-		if send == null:
-			continue
+	for send in collect_spawnable_wet_sends(sends, bus_root, id_to_godot_name):
 		var target: CodaBus = bus_root.find_by_id(send.target_bus_id)
-		if target == null or target.bus_kind != CodaBus.BusKind.RETURN:
+		if target == null:
 			continue
 		var return_nm: String = String(id_to_godot_name.get(target.id, target.bus_name)).strip_edges()
-		if return_nm.is_empty() or AudioServer.get_bus_index(return_nm) < 0:
-			continue
 		var amt: float = effective_level(send, param_values)
 		var wet_chain: Array = []
 		for eff in target.effects:
