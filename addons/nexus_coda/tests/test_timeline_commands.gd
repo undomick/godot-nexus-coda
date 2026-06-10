@@ -26,6 +26,7 @@ static func run() -> int:
 	failed += _test_duplicate_resolves_overlap()
 	failed += _test_add_clip_resolves_overlap()
 	failed += _test_assign_clip_audio_resolves_overlap()
+	failed += _test_duplicate_track_invalidates_clip_index()
 	return failed
 
 
@@ -192,6 +193,32 @@ static func _test_assign_clip_audio_resolves_overlap() -> int:
 		):
 			push_error("assign clip audio overlap: neighbor should be trimmed or removed")
 			return 1
+	return 0
+
+
+static func _test_duplicate_track_invalidates_clip_index() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var clip = CodaTimelineClipScript.new()
+	clip.duration_seconds = 2.0
+	timeline.tracks[0].clips.append(clip)
+	timeline.find_clip(clip.id)
+	var track_id: String = timeline.tracks[0].id
+	var result: Dictionary = CodaTimelineCommandsScript.duplicate_track(timeline, track_id)
+	if int(result.get("new_index", -1)) < 0:
+		push_error("duplicate track should succeed")
+		return 1
+	var new_track = timeline.tracks[int(result.get("new_index", -1))]
+	if new_track.clips.is_empty():
+		push_error("duplicated track should copy clips")
+		return 1
+	var dup_clip_id: String = new_track.clips[0].id
+	if timeline.find_clip(dup_clip_id).is_empty():
+		push_error("duplicated clip must be findable after duplicate_track")
+		return 1
+	var snap = CodaTimelineCommandsScript.set_clip_volume_db(timeline, dup_clip_id, -6.0)
+	if snap == null:
+		push_error("commands on duplicated clip should work after duplicate_track")
+		return 1
 	return 0
 
 
