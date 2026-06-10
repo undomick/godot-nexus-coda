@@ -5,6 +5,18 @@ const CodaRuntimeScript := preload("res://addons/nexus_coda/runtime/coda_runtime
 const CodaTestRuntimeScript := preload("res://addons/nexus_coda/tests/helpers/coda_test_runtime.gd")
 const CodaEventHandleScript := preload("res://addons/nexus_coda/runtime/coda_event_handle.gd")
 const CodaPlayOptionsScript := preload("res://addons/nexus_coda/domain/coda_play_options.gd")
+const CodaTimelineDispatcherScript := preload(
+	"res://addons/nexus_coda/runtime/coda_timeline_dispatcher.gd"
+)
+const CodaTimelineLaneVoiceScript := preload(
+	"res://addons/nexus_coda/runtime/coda_timeline_lane_voice.gd"
+)
+const CodaTimelineTrackScript := preload(
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_track.gd"
+)
+const CodaTimelineClipScript := preload(
+	"res://addons/nexus_coda/domain/timeline/coda_timeline_clip.gd"
+)
 
 
 class SegmentSpawnTestRuntime extends CodaRuntime:
@@ -18,6 +30,20 @@ class SegmentSpawnTestRuntime extends CodaRuntime:
 		var clip_id: String = String(entry.get("sound_id", ""))
 		if clip_id.is_empty():
 			return false
+		var voices: Dictionary = d.get("voices", {})
+		voices[clip_id] = AudioStreamPlayer.new()
+		d["voices"] = voices
+		return true
+
+
+class CountingLaneVoice extends CodaTimelineLaneVoiceScript:
+	var spawned_clip_ids: Array[String] = []
+
+	func spawn_lane_voice(handle: CodaEventHandle, d: Dictionary, entry: Dictionary) -> bool:
+		var clip_id: String = String(entry.get("sound_id", ""))
+		if clip_id.is_empty():
+			return false
+		spawned_clip_ids.append(clip_id)
 		var voices: Dictionary = d.get("voices", {})
 		voices[clip_id] = AudioStreamPlayer.new()
 		d["voices"] = voices
@@ -39,6 +65,7 @@ static func run() -> int:
 	failed += _test_timeline_fade_keeps_dispatcher_until_playing_voices_finish()
 	failed += _test_graph_pause_reserves_pooled_player()
 	failed += _test_graph_stop_after_pause_releases_pool_slot()
+	failed += _test_loop_backward_wrap_does_not_fire_future_clips()
 	return failed
 
 
@@ -475,6 +502,75 @@ static func _test_graph_stop_after_pause_releases_pool_slot() -> int:
 		runtime.stop_all()
 		runtime.free()
 		return 1
+	runtime.stop_all()
+	runtime.free()
+	return 0
+
+
+static func _test_loop_backward_wrap_does_not_fire_future_clips() -> int:
+	var runtime: SegmentSpawnTestRuntime = _make_runtime()
+	var state: CodaState = CodaTestRuntimeScript.build_music_state()
+	runtime.set_project(state)
+	var ev: CodaBrowserNode = CodaTestRuntimeScript.music_exploration_event(state)
+	var timeline = ev.event_timeline
+	timeline.loop_enabled = true
+	timeline.loop_start_seconds = 0.0
+	timeline.loop_end_seconds = 10.0
+	timeline.length_seconds = 10.0
+	var lane: CodaTimelineTrack = CodaTimelineTrackScript.new()
+	lane.track_name = "SFX"
+	var long_clip: CodaTimelineClip = CodaTimelineClipScript.new()
+	long_clip.start_seconds = 0.0
+	long_clip.duration_seconds = 20.0
+	long_clip.audio_path = "res://fake.ogg"
+	var future_clip: CodaTimelineClip = CodaTimelineClipScript.new()
+	future_clip.start_seconds = 8.0
+	future_clip.duration_seconds = 1.0
+	future_clip.audio_path = "res://fake.ogg"
+	lane.clips.append(long_clip)
+	lane.clips.append(future_clip)
+	timeline.tracks.append(lane)
+	timeline.invalidate_clip_index()
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	handle.is_timeline = true
+	handle._alive = true
+	handle.loop = true
+	handle.event_node = ev
+	handle.timeline_cursor_seconds = 9.5
+	handle.timeline_length_seconds = 10.0
+	handle.param_values = {}
+	handle.param_values_smoothed = {}
+	var d: Dictionary = {
+		"timeline": timeline,
+		"voices": {},
+		"fired_clip_ids": {},
+		"fired_marker_ids": {},
+		"spent_clip_ids": {},
+		"loop_override_start": -1.0,
+		"loop_override_end": -1.0,
+	}
+	runtime._timeline_dispatchers[handle] = d
+	var counting_voice: CountingLaneVoice = CountingLaneVoice.new()
+	counting_voice.setup(runtime, null)
+	var dispatcher: CodaTimelineDispatcher = CodaTimelineDispatcherScript.new()
+	dispatcher.setup(runtime, null, null)
+	dispatcher._lane_voice = counting_voice
+	dispatcher._clip_dispatch.setup(runtime, counting_voice)
+	runtime._timeline_dispatcher = dispatcher
+	dispatcher.tick_dispatchers(1.0)
+	if absf(handle.timeline_cursor_seconds - 0.5) > 0.001:
+		push_error(
+			"loop wrap should land at 0.5, got %s" % handle.timeline_cursor_seconds
+		)
+		runtime.stop_all()
+		runtime.free()
+		return 1
+	for spawned_id in counting_voice.spawned_clip_ids:
+		if spawned_id == future_clip.id:
+			push_error("backward loop wrap must not spawn clip starting at 8s when landing at 0.5")
+			runtime.stop_all()
+			runtime.free()
+			return 1
 	runtime.stop_all()
 	runtime.free()
 	return 0

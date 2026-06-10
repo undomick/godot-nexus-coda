@@ -205,10 +205,10 @@ func tick_dispatchers(delta: float) -> void:
 			# wrapped cursor lands ahead of the pre-wrap position (large frame delta).
 			d["fired_clip_ids"] = {}
 			var loop_lo: float = loop_start if loop_start >= 0.0 else 0.0
-			if backward_landing:
-				_clip_dispatch.fire_clips_in_range(
-					handle, d, timeline, next_cursor, cursor_at_frame_start
-				)
+			# prime_overlapping_voices + the post-wrap fire_clips_in_range scan cover clips
+			# active at the landing cursor and clip starts crossed since loop_lo. Do not fire
+			# clip starts in (next_cursor, cursor_at_frame_start): those are future lanes on a
+			# backward landing (e.g. wrap 9.5 -> 0.5) and would stack voices ahead of the cursor.
 			_clip_dispatch.prime_overlapping_voices(handle, d, timeline, next_cursor)
 			_sync_segment_voice_after_prime(handle, d, timeline)
 			prev_cursor = loop_lo if backward_landing else cursor_at_frame_start
