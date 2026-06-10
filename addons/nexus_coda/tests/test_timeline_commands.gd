@@ -27,6 +27,8 @@ static func run() -> int:
 	failed += _test_add_clip_resolves_overlap()
 	failed += _test_assign_clip_audio_resolves_overlap()
 	failed += _test_duplicate_track_invalidates_clip_index()
+	failed += _test_move_clip_invalidates_spatial_index()
+	failed += _test_resize_clip_invalidates_spatial_index()
 	return failed
 
 
@@ -218,6 +220,45 @@ static func _test_duplicate_track_invalidates_clip_index() -> int:
 	var snap = CodaTimelineCommandsScript.set_clip_volume_db(timeline, dup_clip_id, -6.0)
 	if snap == null:
 		push_error("commands on duplicated clip should work after duplicate_track")
+		return 1
+	return 0
+
+
+static func _clip_active_at(timeline: CodaEventTimeline, clip_id: String, at_seconds: float) -> bool:
+	for entry in timeline.clips_active_at(at_seconds):
+		var clip: CodaTimelineClip = entry.get("clip") as CodaTimelineClip
+		if clip != null and clip.id == clip_id:
+			return true
+	return false
+
+
+static func _test_move_clip_invalidates_spatial_index() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var clip = CodaTimelineClipScript.new()
+	clip.start_seconds = 1.0
+	clip.duration_seconds = 2.0
+	timeline.tracks[0].clips.append(clip)
+	timeline.find_clip(clip.id)
+	CodaTimelineCommandsScript.move_clip(timeline, clip.id, 6.0, 0)
+	if _clip_active_at(timeline, clip.id, 1.5):
+		push_error("move_clip: spatial index should not keep clip active at old start")
+		return 1
+	if not _clip_active_at(timeline, clip.id, 6.5):
+		push_error("move_clip: spatial index should list clip at new start")
+		return 1
+	return 0
+
+
+static func _test_resize_clip_invalidates_spatial_index() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var clip = CodaTimelineClipScript.new()
+	clip.start_seconds = 0.0
+	clip.duration_seconds = 2.0
+	timeline.tracks[0].clips.append(clip)
+	timeline.find_clip(clip.id)
+	CodaTimelineCommandsScript.resize_clip(timeline, clip.id, 0.0, 5.0)
+	if not _clip_active_at(timeline, clip.id, 4.5):
+		push_error("resize_clip: spatial index should reflect extended duration")
 		return 1
 	return 0
 
