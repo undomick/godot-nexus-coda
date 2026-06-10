@@ -30,6 +30,8 @@ static func run() -> int:
 	failed += _test_move_clip_invalidates_spatial_index()
 	failed += _test_resize_clip_invalidates_spatial_index()
 	failed += _test_set_timeline_length_invalidates_spatial_index()
+	failed += _test_paste_rollback_invalidates_spatial_index()
+	failed += _test_split_rollback_invalidates_spatial_index()
 	return failed
 
 
@@ -279,6 +281,67 @@ static func _test_set_timeline_length_invalidates_spatial_index() -> int:
 	CodaTimelineCommandsScript.set_timeline_length(timeline, 5.0)
 	if _clip_active_at(timeline, clip.id, 6.0):
 		push_error("set_timeline_length: spatial index should cap clips past shortened length")
+		return 1
+	return 0
+
+
+static func _spatial_index_matches_tracks(timeline: CodaEventTimeline) -> bool:
+	for entry in timeline.clips_overlapping_range(0.0, timeline.length_seconds):
+		var clip: CodaTimelineClip = entry.get("clip") as CodaTimelineClip
+		if clip == null:
+			continue
+		if timeline.find_clip(clip.id).is_empty():
+			return false
+	return true
+
+
+static func _test_paste_rollback_invalidates_spatial_index() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var existing = CodaTimelineClipScript.new()
+	existing.start_seconds = 0.0
+	existing.duration_seconds = 2.0
+	timeline.tracks[0].clips.append(existing)
+	timeline.find_clip(existing.id)
+	var pasted = CodaTimelineClipScript.new()
+	pasted.duration_seconds = 2.0
+	pasted.audio_path = "res://nonexistent/coda_paste_rollback_test.ogg"
+	var data: Dictionary = pasted.to_dictionary()
+	var result: Dictionary = timeline.paste_clip_at(0, 10.0, data)
+	if result.get("error", "") == "":
+		push_error("paste_clip_at should fail when audio path is missing")
+		return 1
+	if timeline.tracks[0].clips.size() != 1:
+		push_error("failed paste should roll back track clips")
+		return 1
+	if not timeline.clips_active_at(10.5).is_empty():
+		push_error("failed paste should not leave ghost spatial index entries")
+		return 1
+	if not _spatial_index_matches_tracks(timeline):
+		push_error("failed paste should keep spatial index aligned with tracks")
+		return 1
+	return 0
+
+
+static func _test_split_rollback_invalidates_spatial_index() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var clip = CodaTimelineClipScript.new()
+	clip.start_seconds = 0.0
+	clip.duration_seconds = 4.0
+	clip.audio_path = "res://nonexistent/coda_split_rollback_test.ogg"
+	timeline.tracks[0].clips.append(clip)
+	timeline.find_clip(clip.id)
+	var err: String = timeline.split_clip_at_time(clip.id, 2.0)
+	if err == "":
+		push_error("split_clip_at_time should fail when audio path is missing")
+		return 1
+	if timeline.tracks[0].clips.size() != 1:
+		push_error("failed split should roll back to a single clip")
+		return 1
+	if abs(clip.duration_seconds - 4.0) > 0.001:
+		push_error("failed split should restore original clip duration")
+		return 1
+	if not _spatial_index_matches_tracks(timeline):
+		push_error("failed split should keep spatial index aligned with tracks")
 		return 1
 	return 0
 

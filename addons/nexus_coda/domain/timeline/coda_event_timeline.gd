@@ -272,6 +272,7 @@ func split_clip_at_time(clip_id: String, split_seconds: float) -> String:
 		c.fade_out_seconds = saved_fo
 		tr.clips.erase(right)
 		_sort_track_clips(tr)
+		invalidate_clip_index()
 		return err
 	return ""
 
@@ -334,6 +335,7 @@ func paste_clip_at(track_index: int, start_seconds: float, data: Dictionary) -> 
 	if not err.is_empty():
 		tr.clips.erase(clip)
 		_sort_track_clips(tr)
+		invalidate_clip_index()
 		return {"error": err, "clip_id": ""}
 	return {"error": "", "clip_id": clip.id}
 
