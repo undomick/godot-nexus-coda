@@ -53,11 +53,10 @@ static func spawn_wet_layers(
 	var bus_root: CodaBus = runtime.get_playback_bus_root()
 	if bus_root == null:
 		return
-	var id_map: Dictionary = runtime.get_bus_id_map()
 	var layers: Array = CodaBusSendRuntimeScript.build_wet_voice_layers(
 		sends,
 		bus_root,
-		id_map,
+		_runtime_bus_id_map(runtime),
 		param_values,
 		dry_player.volume_db
 	)
@@ -94,6 +93,32 @@ static func spawn_wet_layers(
 	d["voices"] = voices
 
 
+static func _runtime_bus_id_map(runtime: CodaRuntime) -> Dictionary:
+	if runtime == null:
+		return {}
+	var bus_sync: Variant = runtime.get_bus_sync()
+	if bus_sync == null:
+		return {}
+	return bus_sync.get_bus_id_map()
+
+
+static func routable_wet_send_count(sends: Array[CodaBusSend], bus_root: CodaBus) -> int:
+	if bus_root == null:
+		return 0
+	var count: int = 0
+	for send in sends:
+		if send == null:
+			continue
+		var target: CodaBus = bus_root.find_by_id(send.target_bus_id)
+		if target == null or target.bus_kind != CodaBus.BusKind.RETURN:
+			continue
+		for eff in target.effects:
+			if eff is CodaTrackEffect:
+				count += 1
+				break
+	return count
+
+
 static func count_timeline_wet_layers(voices: Dictionary, voice_key_prefix: String) -> int:
 	var count: int = 0
 	while voices.has("%s_wet_%d" % [voice_key_prefix, count]):
@@ -117,19 +142,13 @@ static func ensure_timeline_wet_layers(
 	var bus_root: CodaBus = runtime.get_playback_bus_root()
 	if bus_root == null:
 		return
-	var expected_layers: Array = CodaBusSendRuntimeScript.build_wet_voice_layers(
-		sends,
-		bus_root,
-		runtime.get_bus_id_map(),
-		param_values,
-		dry_player.volume_db
-	)
+	var expected_count: int = routable_wet_send_count(sends, bus_root)
 	var voices: Dictionary = d.get("voices", {})
 	var existing_count: int = count_timeline_wet_layers(voices, voice_key_prefix)
-	if existing_count == expected_layers.size():
+	if existing_count == expected_count:
 		return
 	teardown_wet_layers_for_prefix(d, voice_key_prefix)
-	if expected_layers.is_empty():
+	if expected_count <= 0:
 		return
 	spawn_wet_layers(
 		runtime, handle, dry_player, d, voice_key_prefix, sends, param_values
@@ -150,20 +169,14 @@ static func ensure_graph_wet_layers(
 	var bus_root: CodaBus = runtime.get_playback_bus_root()
 	if bus_root == null:
 		return
-	var expected_layers: Array = CodaBusSendRuntimeScript.build_wet_voice_layers(
-		sends,
-		bus_root,
-		runtime.get_bus_id_map(),
-		param_values,
-		dry_player.volume_db
-	)
+	var expected_count: int = routable_wet_send_count(sends, bus_root)
 	var by_dry: Dictionary = owner.params.get("_coda_graph_wet_by_dry", {})
 	var dry_key: String = str(dry_player.get_instance_id())
 	var dry_wets: Array = by_dry.get(dry_key, [])
-	if dry_wets.size() == expected_layers.size():
+	if dry_wets.size() == expected_count:
 		return
 	teardown_graph_wet_layers_for_dry(owner, dry_player)
-	if expected_layers.is_empty():
+	if expected_count <= 0:
 		return
 	spawn_graph_wet_layers(runtime, owner, dry_player, sends, param_values)
 
@@ -213,7 +226,7 @@ static func spawn_graph_wet_layers(
 	var layers: Array = CodaBusSendRuntimeScript.build_wet_voice_layers(
 		sends,
 		bus_root,
-		runtime.get_bus_id_map(),
+		_runtime_bus_id_map(runtime),
 		param_values,
 		dry_player.volume_db
 	)
