@@ -52,6 +52,7 @@ static func run() -> int:
 	failed += _test_count_timeline_wet_layers()
 	failed += _test_multi_send_rtpc_maps_wet_layers_by_spawn_index()
 	failed += _test_ensure_timeline_wet_layers_no_thrash_when_send_not_spawnable()
+	failed += _test_ensure_timeline_wet_layers_teardown_when_sends_cleared()
 	return failed
 
 
@@ -498,6 +499,29 @@ static func _test_ensure_timeline_wet_layers_no_thrash_when_send_not_spawnable()
 	var kept: AudioStreamPlayer = voices.get("clip_a_wet_0", null) as AudioStreamPlayer
 	if kept == null or kept.get_instance_id() != wet_id:
 		push_error("ensure_timeline_wet_layers should not respawn existing wet layers every refresh")
+		runtime.free()
+		return 1
+	runtime.free()
+	return 0
+
+
+static func _test_ensure_timeline_wet_layers_teardown_when_sends_cleared() -> int:
+	var runtime: CodaRuntime = CodaRuntimeScript.new()
+	var handle: CodaEventHandle = CodaEventHandleScript.new()
+	var dry: AudioStreamPlayer = AudioStreamPlayer.new()
+	var wet: AudioStreamPlayer = AudioStreamPlayer.new()
+	var d: Dictionary = {"voices": {"clip_a": dry, "clip_a_wet_0": wet, "clip_a_wet_1": wet}}
+	var empty_sends: Array[CodaBusSend] = []
+	CodaVoiceWetLayersScript.ensure_timeline_wet_layers(
+		runtime, handle, d, dry, "clip_a", empty_sends, {}
+	)
+	var voices: Dictionary = d.get("voices", {})
+	if voices.has("clip_a_wet_0") or voices.has("clip_a_wet_1"):
+		push_error("ensure_timeline_wet_layers should tear down wet layers when sends are cleared")
+		runtime.free()
+		return 1
+	if not voices.has("clip_a"):
+		push_error("clearing wet sends should keep the dry timeline voice")
 		runtime.free()
 		return 1
 	runtime.free()

@@ -367,7 +367,7 @@ func on_voice_finished(player: AudioStreamPlayer, key: int) -> void:
 	var cl: CodaTimelineClip = info.get("clip", null) as CodaTimelineClip
 	if cl == null:
 		return
-	var clip_end: float = cl.start_seconds + cl.duration_seconds
+	var clip_end: float = CodaTimelineClipDispatchScript.audible_clip_end(cl, timeline)
 	if h.timeline_cursor_seconds >= clip_end - 0.001:
 		_lane_voice.finalize_lane_voice(player, key, h, d, finished_clip_id)
 		return
