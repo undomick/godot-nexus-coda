@@ -232,6 +232,16 @@ func refresh_voice_output_levels(
 		var merged_sends: Array[CodaBusSend] = CodaVoiceWetLayersScript.merge_sends(
 			event_sends, tr.wet_sends
 		)
+		CodaVoiceWetLayersScript.ensure_timeline_wet_layers(
+			_runtime,
+			handle,
+			d,
+			p,
+			clip_id,
+			merged_sends,
+			handle.param_values_smoothed
+		)
+		voices = d.get("voices", {})
 		wet_levels[clip_id] = {
 			"volume_db": p.volume_db,
 			"pitch_scale": p.pitch_scale,

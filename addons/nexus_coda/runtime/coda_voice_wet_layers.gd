@@ -94,6 +94,80 @@ static func spawn_wet_layers(
 	d["voices"] = voices
 
 
+static func count_timeline_wet_layers(voices: Dictionary, voice_key_prefix: String) -> int:
+	var count: int = 0
+	while voices.has("%s_wet_%d" % [voice_key_prefix, count]):
+		count += 1
+	return count
+
+
+static func ensure_timeline_wet_layers(
+	runtime: CodaRuntime,
+	handle: CodaEventHandle,
+	d: Dictionary,
+	dry_player: AudioStreamPlayer,
+	voice_key_prefix: String,
+	sends: Array[CodaBusSend],
+	param_values: Dictionary
+) -> void:
+	if runtime == null or handle == null or dry_player == null or not is_instance_valid(dry_player):
+		return
+	if sends.is_empty():
+		return
+	var bus_root: CodaBus = runtime.get_playback_bus_root()
+	if bus_root == null:
+		return
+	var expected_layers: Array = CodaBusSendRuntimeScript.build_wet_voice_layers(
+		sends,
+		bus_root,
+		runtime.get_bus_id_map(),
+		param_values,
+		dry_player.volume_db
+	)
+	var voices: Dictionary = d.get("voices", {})
+	var existing_count: int = count_timeline_wet_layers(voices, voice_key_prefix)
+	if existing_count == expected_layers.size():
+		return
+	teardown_wet_layers_for_prefix(d, voice_key_prefix)
+	if expected_layers.is_empty():
+		return
+	spawn_wet_layers(
+		runtime, handle, dry_player, d, voice_key_prefix, sends, param_values
+	)
+
+
+static func ensure_graph_wet_layers(
+	runtime: CodaRuntime,
+	owner: CodaEventHandle,
+	dry_player: AudioStreamPlayer,
+	sends: Array[CodaBusSend],
+	param_values: Dictionary
+) -> void:
+	if runtime == null or owner == null or dry_player == null or not is_instance_valid(dry_player):
+		return
+	if sends.is_empty():
+		return
+	var bus_root: CodaBus = runtime.get_playback_bus_root()
+	if bus_root == null:
+		return
+	var expected_layers: Array = CodaBusSendRuntimeScript.build_wet_voice_layers(
+		sends,
+		bus_root,
+		runtime.get_bus_id_map(),
+		param_values,
+		dry_player.volume_db
+	)
+	var by_dry: Dictionary = owner.params.get("_coda_graph_wet_by_dry", {})
+	var dry_key: String = str(dry_player.get_instance_id())
+	var dry_wets: Array = by_dry.get(dry_key, [])
+	if dry_wets.size() == expected_layers.size():
+		return
+	teardown_graph_wet_layers_for_dry(owner, dry_player)
+	if expected_layers.is_empty():
+		return
+	spawn_graph_wet_layers(runtime, owner, dry_player, sends, param_values)
+
+
 static func refresh_graph_wet_layers_for_dry(
 	runtime: CodaRuntime,
 	owner: CodaEventHandle,
@@ -102,15 +176,14 @@ static func refresh_graph_wet_layers_for_dry(
 ) -> void:
 	if runtime == null or owner == null or dry_player == null or not is_instance_valid(dry_player):
 		return
+	var event_sends: Array[CodaBusSend] = []
+	if owner.event_node is CodaBrowserNode:
+		event_sends = (owner.event_node as CodaBrowserNode).event_wet_sends
+	ensure_graph_wet_layers(runtime, owner, dry_player, event_sends, param_values)
 	var by_dry: Dictionary = owner.params.get("_coda_graph_wet_by_dry", {})
 	var dry_key: String = str(dry_player.get_instance_id())
 	var dry_wets: Array = by_dry.get(dry_key, [])
 	if dry_wets.is_empty():
-		return
-	var event_sends: Array[CodaBusSend] = []
-	if owner.event_node is CodaBrowserNode:
-		event_sends = (owner.event_node as CodaBrowserNode).event_wet_sends
-	if event_sends.is_empty():
 		return
 	var bus_root: CodaBus = runtime.get_playback_bus_root()
 	if bus_root == null:

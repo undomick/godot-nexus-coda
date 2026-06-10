@@ -29,6 +29,7 @@ static func run() -> int:
 	failed += _test_duplicate_track_invalidates_clip_index()
 	failed += _test_move_clip_invalidates_spatial_index()
 	failed += _test_resize_clip_invalidates_spatial_index()
+	failed += _test_set_timeline_length_invalidates_spatial_index()
 	return failed
 
 
@@ -259,6 +260,25 @@ static func _test_resize_clip_invalidates_spatial_index() -> int:
 	CodaTimelineCommandsScript.resize_clip(timeline, clip.id, 0.0, 5.0)
 	if not _clip_active_at(timeline, clip.id, 4.5):
 		push_error("resize_clip: spatial index should reflect extended duration")
+		return 1
+	return 0
+
+
+static func _test_set_timeline_length_invalidates_spatial_index() -> int:
+	var timeline = CodaEventTimelineScript.make_default()
+	var clip = CodaTimelineClipScript.new()
+	clip.start_seconds = 0.0
+	clip.duration_seconds = 10.0
+	timeline.tracks[0].clips.append(clip)
+	timeline.length_seconds = 5.0
+	timeline.find_clip(clip.id)
+	CodaTimelineCommandsScript.set_timeline_length(timeline, 20.0)
+	if not _clip_active_at(timeline, clip.id, 8.0):
+		push_error("set_timeline_length: spatial index should track clip inside extended length")
+		return 1
+	CodaTimelineCommandsScript.set_timeline_length(timeline, 5.0)
+	if _clip_active_at(timeline, clip.id, 6.0):
+		push_error("set_timeline_length: spatial index should cap clips past shortened length")
 		return 1
 	return 0
 
